@@ -32,7 +32,7 @@
       "id": 1,
       "type": "app_init",
       "name": "项目脚手架初始化",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-01-app-init.md",
       "depends_on": [],
       "subtasks": [
@@ -50,7 +50,7 @@
       "id": 2,
       "type": "database",
       "name": "数据库 schema 与数据访问层",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-02-database.md",
       "depends_on": [
         1
