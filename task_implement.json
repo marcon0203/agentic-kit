@@ -1,0 +1,402 @@
+{
+  "meta": {
+    "project": "AI Agent 平台",
+    "version": "1.0.0",
+    "generated_at": "2026-08-21",
+    "source_docs": [
+      "docs/PRD_AI-Agent平台_AgentBundle编排与运行_V1.md",
+      "docs/架构设计文档_AI-Agent平台_V1.md",
+      "api/openapi.yaml",
+      "schemas/agent.schema.json",
+      "schemas/bundle.schema.json",
+      "design-system.md"
+    ],
+    "status_enum": [
+      "pending",
+      "in_progress",
+      "blocked",
+      "done"
+    ],
+    "conventions": {
+      "backend": "Go 1.24.0 + chi v5.1.0 + sqlc v1.27.0/pgx v5.7.1 + PostgreSQL 16.4，ADK Go v2.0.0（次版本锁死）",
+      "frontend": "React 19.0.0 + TS 5.7.2 + Vite 7.0.0 + TanStack Query 5.62.7 + Zustand 5.0.2 + Tailwind 4.0.0 + shadcn/ui（CLI 方式，源码进仓库）",
+      "api_contract": "api/openapi.yaml 是唯一事实来源，实现与规范不一致 CI 失败",
+      "definition_of_done": "代码合入 + 单测通过 + 对应 spec 的验收清单全部勾选 + 涉及界面的任务需额外通过「UI验收标准」+ openapi 一致性校验通过",
+      "design_system": "design-system.md 是视觉规范唯一来源，数值取自 ui-design-system/references/tokens-pc.md；PC 端浅色系统，V1 不做深色模式",
+      "version_locking": "所有依赖锁定精确补丁版本，禁止浮动范围；CI 用 npm ci；镜像带 digest",
+      "dsl_schema": "schemas/*.json 前后端共用，后端 santhosh-tekuri/jsonschema，前端 ajv；Schema 校验与图逻辑校验分两层，不要混"
+    }
+  },
+  "tasks": [
+    {
+      "id": 1,
+      "type": "app_init",
+      "name": "项目脚手架初始化",
+      "status": "pending",
+      "doc_dir": "spec/spec-01-app-init.md",
+      "depends_on": [],
+      "subtasks": [
+        "初始化 Go module 与目录结构（cmd/ internal/ api/ migrations/）",
+        "初始化 React + TS + Vite 前端工程",
+        "配置 Docker Compose（PostgreSQL 16 + 后端 + 前端）",
+        "配置 Makefile：build/test/lint/migrate/sqlc-gen 常用命令",
+        "配置 GitHub Actions：单测 + golangci-lint + tsc + openapi lint",
+        "配置 .env.example 与 viper 配置加载",
+        "锁定全部依赖到精确版本，提交 go.sum 与 package-lock.json",
+        "用 shadcn CLI 初始化并添加基础组件到 src/components/ui/"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "database",
+      "name": "数据库 schema 与数据访问层",
+      "status": "pending",
+      "doc_dir": "spec/spec-02-database.md",
+      "depends_on": [
+        1
+      ],
+      "subtasks": [
+        "编写 golang-migrate 迁移文件：users/agents/bundles/resources",
+        "编写迁移文件：marketplace_listings/subscriptions",
+        "编写迁移文件：bundle_runs/bundle_run_events/model_providers",
+        "为 immutable 字段添加数据库触发器，阻止已订阅版本被 UPDATE/DELETE",
+        "编写 sqlc 查询：owner 视角与 subscriber 视角分离的两组方法",
+        "生成 sqlc 代码并配置 testcontainers 集成测试基座"
+      ]
+    },
+    {
+      "id": 3,
+      "type": "api_foundation",
+      "name": "API 基础设施（统一响应、中间件）",
+      "status": "pending",
+      "doc_dir": "spec/spec-03-api-foundation.md",
+      "depends_on": [
+        1
+      ],
+      "subtasks": [
+        "实现统一响应信封 Envelope 与 writeJSON/writeErr helper",
+        "定义五位业务错误码常量表（10xxx~70xxx）",
+        "实现 request_id 中间件并与 OTel trace_id 关联",
+        "实现 slog 结构化日志中间件",
+        "实现限流中间件（令牌桶，600/min 用户级，20/min 运行创建）",
+        "实现 Idempotency-Key 中间件（24h 内相同 key 返回首次结果）",
+        "实现 panic recovery 中间件，500 响应不泄露堆栈",
+        "编写 lint 规则或单测，防止列表字段返回 null"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "auth",
+      "name": "用户体系与认证",
+      "status": "pending",
+      "doc_dir": "spec/spec-04-auth.md",
+      "depends_on": [
+        2,
+        3
+      ],
+      "subtasks": [
+        "实现注册接口（argon2id 哈希密码）",
+        "实现登录接口，签发 JWT（2h）+ refresh token（7d）",
+        "实现 JWT 鉴权中间件与 ApiKey 鉴权中间件",
+        "实现用户上下文注入（后续所有 handler 从 context 取当前用户）",
+        "实现资源归属校验 helper：owner_user_id 匹配判断"
+      ]
+    },
+    {
+      "id": 5,
+      "type": "resource_center",
+      "name": "资源中心",
+      "status": "pending",
+      "doc_dir": "spec/spec-05-resource-center.md",
+      "depends_on": [
+        4
+      ],
+      "subtasks": [
+        "实现资源注册/列表/更新接口（tool/skill/mcp/knowledge_base）",
+        "实现资源启用/禁用，禁用后不可被新建 Agent 引用",
+        "实现 MCP Server 健康检查（注册时探测 + 定时任务）",
+        "config 字段中的凭证走 AES-256 加密存储，接口不回显",
+        "实现资源删除与删除前占用检查接口"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "agent_center",
+      "name": "Agent 定义与版本管理",
+      "status": "pending",
+      "doc_dir": "spec/spec-06-agent-center.md",
+      "depends_on": [
+        5
+      ],
+      "subtasks": [
+        "接入 schemas/agent.schema.json（已有，含示例与正反用例）并实现校验器",
+        "实现 Agent 创建接口，校验失败返回 details 字段级错误",
+        "实现引用资源的存在性与可用性校验（引用被禁用资源时报 30002）",
+        "实现 Agent 列表/详情/版本列表接口",
+        "definition 与 display_meta 分离存储",
+        "实现 Agent 删除：校验被订阅/被引用两类占用后才允许"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "bundle_center",
+      "name": "Bundle 编排定义与图校验",
+      "status": "pending",
+      "doc_dir": "spec/spec-07-bundle-center.md",
+      "depends_on": [
+        6
+      ],
+      "subtasks": [
+        "接入 schemas/bundle.schema.json（已有）并实现 Schema 层校验",
+        "实现执行图构建：邻接表 + 入边/出边索引",
+        "实现图静态校验：entry 存在、边引用节点已声明",
+        "实现死锁检测：自环边不计入 join 前置计数（POC 已验证的关键规则）",
+        "实现 handoff 契约与实际图连接的一致性告警",
+        "实现 Bundle 创建/列表接口，图校验失败返回 422 + 40003",
+        "实现 Bundle 删除：已被订阅的版本不可删除"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "marketplace",
+      "name": "应用广场：发布与订阅",
+      "status": "pending",
+      "doc_dir": "spec/spec-08-marketplace.md",
+      "depends_on": [
+        7
+      ],
+      "subtasks": [
+        "实现递归依赖闭包校验：显式栈深度优先遍历，版本精确匹配，一次返回全部问题",
+        "实现循环依赖检测（visiting 集合），返回 70008 而非转圈超时",
+        "实现广场浏览/搜索接口，仅返回 display_meta",
+        "实现资源详情接口，附 constraints_summary（黑盒规则的必要例外）",
+        "实现订阅接口，绑定到具体版本并置 immutable=true",
+        "实现退订、我的订阅列表（含 latest_version 提示）",
+        "实现显式升级接口",
+        "实现停止分发与下架（不影响存量订阅者）",
+        "编写黑盒泄露防护单测：订阅者视角接口不得返回 definition",
+        "实现停止分发的反向依赖检查：被已发布资源依赖时拒绝（70007）"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "model_gateway",
+      "name": "模型网关",
+      "status": "pending",
+      "doc_dir": "spec/spec-09-model-gateway.md",
+      "depends_on": [
+        4
+      ],
+      "subtasks": [
+        "实现 Provider 接入时的连通性校验，失败给出明确原因",
+        "实现 Provider 接入接口，凭证 AES-256 加密存储且永不回显",
+        "实现统一模型调用抽象层（Anthropic/OpenAI/Google）",
+        "实现 fallback 降级链路，降级发生时产出可观测事件",
+        "实现 token 用量统计与成本计算，写入 bundle_runs",
+        "实现个人用量接口 /usage/me（按 bundle/按天分组）"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "adk_integration",
+      "name": "ADK Go 2.0 集成与 DSL 编译层",
+      "status": "pending",
+      "doc_dir": "spec/spec-10-adk-integration.md",
+      "depends_on": [
+        7,
+        9
+      ],
+      "subtasks": [
+        "引入 ADK Go 2.0，所有调用收敛在 internal/orchestrator/adk 包内",
+        "实现 Agent DSL → ADK Agent 节点的编译",
+        "实现 Bundle edges → ADK 图节点与边的编译（含 parallel/join）",
+        "接入 expr-lang/expr 实现 edge.condition 求值",
+        "实现 human_gates → ADK human-in-the-loop 确认节点映射",
+        "实现 shared_state 与 ADK session state 的映射",
+        "实现 capabilities → ADK Tool 实例的解析（编译前完成资源授权校验）",
+        "实现 ADK 执行事件 → 平台事件模型的翻译层（保持前端契约独立于 ADK 版本）"
+      ]
+    },
+    {
+      "id": 11,
+      "type": "run_engine",
+      "name": "运行生命周期与 human gate",
+      "status": "pending",
+      "doc_dir": "spec/spec-11-run-engine.md",
+      "depends_on": [
+        10,
+        8
+      ],
+      "subtasks": [
+        "实现运行创建接口：订阅关系校验 → 版本解析 → 依赖复核 → 启动",
+        "实现黑盒运行链路：via_listing_id 标记与错误信息脱敏",
+        "实现事件落库，按类型标记 is_internal",
+        "实现 human gate 审批接口，含审批人角色二次校验（50004）",
+        "实现 gate 超时扫描任务（auto_approve/auto_reject/abort）",
+        "实现运行详情接口，黑盒运行时按 io_description 过滤 shared_state",
+        "实现全局熔断：max_total_tokens / max_cost_usd / max_wall_clock_seconds",
+        "实现停止运行接口（5 秒内生效，保留已产生的产出与事件，Token 照常计费）"
+      ]
+    },
+    {
+      "id": 12,
+      "type": "event_stream",
+      "name": "NDJSON 事件流接口",
+      "status": "pending",
+      "doc_dir": "spec/spec-12-event-stream.md",
+      "depends_on": [
+        11
+      ],
+      "subtasks": [
+        "实现 chunked NDJSON 流式 handler（Content-Type: application/x-ndjson）",
+        "设置 X-Accel-Buffering: no 防止反向代理缓冲",
+        "实现建连补发历史事件 + after_id 断线续传",
+        "实现黑盒过滤：非作者请求时剔除 is_internal 事件",
+        "实现终态自动关闭连接（bundle.finished/failed）",
+        "配置负载均衡会话粘性，并编写多实例部署说明"
+      ]
+    },
+    {
+      "id": 13,
+      "type": "fe_foundation",
+      "name": "前端基础设施",
+      "status": "pending",
+      "doc_dir": "spec/spec-13-fe-foundation.md",
+      "depends_on": [
+        1
+      ],
+      "subtasks": [
+        "初始化设计系统 CSS 变量：色板、字体层级、间距/圆角/阴影、状态语义色",
+        "实现顶层布局与六大导航（首页/应用中心/资源中心/模型中心/运营中心/系统设置）",
+        "配置 React Router 路由表与占位页面",
+        "从 openapi.yaml 生成 TypeScript 类型与 API client",
+        "封装统一响应信封解包与错误码处理",
+        "接入 TanStack Query，配置默认重试与缓存策略",
+        "实现认证弹窗（modal 形式，非独立路由）与鉴权触发逻辑"
+      ]
+    },
+    {
+      "id": 14,
+      "type": "fe_chat",
+      "name": "Chat 运行详情页（核心）",
+      "status": "pending",
+      "doc_dir": "spec/spec-14-fe-chat.md",
+      "depends_on": [
+        13,
+        12
+      ],
+      "subtasks": [
+        "实现 fetch + ReadableStream 消费 NDJSON 事件流的 hook",
+        "处理 React StrictMode 双挂载竞态（cancelled 闭包保护，POC 已验证的坑）",
+        "实现 Chat 对话流：按角色渲染 Agent 气泡",
+        "实现 node.thinking 驱动的打字机流式效果",
+        "实现气泡内工具调用状态条（node.tool_call.*）",
+        "实现并行 Agent 的并排气泡布局",
+        "实现内联 human gate 审批卡片（非弹窗），按权限显示操作按钮",
+        "实现右侧辅助栏：执行图 / 共享状态 / 原始时间线切换",
+        "实现黑盒模式：执行图显示占位节点，共享状态按 io_description 过滤",
+        "实现「查看完整产出」抽屉",
+        "实现右侧栏运行统计（耗时/Token/成本）",
+        "实现「停止运行」操作（二次确认，说明已消耗 Token 不退回）"
+      ]
+    },
+    {
+      "id": 15,
+      "type": "fe_console",
+      "name": "资源与应用管理页",
+      "status": "pending",
+      "doc_dir": "spec/spec-15-fe-console.md",
+      "depends_on": [
+        13,
+        6,
+        5
+      ],
+      "subtasks": [
+        "实现资源中心：列表、注册表单、启停操作",
+        "实现 Agent 定义页表单（映射 Agent DSL 全字段）",
+        "实现表单级 JSON Schema 实时校验（复用后端同一份 schema）",
+        "实现「从现有 Agent 复制」快速创建",
+        "实现 Agent/Bundle 列表与版本历史查看",
+        "实现首页工作台：我的应用/智能体/最近访问/快速创建",
+        "实现模型 Provider 接入页；未接入时全站运行入口置灰并提示",
+        "实现首页工作台的本月用量与成本卡片",
+        "实现资源/Agent/Bundle 删除交互（二次确认 + 展示占用影响）"
+      ]
+    },
+    {
+      "id": 16,
+      "type": "fe_marketplace",
+      "name": "应用广场前端",
+      "status": "pending",
+      "doc_dir": "spec/spec-16-fe-marketplace.md",
+      "depends_on": [
+        13,
+        8
+      ],
+      "subtasks": [
+        "实现广场浏览页：卡片列表、类型筛选、搜索、分页",
+        "实现资源详情页：简介/使用说明/输入输出/执行约束/版本历史",
+        "实现订阅与退订交互，已订阅卡片显示「进入使用」",
+        "实现「我的发布」：发布表单、版本管理、停止分发",
+        "实现「我的订阅」：新版本提示与显式升级流程",
+        "订阅资源在各处列表中带「订阅」标识与作者信息",
+        "发布失败时展示完整依赖路径，并对每个未发布依赖提供「去发布」快捷入口"
+      ]
+    },
+    {
+      "id": 17,
+      "type": "fe_bundle_editor",
+      "name": "Bundle 可视化编排",
+      "status": "pending",
+      "doc_dir": "spec/spec-17-fe-bundle-editor.md",
+      "depends_on": [
+        15,
+        7
+      ],
+      "subtasks": [
+        "接入 React Flow 实现节点拖拽与连线",
+        "实现 human gate 节点配置面板（超时与超时策略）",
+        "实现条件边表达式编辑",
+        "实现可视化与 DSL 源码双向切换",
+        "实现保存前图校验并高亮问题边"
+      ]
+    },
+    {
+      "id": 18,
+      "type": "operation",
+      "name": "运营中心",
+      "status": "pending",
+      "doc_dir": "spec/spec-18-operation.md",
+      "depends_on": [
+        11,
+        13
+      ],
+      "subtasks": [
+        "实现运行列表接口与页面（按 Bundle/状态/时间筛选）",
+        "实现失败运行一键跳转到时间线定位",
+        "实现 Token 消耗与成本报表（按天/周/月聚合，支持导出）",
+        "实现审计日志：human gate 审批记录 append-only 落库与查询",
+        "实现举报提交与管理员下架处理"
+      ]
+    },
+    {
+      "id": 19,
+      "type": "observability",
+      "name": "可观测性与部署",
+      "status": "pending",
+      "doc_dir": "spec/spec-19-observability.md",
+      "depends_on": [
+        12,
+        10
+      ],
+      "subtasks": [
+        "接入 OpenTelemetry，打通 ADK 执行链路 trace",
+        "实现 /health 与 /ready 探针",
+        "编写 Kubernetes 部署清单（Deployment/Service/Ingress/ConfigMap/Secret）",
+        "配置 Ingress 关闭响应缓冲（proxy_buffering off），保证流式生效",
+        "配置事件流接口的会话粘性路由",
+        "编写灰度发布与回滚流程"
+      ]
+    }
+  ]
+}

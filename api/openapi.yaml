@@ -1,0 +1,1576 @@
+openapi: 3.1.0
+
+info:
+  title: AI Agent 平台 API
+  version: 1.0.0
+  contact:
+    name: AI Agent 平台团队
+    email: platform@example.com
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+  description: |
+    AI Agent 平台的 HTTP API 规范，是前后端联调的**唯一事实来源**。
+
+    关键约定（详见《架构设计文档》第六章）：
+    - 除事件流接口外，所有响应使用统一信封 `{code, message, data, request_id}`
+    - `code = 0` 表示成功；非 0 为五位业务错误码（AABBB：前两位模块，后三位序号）
+    - 列表字段无数据时必须返回 `[]`，**禁止返回 null**
+    - 时间一律 RFC3339 带时区；对外 ID 一律字符串（避免 JS Number 精度丢失）
+    - 创建类接口支持 `Idempotency-Key` 请求头
+
+servers:
+  - url: https://api.example.com/api/v1
+    description: 生产环境
+  - url: http://localhost:8080/api/v1
+    description: 本地开发
+
+tags:
+  - name: Auth
+    description: 用户注册与登录
+  - name: Marketplace
+    description: 应用广场 — 发布、浏览、订阅
+  - name: Resources
+    description: 资源中心 — Tool / Skill / MCP / 知识库注册
+  - name: Agents
+    description: 应用中心 — Agent 定义与版本管理
+  - name: Bundles
+    description: 应用中心 — Bundle 编排定义
+  - name: Runs
+    description: 编排运行时 — 启动运行、事件流、human gate 审批
+  - name: Usage
+    description: 用量与成本 — 用户自己的消耗
+  - name: ModelProviders
+    description: 模型中心 — Provider 接入
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  # ────────────────────────── 认证 ──────────────────────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: 注册
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, display_name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, writeOnly: true }
+                display_name: { type: string, maxLength: 64 }
+      responses:
+        '201':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: 邮箱已注册
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: 登录
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, writeOnly: true }
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────── 应用广场 ──────────────────────────
+  /marketplace/listings:
+    get:
+      tags: [Marketplace]
+      summary: 广场浏览
+      description: |
+        返回**黑盒安全**的展示信息，绝不包含 persona、编排图等内部定义。
+      operationId: browseMarketplace
+      parameters:
+        - name: resource_type
+          in: query
+          schema: { $ref: '#/components/schemas/ListingResourceType' }
+        - name: q
+          in: query
+          description: 按名称/描述搜索
+          schema: { type: string }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/ListingSummary' }
+                          next_cursor: { type: [string, 'null'] }
+                          has_more: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+    post:
+      tags: [Marketplace]
+      summary: 发布资源到广场
+      description: |
+        发布前做**递归依赖闭包校验**：被发布资源传递依赖的每一层
+        （Bundle → Agent → MCP/Skill/Tool）都必须已发布，任一层存在
+        未发布的私有资源即返回 422 + 错误码 70001。
+
+        校验按精确版本匹配——Bundle 引用的是 Agent 的具体版本，
+        必须是「该版本」已发布，不是「该 Agent 有任意版本发过」。
+
+        存在多个未发布依赖时一次性全部返回，`details` 给出完整依赖路径。
+        循环依赖返回 70008。
+      operationId: publishListing
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resource_type, resource_ref, version, display_meta]
+              properties:
+                resource_type: { $ref: '#/components/schemas/ListingResourceType' }
+                resource_ref:
+                  type: string
+                  description: 作者空间内的资源标识
+                version: { type: string, examples: ['2.0'] }
+                display_meta: { $ref: '#/components/schemas/ListingDisplayMeta' }
+                changelog:
+                  type: string
+                  description: |
+                    本版本的更新说明，由作者手写。**不提供自动 diff**——
+                    diff 会泄露黑盒内容。
+      responses:
+        '201':
+          description: 发布成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ListingDetail' }
+        '422':
+          description: 依赖完整性校验失败（70001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+              examples:
+                privateDep:
+                  value:
+                    code: 70001
+                    message: '该资源引用了未发布的私有资源，无法发布'
+                    data: null
+                    request_id: 'req-a1b2c3d4'
+                    details:
+                      - field: 'agents[1].capabilities.tools[2]'
+                        reason: '依赖路径 web-app-builder → architect@1.0 → mcp/internal-search@1.0 未发布'
+                      - field: 'agents[0]'
+                        reason: '依赖路径 web-app-builder → product_manager@1.2 未发布'
+
+  /marketplace/listings/{ref}:
+    parameters:
+      - name: ref
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Marketplace]
+      summary: 广场资源详情
+      description: |
+        黑盒资源仅返回 `display_meta` 与 `constraints_summary`。
+        **`constraints_summary` 是黑盒规则的必要例外**——不暴露 persona 和
+        编排图，但必须暴露执行约束，否则订阅者无法预估 Token 成本。
+      operationId: getListing
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ListingDetail' }
+        '404':
+          description: listing 不存在或已下架（70002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /marketplace/listings/{id}/unpublish:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Marketplace]
+      summary: 停止分发
+      description: |
+        停止分发后广场不再展示，但**不影响存量订阅者**（他们继续可用）。
+
+        若该资源正被其他**已发布**资源依赖，拒绝停止分发（70007）——
+        否则上游资源的依赖闭包会断裂，订阅了上游的用户会突然跑不了。
+        响应的 details 列出具体依赖方。
+      operationId: unpublishListing
+      responses:
+        '204':
+          description: 已停止分发
+        '409':
+          description: 被其他已发布资源依赖（70007）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+              examples:
+                depended:
+                  value:
+                    code: 70007
+                    message: '该资源正被其他已发布资源依赖，无法停止分发'
+                    data: null
+                    request_id: 'req-a1b2c3d4'
+                    details:
+                      - field: 'depended_by'
+                        reason: 'Bundle web-app-builder@2.0 正在依赖'
+
+  /marketplace/listings/{id}/subscribe:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Marketplace]
+      summary: 订阅
+      description: |
+        订阅关系绑定到**该 listing 的具体版本**（快照隔离）。
+        作者后续发布新版本不影响本次订阅，订阅者需显式升级。
+        订阅动作会把对应资源版本标记为不可变，防止作者事后修改。
+      operationId: subscribeListing
+      responses:
+        '201':
+          description: 订阅成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Subscription' }
+        '404':
+          description: listing 不存在或已停止分发（70002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '409':
+          description: 已订阅该版本（70004）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /marketplace/subscriptions:
+    get:
+      tags: [Marketplace]
+      summary: 我的订阅
+      operationId: listSubscriptions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Subscription' }
+                          next_cursor: { type: [string, 'null'] }
+                          has_more: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /marketplace/subscriptions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [Marketplace]
+      summary: 退订
+      operationId: unsubscribe
+      responses:
+        '204':
+          description: 退订成功（历史运行记录仍可查）
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /marketplace/subscriptions/{id}/upgrade:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Marketplace]
+      summary: 升级订阅到新版本
+      description: 显式操作，不会自动发生。升级后旧版本的运行历史仍可查。
+      operationId: upgradeSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_version]
+              properties:
+                target_version: { type: string, examples: ['2.0'] }
+      responses:
+        '200':
+          description: 升级成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Subscription' }
+        '404':
+          description: 目标版本不存在（70002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  # ────────────────────────── 资源中心 ──────────────────────────
+  /resources:
+    get:
+      tags: [Resources]
+      summary: 资源列表
+      operationId: listResources
+      parameters:
+        - name: type
+          in: query
+          schema:
+            $ref: '#/components/schemas/ResourceType'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Resource' }
+                          next_cursor: { type: [string, 'null'] }
+                          has_more: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Resources]
+      summary: 注册资源
+      operationId: createResource
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, ref, config]
+              properties:
+                type: { $ref: '#/components/schemas/ResourceType' }
+                ref:
+                  type: string
+                  pattern: '^[a-z][a-z0-9_-]*$'
+                  description: Agent DSL 中引用该资源使用的 ID
+                  examples: ['internal-search']
+                display_name: { type: string }
+                config:
+                  type: object
+                  description: 因资源类型而异的连接配置
+                  additionalProperties: true
+                  examples:
+                    - { endpoint: 'https://mcp.internal/search', auth_type: 'bearer' }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Resource' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: ref 重复（错误码 30003）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /resources/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      tags: [Resources]
+      summary: 更新资源（含启用/禁用）
+      operationId: updateResource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string }
+                config: { type: object, additionalProperties: true }
+                status: { $ref: '#/components/schemas/Status' }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Resource' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────── Agent ──────────────────────────
+  /resources/{id}/delete-check:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Resources]
+      summary: 删除前占用检查
+      description: 返回该资源被哪些 Agent 引用，供前端在确认弹窗中展示影响范围
+      operationId: checkResourceDeletable
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          deletable: { type: boolean }
+                          referenced_by:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                type: { type: string }
+                                ref: { type: string }
+                                version: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /agents:
+    get:
+      tags: [Agents]
+      summary: Agent 列表（每个 ref 返回最新启用版本）
+      operationId: listAgents
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Agent' }
+                          next_cursor: { type: [string, 'null'] }
+                          has_more: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Agents]
+      summary: 创建 Agent（新建或新增版本）
+      description: |
+        请求体中的 `definition` 会用 Agent DSL 的 JSON Schema 严格校验。
+        校验失败返回 400 + 错误码 40001，`details` 中给出具体字段路径。
+      operationId: createAgent
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition: { $ref: '#/components/schemas/AgentDefinition' }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Agent' }
+        '400':
+          description: |
+            DSL 校验失败（40001）或引用了被禁用的资源（30002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+              examples:
+                dslInvalid:
+                  summary: DSL 字段不合法
+                  value:
+                    code: 40001
+                    message: 'Agent 定义不符合 Schema'
+                    data: null
+                    request_id: 'req-a1b2c3d4'
+                    details:
+                      - field: 'model.provider'
+                        reason: '必须是 anthropic / openai / google / custom 之一'
+
+  /agents/{ref}:
+    parameters:
+      - name: ref
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [Agents]
+      summary: 删除 Agent
+      description: |
+        删除前校验两类占用：
+        1. 该 Agent 的任一版本已被发布且有存量订阅者 → 拒绝（快照隔离要求），只能停止分发
+        2. 被其他 Bundle 引用中 → 拒绝，并在 details 列出具体 Bundle
+        删除不影响历史运行记录的可查性。
+      operationId: deleteAgent
+      responses:
+        '204':
+          description: 删除成功
+        '409':
+          description: 存在占用无法删除（70005 已被订阅 / 40004 被引用）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+              examples:
+                inUse:
+                  value:
+                    code: 40004
+                    message: '该 Agent 正被其他 Bundle 引用，无法删除'
+                    data: null
+                    request_id: 'req-a1b2c3d4'
+                    details:
+                      - field: 'referenced_by'
+                        reason: 'Bundle web-app-builder v2.0 正在引用'
+
+  /agents/{ref}/versions:
+    get:
+      tags: [Agents]
+      summary: 某个 Agent 的全部版本
+      operationId: listAgentVersions
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Agent' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ────────────────────────── Bundle ──────────────────────────
+  /bundles:
+    get:
+      tags: [Bundles]
+      summary: Bundle 列表
+      operationId: listBundles
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Bundle' }
+                          next_cursor: { type: [string, 'null'] }
+                          has_more: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Bundles]
+      summary: 创建 Bundle
+      description: |
+        除 JSON Schema 校验外，还会做**编排图静态校验**：
+        entry 节点存在、边引用的节点均已声明、不存在因自环边被计入 join
+        前置条件而永远无法触发的死锁节点。图校验失败返回 422 + 错误码 40003。
+      operationId: createBundle
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition: { $ref: '#/components/schemas/BundleDefinition' }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Bundle' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422':
+          description: 图校验失败（40003）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+              examples:
+                deadlock:
+                  value:
+                    code: 40003
+                    message: 'Bundle 编排图存在无法触发的节点'
+                    data: null
+                    request_id: 'req-a1b2c3d4'
+                    details:
+                      - field: 'orchestration.edges[3]'
+                        reason: '节点 fullstack_engineer 的自环边被计入 join 前置条件，将导致该节点永远无法首次触发'
+
+  /bundles/{ref}:
+    parameters:
+      - name: ref
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [Bundles]
+      summary: 删除 Bundle
+      description: 已被订阅的版本不可删除，只能停止分发。删除不影响历史运行记录。
+      operationId: deleteBundle
+      responses:
+        '204':
+          description: 删除成功
+        '409':
+          description: 已被订阅无法删除（70005）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  # ────────────────────────── Run ──────────────────────────
+  /runs:
+    get:
+      tags: [Runs]
+      summary: 运行列表
+      operationId: listRuns
+      parameters:
+        - name: bundle_ref
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/RunStatus' }
+        - name: sort
+          in: query
+          description: 字段名前加 `-` 表示倒序
+          schema: { type: string, default: '-created_at' }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/RunSummary' }
+                          next_cursor: { type: [string, 'null'] }
+                          has_more: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [Runs]
+      summary: 启动一次 Bundle 运行
+      description: |
+        异步启动，立即返回 run_id。前端随后连接 `/runs/{id}/stream` 消费事件流。
+        强烈建议携带 `Idempotency-Key`：一次运行可能消耗大量 Token，
+        网络抖动导致的重复提交是真实的成本损失。
+      operationId: createRun
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bundle_ref, input]
+              properties:
+                bundle_ref: { type: string, examples: ['web-app-builder'] }
+                bundle_version:
+                  type: string
+                  description: 省略则使用最新启用版本
+                  examples: ['1.0']
+                input:
+                  type: object
+                  description: 初始需求，写入 shared_state
+                  additionalProperties: true
+                  examples:
+                    - { requirements: '做一个待办事项 Web 应用' }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/RunSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: 引用资源被禁用（30002）/ Agent 版本不存在（40004）/ Provider 未配置（60001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /runs/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+        examples: { run: { value: 'run-9e67931d5c38024e' } }
+    get:
+      tags: [Runs]
+      summary: 运行详情（含最新 shared_state）
+      operationId: getRun
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/RunDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /runs/{id}/stream:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: after_id
+        in: query
+        description: 断线续传游标，只推送 id 大于该值的事件
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Runs]
+      summary: 运行事件流（NDJSON，chunked）
+      description: |
+        **唯一不使用统一信封的接口**，因为是流式响应。
+
+        - `Content-Type: application/x-ndjson`，每行一个独立 JSON 事件对象
+        - 建连后先补发历史事件（可用 `after_id` 续传），再进入增量推送
+        - 服务端在 `bundle.finished` / `bundle.failed` 后主动关闭连接
+        - 鉴权失败等**建连阶段**的错误仍用常规信封 + 对应 HTTP 状态码返回；
+          连接建立后发生的错误以一条 `type: "stream.error"` 事件推送后关闭
+        - 响应头必须带 `X-Accel-Buffering: no`，避免 nginx 缓冲导致伪流式
+      operationId: streamRunEvents
+      responses:
+        '200':
+          description: 事件流
+          headers:
+            X-Accel-Buffering:
+              schema: { type: string, const: 'no' }
+            Cache-Control:
+              schema: { type: string, const: 'no-cache' }
+          content:
+            application/x-ndjson:
+              schema: { $ref: '#/components/schemas/RunEvent' }
+              examples:
+                nodeStarted:
+                  value:
+                    id: 42
+                    type: 'node.started'
+                    run_id: 'run-9e67931d5c38024e'
+                    node: 'architect'
+                    timestamp: '2026-08-20T13:10:00Z'
+                    payload: null
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /runs/{id}/cancel:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Runs]
+      summary: 停止运行
+      description: |
+        用户主动终止一次运行，避免继续消耗 Token。停止在 5 秒内生效，
+        不等待当前 Agent 执行完。已产生的产出与事件完整保留，
+        **已消耗的 Token 照常计费**（无法退回）。
+      operationId: cancelRun
+      responses:
+        '204':
+          description: 已发出停止指令
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: 运行已结束（50002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /runs/{id}/gate:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Runs]
+      summary: human gate 审批
+      description: |
+        **必须做审批人角色的二次校验**——具备 Bundle 查看权限不等于具备审批权限，
+        这是安全边界，不能只在网关层做身份校验。
+      operationId: resolveGate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node, approved]
+              properties:
+                node: { type: string, examples: ['architect'] }
+                approved: { type: boolean }
+                comment:
+                  type: string
+                  description: 审批意见，写入审计日志
+      responses:
+        '204':
+          description: 处理成功（无响应体，不带信封）
+        '403':
+          description: 非指定审批角色（50004）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '409':
+          description: gate 已被处理（50003）或 run 已结束（50002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  # ────────────────────────── 用量与成本 ──────────────────────────
+  /usage/me:
+    get:
+      tags: [Usage]
+      summary: 我的用量与成本
+      description: |
+        当前用户自己的消耗，与运营中心的管理员全局报表区分。
+        黑盒资源的运行消耗计入**发起运行的人**（即订阅者）。
+      operationId: getMyUsage
+      parameters:
+        - name: period
+          in: query
+          schema: { type: string, enum: [day, week, month], default: month }
+        - name: group_by
+          in: query
+          schema: { type: string, enum: [bundle, day], default: bundle }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/UsageSummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ────────────────────────── 模型中心 ──────────────────────────
+  /model-providers:
+    get:
+      tags: [ModelProviders]
+      summary: 已接入的 Provider 列表（不返回凭证）
+      operationId: listModelProviders
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ModelProvider' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+    post:
+      tags: [ModelProviders]
+      summary: 接入 Provider
+      operationId: createModelProvider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, api_key]
+              properties:
+                provider: { $ref: '#/components/schemas/ProviderName' }
+                api_key:
+                  type: string
+                  description: 加密存储，任何接口都不回显
+                  writeOnly: true
+      responses:
+        '201':
+          description: 接入成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ModelProvider' }
+        '422':
+          description: 凭证无效（60002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Web 控制台用户会话，有效期 2h
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: 服务端调用 / CI 集成，格式 `ApiKey <key>`
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: 默认 20，上限 100，超出按上限截断而非报错
+      schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+    Cursor:
+      name: cursor
+      in: query
+      description: 游标分页令牌，来自上一页响应的 next_cursor
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: 客户端生成的 UUID，24h 内相同 Key 重复请求直接返回首次结果
+      schema: { type: string, format: uuid }
+
+  responses:
+    BadRequest:
+      description: 请求参数格式错误或 Schema 校验失败
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    Unauthorized:
+      description: 未认证（20001 / 20002）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    Forbidden:
+      description: 已认证但无权限（20003）
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Envelope' }
+
+  schemas:
+    # ── 通用信封 ──
+    Envelope:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: integer
+          description: 0 为成功；非 0 为五位业务错误码
+          examples: [0]
+        message: { type: string, examples: ['ok'] }
+        data:
+          description: 业务数据，无返回内容时为 null
+        request_id:
+          type: string
+          description: 全链路追踪 ID，等同 OTel trace_id
+          examples: ['req-a1b2c3d4']
+        details:
+          type: array
+          description: 字段级错误，表单场景使用
+          items:
+            type: object
+            required: [field, reason]
+            properties:
+              field: { type: string }
+              reason: { type: string }
+
+    Status:
+      type: integer
+      description: 1 启用 / 2 停用
+      enum: [1, 2]
+
+    ResourceType:
+      type: string
+      enum: [tool, skill, mcp, knowledge_base]
+
+    ProviderName:
+      type: string
+      enum: [anthropic, openai, google, custom]
+
+    RunStatus:
+      type: string
+      enum: [running, finished, failed]
+
+    Resource:
+      type: object
+      required: [id, type, ref, status, created_at]
+      properties:
+        id: { type: string }
+        type: { $ref: '#/components/schemas/ResourceType' }
+        ref: { type: string }
+        display_name: { type: string }
+        config: { type: object, additionalProperties: true }
+        status: { $ref: '#/components/schemas/Status' }
+        health:
+          type: string
+          description: MCP Server 等外部资源的健康状态
+          enum: [unknown, healthy, unhealthy]
+        created_at: { type: string, format: date-time }
+
+    # ── Agent DSL（与 schemas/agent.schema.json 保持一致）──
+    AgentDefinition:
+      type: object
+      required: [agent, role, version, model, persona, capabilities, constraints]
+      properties:
+        agent:
+          type: string
+          pattern: '^[a-z][a-z0-9_]*$'
+          examples: ['architect']
+        role: { type: string, examples: ['系统架构师'] }
+        version: { type: string, pattern: '^\d+\.\d+(\.\d+)?$' }
+        model:
+          type: object
+          required: [provider, name]
+          properties:
+            provider: { $ref: '#/components/schemas/ProviderName' }
+            name: { type: string, examples: ['claude-sonnet-5'] }
+            fallback:
+              type: array
+              description: 主模型不可用时按顺序降级，格式 provider/name
+              items: { type: string, pattern: '^[a-z]+/.+$' }
+            temperature: { type: number, minimum: 0, maximum: 2 }
+        persona:
+          type: string
+          description: 角色设定，支持模板变量如 {{shared_state.requirements}}
+        capabilities:
+          type: object
+          properties:
+            tools:
+              type: array
+              items: { type: string }
+            skills:
+              type: array
+              items: { type: string }
+            hooks:
+              type: object
+              properties:
+                before_tool_call: { type: array, items: { type: string } }
+                after_tool_call: { type: array, items: { type: string } }
+                before_response: { type: array, items: { type: string } }
+                after_response: { type: array, items: { type: string } }
+                on_error: { type: array, items: { type: string } }
+        constraints:
+          type: object
+          properties:
+            max_tokens_per_turn: { type: integer, minimum: 1 }
+            max_tool_calls: { type: integer, minimum: 0 }
+            max_turns: { type: integer, minimum: 1 }
+            timeout_seconds: { type: integer, minimum: 1 }
+            forbidden_actions:
+              type: array
+              items: { type: string }
+            output_schema:
+              type: string
+              description: 该 Agent 产出必须满足的 JSON Schema 引用
+        handoff:
+          type: object
+          properties:
+            accepts_input_from: { type: array, items: { type: string } }
+            produces_output_to: { type: array, items: { type: string } }
+            requires_review: { type: boolean }
+
+    Agent:
+      type: object
+      required: [id, agent_ref, version, definition, status, created_at]
+      properties:
+        id: { type: string }
+        agent_ref: { type: string }
+        version: { type: string }
+        definition: { $ref: '#/components/schemas/AgentDefinition' }
+        status: { $ref: '#/components/schemas/Status' }
+        created_at: { type: string, format: date-time }
+
+    # ── Bundle DSL（与 schemas/bundle.schema.json 保持一致）──
+    BundleDefinition:
+      type: object
+      required: [bundle, version, agents, orchestration]
+      properties:
+        bundle: { type: string, pattern: '^[a-z][a-z0-9-]*$' }
+        version: { type: string, pattern: '^\d+\.\d+(\.\d+)?$' }
+        description: { type: string }
+        agents:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [ref]
+            properties:
+              ref: { type: string }
+              alias:
+                type: string
+                description: 同一 Agent 在一个 Bundle 中多次出现时用于区分
+              version: { type: string }
+        orchestration:
+          type: object
+          required: [mode, entry, edges]
+          properties:
+            mode:
+              type: string
+              enum: [pipeline, graph]
+            entry: { type: string }
+            edges:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [from, to]
+                properties:
+                  from: { type: string }
+                  to:
+                    description: 单个目标、多个目标（并行 fan-out），或字面量 END
+                    oneOf:
+                      - type: string
+                      - type: array
+                        items: { type: string }
+                        minItems: 2
+                  mode:
+                    type: string
+                    enum: [sequential, parallel]
+                  join:
+                    type: string
+                    enum: [wait_all, wait_any]
+                  condition:
+                    type: string
+                    description: 基于 shared_state 的路由表达式（expr-lang 语法）
+                    examples: ['shared_state.tests_passed == true']
+            human_gates:
+              type: array
+              items:
+                type: object
+                required: [after]
+                properties:
+                  after: { type: string }
+                  timeout_seconds: { type: integer, minimum: 1 }
+                  on_timeout:
+                    type: string
+                    enum: [auto_approve, auto_reject, abort]
+                  approver_roles:
+                    type: array
+                    description: 有资格审批的角色，为空则回退到团队默认审批角色
+                    items: { type: string }
+        limits:
+          type: object
+          properties:
+            max_total_tokens: { type: integer, minimum: 1 }
+            max_wall_clock_seconds: { type: integer, minimum: 1 }
+            max_cost_usd: { type: number, minimum: 0 }
+
+    Bundle:
+      type: object
+      required: [id, bundle_ref, version, definition, status, created_at]
+      properties:
+        id: { type: string }
+        bundle_ref: { type: string }
+        version: { type: string }
+        definition: { $ref: '#/components/schemas/BundleDefinition' }
+        status: { $ref: '#/components/schemas/Status' }
+        created_at: { type: string, format: date-time }
+
+    # ── Run ──
+    RunSummary:
+      type: object
+      required: [run_id, bundle_ref, status, created_at]
+      properties:
+        run_id: { type: string, examples: ['run-9e67931d5c38024e'] }
+        bundle_ref: { type: string }
+        bundle_version: { type: string }
+        status: { $ref: '#/components/schemas/RunStatus' }
+        error: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: [string, 'null'], format: date-time }
+
+    RunDetail:
+      allOf:
+        - $ref: '#/components/schemas/RunSummary'
+        - type: object
+          required: [shared_state]
+          properties:
+            shared_state:
+              type: object
+              description: 跨 Agent 共享的结构化上下文
+              additionalProperties: true
+            usage:
+              type: object
+              description: 本次运行的资源消耗，用于 Chat 页右侧栏展示
+              properties:
+                total_tokens: { type: integer }
+                cost_usd: { type: number }
+                duration_seconds: { type: integer }
+
+    RunEvent:
+      type: object
+      required: [id, type, run_id, timestamp]
+      description: |
+        事件流中的单条事件。前端 Chat 界面据此驱动：
+        `node.thinking` → 打字机效果；`node.tool_call.*` → 气泡内工具调用状态条；
+        `human_gate.waiting` → 内联审批卡片。
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: 自增主键，作为断线续传游标
+        type:
+          type: string
+          enum:
+            - bundle.started
+            - bundle.finished
+            - bundle.failed
+            - node.queued
+            - node.started
+            - node.thinking
+            - node.tool_call.started
+            - node.tool_call.finished
+            - node.finished
+            - node.failed
+            - human_gate.waiting
+            - human_gate.resolved
+            - shared_state.updated
+            - stream.error
+        run_id: { type: string }
+        node:
+          type: string
+          description: 事件关联的节点（bundle 级事件为空）
+        timestamp: { type: string, format: date-time }
+        payload:
+          description: 因事件类型而异
+
+    # ── 用户与认证 ──
+    AuthResult:
+      type: object
+      required: [access_token, refresh_token, user]
+      properties:
+        access_token: { type: string, description: 'JWT，有效期 2h' }
+        refresh_token: { type: string, description: '有效期 7d' }
+        user: { $ref: '#/components/schemas/User' }
+
+    User:
+      type: object
+      required: [id, email, display_name, created_at]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        created_at: { type: string, format: date-time }
+
+    # ── 广场与订阅 ──
+    ListingResourceType:
+      type: string
+      enum: [agent, bundle, skill, mcp]
+
+    ListingDisplayMeta:
+      type: object
+      description: |
+        **可公开展示**的元信息，与资源的 definition 分离存储。
+        黑盒发布下，订阅者只能看到本对象的内容。
+      required: [display_name, description]
+      properties:
+        display_name: { type: string, examples: ['全栈应用生成器'] }
+        description: { type: string }
+        usage:
+          type: string
+          description: 使用说明（怎么用、注意什么）
+        io_description:
+          type: object
+          description: 输入输出说明；黑盒运行时，共享状态面板只展示此处声明的输出字段
+          properties:
+            input: { type: string }
+            outputs:
+              type: array
+              items: { type: string }
+              examples: [['requirements', 'architecture_doc', 'ui_spec', 'code_diff']]
+
+    ConstraintsSummary:
+      type: object
+      description: |
+        执行约束摘要。黑盒规则的**必要例外**：不暴露内部定义，
+        但必须让订阅者能预估运行成本。
+      properties:
+        max_tool_calls: { type: integer }
+        timeout_seconds: { type: integer }
+        estimated_tokens_range:
+          type: string
+          examples: ['30000~60000']
+
+    ListingSummary:
+      type: object
+      required: [id, listing_ref, resource_type, version, display_meta, author, subscriber_count]
+      properties:
+        id: { type: string }
+        listing_ref:
+          type: string
+          description: 广场内的稳定标识，跨版本不变
+        resource_type: { $ref: '#/components/schemas/ListingResourceType' }
+        version: { type: string }
+        visibility:
+          type: string
+          enum: [blackbox]
+          description: V1 仅支持 blackbox；public 模式见 PRD P2-4
+        display_meta: { $ref: '#/components/schemas/ListingDisplayMeta' }
+        author: { $ref: '#/components/schemas/User' }
+        subscriber_count: { type: integer }
+        run_count: { type: integer }
+        subscribed:
+          type: boolean
+          description: 当前用户是否已订阅（用于广场卡片显示"进入使用"）
+        published_at: { type: string, format: date-time }
+
+    ListingDetail:
+      allOf:
+        - $ref: '#/components/schemas/ListingSummary'
+        - type: object
+          properties:
+            constraints_summary: { $ref: '#/components/schemas/ConstraintsSummary' }
+            versions:
+              type: array
+              description: 版本历史，只含作者手写的 changelog，不含 diff
+              items:
+                type: object
+                properties:
+                  version: { type: string }
+                  changelog: { type: string }
+                  published_at: { type: string, format: date-time }
+
+    Subscription:
+      type: object
+      required: [id, listing, subscribed_version, created_at]
+      properties:
+        id: { type: string }
+        listing: { $ref: '#/components/schemas/ListingSummary' }
+        subscribed_version:
+          type: string
+          description: 订阅时绑定的版本（快照隔离），不随作者发新版而变
+        local_alias:
+          type: [string, 'null']
+          description: 订阅者可在自己空间内重命名
+        latest_version:
+          type: [string, 'null']
+          description: 作者当前最新版本；与 subscribed_version 不同则前端提示"有新版本"
+        latest_changelog:
+          type: [string, 'null']
+          description: 最新版本的更新说明，供订阅者判断是否升级
+        created_at: { type: string, format: date-time }
+
+    UsageSummary:
+      type: object
+      required: [period, total_tokens, total_cost_usd, breakdown]
+      properties:
+        period: { type: string, examples: ['2026-08'] }
+        total_tokens: { type: integer, format: int64 }
+        total_cost_usd: { type: number }
+        run_count: { type: integer }
+        breakdown:
+          type: array
+          description: 按 bundle 或按天的分组明细
+          items:
+            type: object
+            properties:
+              key: { type: string, description: 'bundle_ref 或日期' }
+              tokens: { type: integer, format: int64 }
+              cost_usd: { type: number }
+              run_count: { type: integer }
+
+    ModelProvider:
+      type: object
+      required: [id, provider, status, created_at]
+      properties:
+        id: { type: string }
+        provider: { $ref: '#/components/schemas/ProviderName' }
+        status: { $ref: '#/components/schemas/Status' }
+        created_at: { type: string, format: date-time }

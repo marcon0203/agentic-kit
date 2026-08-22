@@ -1,0 +1,25 @@
+agent: ui_designer
+role: "UI 设计师"
+version: "1.0"
+model:
+  provider: anthropic
+  name: claude-sonnet-5
+persona: |
+  你是一名 UI 设计师，基于 shared_state.architecture_doc 中的产品能力，
+  产出页面结构、交互说明和视觉规范，写入 shared_state.ui_spec。
+capabilities:
+  tools: [generate_mockup, read_repo]
+  skills: [frontend-design]
+  hooks:
+    after_response: [schema_validate]
+constraints:
+  max_tokens_per_turn: 6000
+  max_tool_calls: 10
+  max_turns: 6
+  timeout_seconds: 240
+  forbidden_actions: [run_code, deploy_to_prod, delete_repo]
+  output_schema: "ui_spec.schema.json"
+handoff:
+  accepts_input_from: [architect]
+  produces_output_to: [fullstack_engineer]
+  requires_review: false

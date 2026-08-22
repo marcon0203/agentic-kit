@@ -1,0 +1,10 @@
+.env
+/bin/
+*.tsbuildinfo
+
+# Go
+*.test
+*.out
+
+# Node (web/ has its own .gitignore too, this covers root-level tooling)
+node_modules/

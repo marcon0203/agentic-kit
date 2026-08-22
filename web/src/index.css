@@ -1,0 +1,89 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design tokens sourced from design-system.md (PC 端浅色系统, V1 无深色模式).
+ * Full token rollout happens in spec-13-fe-foundation; this seeds the
+ * shadcn/ui variable contract so components render correctly out of the box.
+ */
+:root {
+  --radius: 0.875rem; /* rounded.sm ~ 12px baseline for controls */
+
+  --color-primary: #4264ff;
+  --color-secondary: #8b5cff;
+  --color-tertiary: #63d8ff;
+  --color-mint: #6ce0c7;
+  --color-success: #199572;
+  --color-warning: #d8862f;
+  --color-error: #dc5970;
+
+  --color-ink-900: #11162f;
+  --color-ink-700: #4d5572;
+  --color-ink-500: #7d849e;
+
+  --background: #f6f7fb; /* surface-page */
+  --foreground: var(--color-ink-900);
+
+  --card: #ffffff; /* surface */
+  --card-foreground: var(--color-ink-900);
+
+  --popover: #ffffff;
+  --popover-foreground: var(--color-ink-900);
+
+  --primary: var(--color-primary);
+  --primary-foreground: #ffffff;
+
+  --secondary: #f1f4fa; /* surface-muted */
+  --secondary-foreground: var(--color-ink-900);
+
+  --muted: #f1f4fa;
+  --muted-foreground: var(--color-ink-500);
+
+  --accent: #f1f4fa;
+  --accent-foreground: var(--color-ink-900);
+
+  --destructive: var(--color-error);
+  --destructive-foreground: #ffffff;
+
+  --border: #e4e7f0;
+  --input: #e4e7f0;
+  --ring: var(--color-primary);
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

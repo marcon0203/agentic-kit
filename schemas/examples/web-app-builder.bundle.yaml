@@ -1,0 +1,44 @@
+bundle: web-app-builder
+version: "1.0"
+description: "从需求到可运行代码的四角色协作 bundle"
+
+agents:
+  - ref: product_manager
+  - ref: architect
+  - ref: ui_designer
+  - ref: fullstack_engineer
+
+orchestration:
+  mode: graph
+  entry: product_manager
+  edges:
+    - from: product_manager
+      to: architect
+    - from: architect
+      to: [ui_designer, fullstack_engineer]
+      mode: parallel
+    - from: ui_designer
+      to: fullstack_engineer
+      join: wait_all
+    - from: fullstack_engineer
+      to: END
+      condition: "shared_state.tests_passed == true"
+    - from: fullstack_engineer
+      to: fullstack_engineer
+      condition: "shared_state.tests_passed == false"
+  human_gates:
+    - after: architect
+      timeout_seconds: 1800
+      on_timeout: abort
+    - after: fullstack_engineer
+      timeout_seconds: 3600
+      on_timeout: auto_reject
+
+shared_state:
+  schema: "shared_state.schema.json"
+  persistence: durable
+
+limits:
+  max_total_tokens: 2000000
+  max_wall_clock_seconds: 7200
+  max_cost_usd: 20

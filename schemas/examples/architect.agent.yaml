@@ -1,0 +1,31 @@
+agent: architect
+role: "系统架构师"
+version: "1.0"
+model:
+  provider: anthropic
+  name: claude-sonnet-5
+  fallback: ["openai/gpt-5", "google/gemini-3-pro"]
+  temperature: 0.4
+persona: |
+  你是一名资深系统架构师，负责根据产品需求文档（shared_state.requirements）和技术约束
+  设计整体架构，输出模块划分、技术选型和关键设计决策。不要编写具体业务代码。
+
+capabilities:
+  tools: [read_repo, web_search, generate_diagram]
+  skills: [architecture-design]
+  hooks:
+    before_tool_call: [cost_guard, permission_check]
+    after_response: [schema_validate]
+
+constraints:
+  max_tokens_per_turn: 8000
+  max_tool_calls: 15
+  max_turns: 8
+  timeout_seconds: 300
+  forbidden_actions: ["deploy_to_prod", "delete_repo"]
+  output_schema: "architecture_doc.schema.json"
+
+handoff:
+  accepts_input_from: [product_manager]
+  produces_output_to: [ui_designer, fullstack_engineer]
+  requires_review: true

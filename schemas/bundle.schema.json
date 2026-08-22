@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/bundle.schema.json",
+  "title": "Bundle Definition",
+  "description": "Agent Bundle 的 DSL 定义：由哪些 agent 组成、如何编排、共享状态与人工审批点",
+  "type": "object",
+  "required": [
+    "bundle",
+    "version",
+    "agents",
+    "orchestration"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bundle": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "examples": [
+        "web-app-builder"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"
+    },
+    "description": {
+      "type": "string"
+    },
+    "agents": {
+      "type": "array",
+      "description": "参与该 bundle 的 agent 引用列表，ref 对应 agent 定义文件中的 `agent` 字段",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "ref"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "alias": {
+            "type": "string",
+            "description": "可选：在本 bundle 内给该 agent 起别名，同一 agent 定义可在一个 bundle 中以不同别名出现多次（例如两个并行的 code-review agent）",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "overrides": {
+            "type": "object",
+            "description": "可选：针对本 bundle 覆盖该 agent 定义中的部分字段（如 model、constraints）",
+            "additionalProperties": true
+          },
+          "version": {
+            "type": "string",
+            "description": "引用的 Agent 具体版本。省略则取最新启用版本。发布到广场时按此版本做递归依赖闭包校验——必须是「该版本」已发布，不是「该 Agent 有任意版本发过」。",
+            "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"
+          }
+        }
+      }
+    },
+    "orchestration": {
+      "type": "object",
+      "required": [
+        "mode",
+        "entry",
+        "edges"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "description": "pipeline 是 graph 的特例（纯线性无分支）；supervisor 通过在 edges 中接入一个路由 agent 节点实现，复用同一套图执行引擎",
+          "enum": [
+            "pipeline",
+            "graph"
+          ]
+        },
+        "entry": {
+          "type": "string",
+          "description": "起始节点，必须是 agents 中某个 ref 或 alias"
+        },
+        "edges": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "from",
+              "to"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "description": "单个目标节点名，或多个目标节点（并行 fan-out），或字面量 END 表示流程结束",
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 2
+                  }
+                ]
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "sequential",
+                  "parallel"
+                ],
+                "default": "sequential",
+                "description": "当 to 为数组时，parallel 表示所有目标同时启动"
+              },
+              "join": {
+                "type": "string",
+                "enum": [
+                  "wait_all",
+                  "wait_any"
+                ],
+                "default": "wait_all",
+                "description": "多条边汇聚到同一节点时的等待策略"
+              },
+              "condition": {
+                "type": "string",
+                "description": "可选：基于 shared_state 的路由表达式（如 'shared_state.needs_redesign == true'），为空表示无条件转移"
+              }
+            }
+          }
+        },
+        "human_gates": {
+          "type": "array",
+          "description": "在指定 agent 执行完成后暂停流程，等待人工确认/编辑后才继续",
+          "items": {
+            "type": "object",
+            "required": [
+              "after"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "after": {
+                "type": "string"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "无人处理时的超时时间，超时后按 on_timeout 处理"
+              },
+              "on_timeout": {
+                "type": "string",
+                "enum": [
+                  "auto_approve",
+                  "auto_reject",
+                  "abort"
+                ],
+                "default": "abort"
+              },
+              "approver_roles": {
+                "type": "array",
+                "description": "有资格审批的角色。为空时默认为运行发起人本人。后端必须做二次校验——前端隐藏按钮不作为安全手段。",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            }
+          },
+          "default": []
+        }
+      }
+    },
+    "shared_state": {
+      "type": "object",
+      "description": "跨 agent 共享的结构化上下文，agent 只读写自己关心的字段，避免整份对话历史被传递",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "type": "string",
+          "description": "shared_state 结构的 JSON Schema 路径/$id，用于校验各 agent 的写入",
+          "format": "uri-reference"
+        },
+        "persistence": {
+          "type": "string",
+          "enum": [
+            "session",
+            "durable"
+          ],
+          "default": "durable",
+          "description": "session：仅本次运行内存态；durable：落库支持暂停/恢复"
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "description": "整个 bundle 运行的全局熔断阈值，独立于单 agent 的 constraints",
+      "additionalProperties": false,
+      "properties": {
+        "max_total_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_wall_clock_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3600
+        },
+        "max_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "display_meta": {
+      "type": "object",
+      "description": "可公开展示的元信息。黑盒发布时订阅者只能看到本对象的内容，definition 的其余部分（尤其 persona）一律不可见。存储上与 definition 分字段存放，不是查出来再过滤。",
+      "required": [
+        "display_name",
+        "description"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "display_name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "usage": {
+          "type": "string",
+          "description": "使用说明：怎么用、注意什么"
+        },
+        "io_description": {
+          "type": "object",
+          "description": "输入输出说明。黑盒运行时，共享状态面板只展示 outputs 中声明的字段，其余字段隐藏——中间节点可能往 shared_state 写了内部提示词片段。",
+          "additionalProperties": false,
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

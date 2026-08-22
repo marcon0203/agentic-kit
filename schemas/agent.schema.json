@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/agent.schema.json",
+  "title": "Agent Definition",
+  "description": "单个 Agent 的 DSL 定义：角色约束、能力白名单、协作契约",
+  "type": "object",
+  "required": [
+    "agent",
+    "role",
+    "version",
+    "model",
+    "persona",
+    "capabilities",
+    "constraints"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "agent": {
+      "type": "string",
+      "description": "Agent 唯一标识，用于在 bundle 中被引用",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "examples": [
+        "architect",
+        "product_manager",
+        "ui_designer",
+        "fullstack_engineer"
+      ]
+    },
+    "role": {
+      "type": "string",
+      "description": "人类可读的角色名称",
+      "minLength": 1,
+      "maxLength": 50
+    },
+    "version": {
+      "type": "string",
+      "description": "语义化版本号",
+      "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"
+    },
+    "extends": {
+      "type": "string",
+      "description": "可选：继承自另一个 agent 定义（agent id），实现角色变体而不重复定义",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "provider",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "enum": [
+            "anthropic",
+            "openai",
+            "google",
+            "custom"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fallback": {
+          "type": "array",
+          "description": "主模型不可用/超限时按顺序尝试的备选模型，格式为 provider/name",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]+/.+$"
+          },
+          "default": []
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 1
+        }
+      }
+    },
+    "persona": {
+      "type": "string",
+      "description": "系统提示词 / 角色设定，支持模板变量如 {{shared_state.requirements}}",
+      "minLength": 1
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "该 agent 可用的能力白名单，未声明的 tool/skill 不可调用",
+      "additionalProperties": false,
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "hooks": {
+          "type": "object",
+          "description": "生命周期钩子，值为已注册 hook 的名称，按数组顺序依次执行",
+          "additionalProperties": false,
+          "properties": {
+            "before_tool_call": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "after_tool_call": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "before_response": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "after_response": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            },
+            "on_error": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": []
+            }
+          }
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "description": "该 agent 的执行边界，Runtime 强制生效",
+      "additionalProperties": false,
+      "properties": {
+        "max_tokens_per_turn": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 8000
+        },
+        "max_tool_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 20
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "单次 agent 执行内的最大 plan-act 循环轮数",
+          "default": 10
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 300
+        },
+        "forbidden_actions": {
+          "type": "array",
+          "description": "即使已在 capabilities.tools 中声明，也禁止实际调用的动作名（用于二次限制，例如共享同一 tool 但不同 agent 权限不同）",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "output_schema": {
+          "type": "string",
+          "description": "该 agent 最终产出必须满足的 JSON Schema 文件路径或 $id，Runtime 会用它做 after_response 校验",
+          "format": "uri-reference"
+        },
+        "estimated_tokens_range": {
+          "type": "string",
+          "description": "预计 Token 消耗区间，如 '5000~12000'。黑盒发布时必须对订阅者可见——这是黑盒规则的必要例外，否则订阅者无法预估自己会被消耗多少成本。",
+          "pattern": "^\\d+~\\d+$"
+        }
+      }
+    },
+    "handoff": {
+      "type": "object",
+      "description": "协作契约：定义该 agent 在 bundle 图中的输入输出关系，供 Orchestrator 做静态校验",
+      "additionalProperties": false,
+      "properties": {
+        "accepts_input_from": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "produces_output_to": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "requires_review": {
+          "type": "boolean",
+          "description": "产出是否需要人工或指定 agent 复核后才能继续流转",
+          "default": false
+        }
+      }
+    },
+    "display_meta": {
+      "type": "object",
+      "description": "可公开展示的元信息。黑盒发布时订阅者只能看到本对象的内容，definition 的其余部分（尤其 persona）一律不可见。存储上与 definition 分字段存放，不是查出来再过滤。",
+      "required": [
+        "display_name",
+        "description"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "display_name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "usage": {
+          "type": "string",
+          "description": "使用说明：怎么用、注意什么"
+        },
+        "io_description": {
+          "type": "object",
+          "description": "输入输出说明。黑盒运行时，共享状态面板只展示 outputs 中声明的字段，其余字段隐藏——中间节点可能往 shared_state 写了内部提示词片段。",
+          "additionalProperties": false,
+          "properties": {
+            "input": {
+              "type": "string"
+            },
+            "outputs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
