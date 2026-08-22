@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	// Owner-view and subscriber-view queries are kept physically separate so the
 	// subscriber path can never accidentally SELECT `definition` (see
 	// docs/架构设计文档_AI-Agent平台_V1.md 五、"黑盒发布的实现要点").
@@ -26,6 +27,7 @@ type Querier interface {
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
 	DeleteResource(ctx context.Context, id int64) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetAgentDisplayForSubscriber(ctx context.Context, id int64) (GetAgentDisplayForSubscriberRow, error)
 	GetAgentForOwner(ctx context.Context, arg GetAgentForOwnerParams) (Agent, error)
 	GetBundleDisplayForSubscriber(ctx context.Context, id int64) (GetBundleDisplayForSubscriberRow, error)
@@ -40,6 +42,7 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	IncrementListingSubscriberCount(ctx context.Context, id int64) error
 	InsertBundleRunEvent(ctx context.Context, arg InsertBundleRunEventParams) (BundleRunEvent, error)
+	ListAPIKeysForOwner(ctx context.Context, ownerUserID int64) ([]ListAPIKeysForOwnerRow, error)
 	ListAgentsForOwner(ctx context.Context, ownerUserID int64) ([]Agent, error)
 	ListBundleRunEventsAfter(ctx context.Context, arg ListBundleRunEventsAfterParams) ([]BundleRunEvent, error)
 	ListBundleRunEventsAfterExternal(ctx context.Context, arg ListBundleRunEventsAfterExternalParams) ([]BundleRunEvent, error)
@@ -54,9 +57,11 @@ type Querier interface {
 	MarkBundleImmutable(ctx context.Context, id int64) error
 	MarkResourceImmutable(ctx context.Context, id int64) error
 	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
+	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error
 	SetResourceStatus(ctx context.Context, arg SetResourceStatusParams) error
+	TouchAPIKeyLastUsed(ctx context.Context, id int64) error
 	UpdateBundleRunStatus(ctx context.Context, arg UpdateBundleRunStatusParams) error
 	UpdateBundleRunUsage(ctx context.Context, arg UpdateBundleRunUsageParams) error
 }

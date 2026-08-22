@@ -20,6 +20,16 @@ type Agent struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ApiKey struct {
+	ID          int64              `json:"id"`
+	OwnerUserID int64              `json:"owner_user_id"`
+	Name        string             `json:"name"`
+	KeyHash     string             `json:"key_hash"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Bundle struct {
 	ID          int64              `json:"id"`
 	OwnerUserID int64              `json:"owner_user_id"`

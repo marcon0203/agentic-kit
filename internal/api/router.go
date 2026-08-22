@@ -7,26 +7,34 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/marcon0203/agentic-kit/internal/auth"
 )
 
 // RouterConfig collects NewRouter's dependencies. AllowedOrigins may be nil
 // for local dev (reflects any Origin). IdempotencyStore may be nil to
 // disable the Idempotency-Key middleware entirely (e.g. in tests that don't
-// need it).
+// need it). Tokens and APIKeys back AuthMiddleware on every route except
+// /auth/register and /auth/login (security: [] in the API contract).
 type RouterConfig struct {
 	AllowedOrigins   []string
 	IdempotencyStore IdempotencyStore
+	Users            AuthUserStore
+	Tokens           *auth.TokenIssuer
+	APIKeys          APIKeyLookup
 }
 
 // NewRouter assembles the top-level chi router with the shared middleware
-// chain — recovery → request_id → logging → cors → rate_limit →
-// idempotency — and the /health, /ready probes. Auth (spec-04) inserts
-// itself between cors and rate_limit once user context exists; feature
-// routes are mounted under /api/v1 by their respective spec tasks.
+// chain — recovery → request_id → logging → cors → auth → rate_limit →
+// idempotency — and the /health, /ready probes. /auth/register and
+// /auth/login are the only /api/v1 routes exempt from auth. Feature routes
+// (Resources, Agents, Bundles, Runs, ...) are mounted under the protected
+// group by their respective spec tasks.
 func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 	r := chi.NewRouter()
 
 	generalLimiter := NewRateLimiter(600, time.Minute, generalRateLimitKey)
+	authHandlers := NewAuthHandlers(cfg.Users, cfg.Tokens)
 
 	r.Use(RecoverMiddleware(logger))
 	r.Use(RequestIDMiddleware)
@@ -51,23 +59,29 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(generalLimiter.Middleware)
-		if cfg.IdempotencyStore != nil {
-			r.Use(IdempotencyMiddleware(cfg.IdempotencyStore))
-		}
-		// Feature routers (Auth, Resources, Agents, Bundles, Runs, ...)
-		// are mounted here by their respective spec tasks. Endpoints that
-		// need a tighter limit (e.g. run creation: 20/min) apply an
-		// additional NewRateLimiter(20, time.Minute, ...) at the route
-		// group level.
+		r.Post("/auth/register", authHandlers.Register)
+		r.Post("/auth/login", authHandlers.Login)
+
+		r.Group(func(r chi.Router) {
+			r.Use(AuthMiddleware(cfg.Tokens, cfg.APIKeys))
+			r.Use(generalLimiter.Middleware)
+			if cfg.IdempotencyStore != nil {
+				r.Use(IdempotencyMiddleware(cfg.IdempotencyStore))
+			}
+			// Feature routers (Resources, Agents, Bundles, Runs, ...) are
+			// mounted here by their respective spec tasks. Endpoints that
+			// need a tighter limit (e.g. run creation: 20/min) apply an
+			// additional NewRateLimiter(20, time.Minute, ...) at the route
+			// group level.
+		})
 	})
 
 	return r
 }
 
 // generalRateLimitKey keys the 600/min general limiter by authenticated
-// user once auth is wired (spec-04), falling back to remote address before
-// then so the limiter is meaningful even pre-auth.
+// user, falling back to remote address on the rare request that reaches it
+// without one.
 func generalRateLimitKey(r *http.Request) string {
 	if userID, ok := UserIDFromContext(r.Context()); ok {
 		return "user:" + strconv.FormatInt(userID, 10)

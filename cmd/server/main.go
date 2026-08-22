@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/marcon0203/agentic-kit/internal/api"
+	"github.com/marcon0203/agentic-kit/internal/auth"
 	"github.com/marcon0203/agentic-kit/internal/config"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
@@ -45,9 +46,13 @@ func run() error {
 	}
 	defer pool.Close()
 
+	queries := store.New(pool)
 	routerCfg := api.RouterConfig{
 		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
-		IdempotencyStore: api.NewPostgresIdempotencyStore(store.New(pool)),
+		IdempotencyStore: api.NewPostgresIdempotencyStore(queries),
+		Users:            api.NewPostgresAuthUserStore(queries),
+		Tokens:           auth.NewTokenIssuer(cfg.JWTSecret),
+		APIKeys:          api.NewPostgresAPIKeyLookup(queries),
 	}
 
 	handler := api.NewRouter(logger, routerCfg)

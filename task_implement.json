@@ -88,7 +88,7 @@
       "id": 4,
       "type": "auth",
       "name": "用户体系与认证",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-04-auth.md",
       "depends_on": [
         2,

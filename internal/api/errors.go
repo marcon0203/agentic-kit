@@ -14,10 +14,12 @@ const (
 	ErrInternal         = 10099
 
 	// 20xxx — IAM
-	ErrTokenInvalid  = 20001
-	ErrTokenExpired  = 20002
-	ErrForbidden     = 20003
-	ErrAPIKeyRevoked = 20004
+	ErrTokenInvalid           = 20001
+	ErrTokenExpired           = 20002
+	ErrForbidden              = 20003
+	ErrAPIKeyRevoked          = 20004
+	ErrEmailAlreadyRegistered = 20005
+	ErrInvalidCredentials     = 20006
 
 	// 30xxx — 资源中心
 	ErrResourceNotFound     = 30001
