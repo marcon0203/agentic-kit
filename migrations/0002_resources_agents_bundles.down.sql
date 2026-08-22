@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS bundles;
+DROP TABLE IF EXISTS agents;
+DROP TABLE IF EXISTS resources;
