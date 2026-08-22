@@ -10,11 +10,12 @@ import (
 
 // Config holds all runtime configuration required to start the server.
 type Config struct {
-	Env              string `mapstructure:"APP_ENV"`
-	HTTPPort         int    `mapstructure:"HTTP_PORT"`
-	DatabaseURL      string `mapstructure:"DATABASE_URL"`
-	JWTSecret        string `mapstructure:"JWT_SECRET"`
-	CredentialAESKey string `mapstructure:"CREDENTIAL_AES_KEY"`
+	Env                string `mapstructure:"APP_ENV"`
+	HTTPPort           int    `mapstructure:"HTTP_PORT"`
+	DatabaseURL        string `mapstructure:"DATABASE_URL"`
+	JWTSecret          string `mapstructure:"JWT_SECRET"`
+	CredentialAESKey   string `mapstructure:"CREDENTIAL_AES_KEY"`
+	CORSAllowedOrigins string `mapstructure:"CORS_ALLOWED_ORIGINS"`
 }
 
 // required lists the env vars that must be non-empty for the server to start.
@@ -49,11 +50,12 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Env:              v.GetString("APP_ENV"),
-		HTTPPort:         v.GetInt("HTTP_PORT"),
-		DatabaseURL:      v.GetString("DATABASE_URL"),
-		JWTSecret:        v.GetString("JWT_SECRET"),
-		CredentialAESKey: v.GetString("CREDENTIAL_AES_KEY"),
+		Env:                v.GetString("APP_ENV"),
+		HTTPPort:           v.GetInt("HTTP_PORT"),
+		DatabaseURL:        v.GetString("DATABASE_URL"),
+		JWTSecret:          v.GetString("JWT_SECRET"),
+		CredentialAESKey:   v.GetString("CREDENTIAL_AES_KEY"),
+		CORSAllowedOrigins: v.GetString("CORS_ALLOWED_ORIGINS"),
 	}
 	return cfg, nil
 }

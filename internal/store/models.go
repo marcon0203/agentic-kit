@@ -56,6 +56,15 @@ type BundleRunEvent struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type IdempotencyKey struct {
+	Key          string             `json:"key"`
+	OwnerUserID  int64              `json:"owner_user_id"`
+	StatusCode   int32              `json:"status_code"`
+	ResponseBody []byte             `json:"response_body"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+}
+
 type MarketplaceListing struct {
 	ID              int64              `json:"id"`
 	AuthorUserID    int64              `json:"author_user_id"`

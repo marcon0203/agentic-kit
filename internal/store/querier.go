@@ -23,6 +23,7 @@ type Querier interface {
 	DecrementListingSubscriberCount(ctx context.Context, id int64) error
 	DeleteAgent(ctx context.Context, id int64) error
 	DeleteBundle(ctx context.Context, id int64) error
+	DeleteExpiredIdempotencyKeys(ctx context.Context) error
 	DeleteResource(ctx context.Context, id int64) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
 	GetAgentDisplayForSubscriber(ctx context.Context, id int64) (GetAgentDisplayForSubscriberRow, error)
@@ -30,6 +31,7 @@ type Querier interface {
 	GetBundleDisplayForSubscriber(ctx context.Context, id int64) (GetBundleDisplayForSubscriberRow, error)
 	GetBundleForOwner(ctx context.Context, arg GetBundleForOwnerParams) (Bundle, error)
 	GetBundleRun(ctx context.Context, id string) (BundleRun, error)
+	GetIdempotencyKey(ctx context.Context, key string) (IdempotencyKey, error)
 	GetListingByRefVersion(ctx context.Context, arg GetListingByRefVersionParams) (MarketplaceListing, error)
 	GetModelProviderCredentials(ctx context.Context, arg GetModelProviderCredentialsParams) ([]byte, error)
 	GetResourceDisplayForSubscriber(ctx context.Context, id int64) (GetResourceDisplayForSubscriberRow, error)
@@ -51,6 +53,7 @@ type Querier interface {
 	MarkAgentImmutable(ctx context.Context, id int64) error
 	MarkBundleImmutable(ctx context.Context, id int64) error
 	MarkResourceImmutable(ctx context.Context, id int64) error
+	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error
 	SetResourceStatus(ctx context.Context, arg SetResourceStatusParams) error

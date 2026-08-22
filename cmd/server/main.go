@@ -9,11 +9,15 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/marcon0203/agentic-kit/internal/api"
 	"github.com/marcon0203/agentic-kit/internal/config"
+	"github.com/marcon0203/agentic-kit/internal/store"
 )
 
 func main() {
@@ -32,7 +36,21 @@ func run() error {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	handler := api.NewRouter(logger)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("connect to database: %w", err)
+	}
+	defer pool.Close()
+
+	routerCfg := api.RouterConfig{
+		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
+		IdempotencyStore: api.NewPostgresIdempotencyStore(store.New(pool)),
+	}
+
+	handler := api.NewRouter(logger, routerCfg)
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
 		Handler:      handler,
@@ -49,9 +67,6 @@ func run() error {
 		}
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
 	select {
 	case err := <-errCh:
 		return err
@@ -63,4 +78,21 @@ func run() error {
 
 	logger.Info("server_stopping")
 	return srv.Shutdown(shutdownCtx)
+}
+
+// splitAndTrim parses a comma-separated CORS_ALLOWED_ORIGINS value into a
+// slice, returning nil for an empty input (NewRouter treats nil as "reflect
+// any origin", the local-dev default).
+func splitAndTrim(csv string) []string {
+	if strings.TrimSpace(csv) == "" {
+		return nil
+	}
+	parts := strings.Split(csv, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

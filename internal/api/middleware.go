@@ -12,13 +12,29 @@ import (
 
 type ctxKey string
 
-const requestIDKey ctxKey = "request_id"
+const (
+	requestIDKey ctxKey = "request_id"
+	userIDKey    ctxKey = "user_id"
+)
 
 // RequestIDFromContext returns the request ID stashed by RequestIDMiddleware,
 // falling back to the empty string if none is present (e.g. in tests).
 func RequestIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(requestIDKey).(string)
 	return id
+}
+
+// WithUserID attaches the authenticated user's ID to the context. Called by
+// the JWT/ApiKey auth middleware (spec-04); consumed here by the
+// Idempotency-Key middleware and by rate-limit keying.
+func WithUserID(ctx context.Context, userID int64) context.Context {
+	return context.WithValue(ctx, userIDKey, userID)
+}
+
+// UserIDFromContext returns the authenticated user's ID, if any.
+func UserIDFromContext(ctx context.Context) (int64, bool) {
+	id, ok := ctx.Value(userIDKey).(int64)
+	return id, ok
 }
 
 // RequestIDMiddleware assigns a request ID (reusing chi's generator) and
@@ -65,7 +81,7 @@ func RecoverMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 						"request_id", RequestIDFromContext(r.Context()),
 						"error", rec,
 					)
-					writeErr(w, r, http.StatusInternalServerError, 0, "internal server error", nil)
+					writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
 				}
 			}()
 			next.ServeHTTP(w, r)

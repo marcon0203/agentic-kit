@@ -68,7 +68,7 @@
       "id": 3,
       "type": "api_foundation",
       "name": "API 基础设施（统一响应、中间件）",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-03-api-foundation.md",
       "depends_on": [
         1
