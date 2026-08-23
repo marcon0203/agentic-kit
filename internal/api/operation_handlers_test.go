@@ -1,325 +1,319 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
-	"github.com/marcon0203/agentic-kit/internal/store"
+	"github.com/marcon0203/agentic-kit/internal/domain/operation"
 )
 
-type fakeOperationQuerier struct {
-	store.Querier
+// The moderation rules — the admin gate, what a takedown reaches, when a
+// report may still be resolved — are tested against the service in
+// internal/domain/operation. This covers transport: DTO shapes and the
+// status codes produced before the service is reached.
 
-	users        map[int64]store.User
-	listings     map[int64]store.MarketplaceListing
-	auditLogs    []store.AuditLog
-	reports      map[int64]store.Report
-	nextReportID int64
-
-	agentStatus  map[int64]int16
-	bundleStatus map[int64]int16
-	skillStatus  map[int64]int16
-	mcpStatus    map[int64]int16
+type stubReports struct {
+	byID   map[int64]operation.Report
+	nextID int64
 }
 
-func newFakeOperationQuerier() *fakeOperationQuerier {
-	return &fakeOperationQuerier{
-		users: map[int64]store.User{}, listings: map[int64]store.MarketplaceListing{},
-		reports: map[int64]store.Report{}, nextReportID: 1,
-		agentStatus: map[int64]int16{}, bundleStatus: map[int64]int16{},
-		skillStatus: map[int64]int16{}, mcpStatus: map[int64]int16{},
-	}
+func (s *stubReports) Create(_ context.Context, listingID, reporterUserID int64, reason string) (operation.Report, error) {
+	r := operation.Report{ID: s.nextID, ListingID: listingID, ReporterUserID: reporterUserID, Reason: reason, Status: operation.ReportPending}
+	s.nextID++
+	s.byID[r.ID] = r
+	return r, nil
 }
 
-func (f *fakeOperationQuerier) GetUserByID(_ context.Context, id int64) (store.User, error) {
-	u, ok := f.users[id]
+func (s *stubReports) Get(_ context.Context, id int64) (operation.Report, error) {
+	r, ok := s.byID[id]
 	if !ok {
-		return store.User{}, pgx.ErrNoRows
+		return operation.Report{}, operation.ErrNotFound
 	}
-	return u, nil
+	return r, nil
 }
 
-func (f *fakeOperationQuerier) GetListingByListingRefLatestPublished(_ context.Context, ref string) (store.MarketplaceListing, error) {
-	for _, l := range f.listings {
-		if l.ListingRef == ref {
-			return l, nil
-		}
-	}
-	return store.MarketplaceListing{}, pgx.ErrNoRows
-}
-
-func (f *fakeOperationQuerier) GetListingByID(_ context.Context, id int64) (store.MarketplaceListing, error) {
-	l, ok := f.listings[id]
-	if !ok {
-		return store.MarketplaceListing{}, pgx.ErrNoRows
-	}
-	return l, nil
-}
-
-func (f *fakeOperationQuerier) SetListingDistribution(_ context.Context, arg store.SetListingDistributionParams) error {
-	l := f.listings[arg.ID]
-	l.Distribution = arg.Distribution
-	f.listings[arg.ID] = l
-	return nil
-}
-
-func (f *fakeOperationQuerier) CreateAuditLog(_ context.Context, arg store.CreateAuditLogParams) (store.AuditLog, error) {
-	log := store.AuditLog{ID: int64(len(f.auditLogs) + 1), ActorUserID: arg.ActorUserID, Action: arg.Action, TargetType: arg.TargetType, TargetID: arg.TargetID, Detail: arg.Detail}
-	f.auditLogs = append(f.auditLogs, log)
-	return log, nil
-}
-
-func (f *fakeOperationQuerier) ListAuditLogsForActorPage(_ context.Context, arg store.ListAuditLogsForActorPageParams) ([]store.AuditLog, error) {
-	var out []store.AuditLog
-	for i := len(f.auditLogs) - 1; i >= 0; i-- {
-		l := f.auditLogs[i]
-		if l.ActorUserID != arg.ActorUserID {
-			continue
-		}
-		if l.ID >= arg.ID {
-			continue
-		}
-		out = append(out, l)
-		if int32(len(out)) >= arg.Limit {
-			break
+func (s *stubReports) ListPending(_ context.Context, beforeID int64, limit int) ([]operation.Report, error) {
+	var out []operation.Report
+	for id := int64(1); id < s.nextID && len(out) < limit; id++ {
+		if r, ok := s.byID[id]; ok && r.Pending() && r.ID < beforeID {
+			out = append(out, r)
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeOperationQuerier) CreateReport(_ context.Context, arg store.CreateReportParams) (store.Report, error) {
-	rep := store.Report{ID: f.nextReportID, ListingID: arg.ListingID, ReporterUserID: arg.ReporterUserID, Reason: arg.Reason, Status: "pending"}
-	f.reports[rep.ID] = rep
-	f.nextReportID++
-	return rep, nil
-}
-
-func (f *fakeOperationQuerier) GetReportByID(_ context.Context, id int64) (store.Report, error) {
-	r, ok := f.reports[id]
-	if !ok {
-		return store.Report{}, pgx.ErrNoRows
-	}
+func (s *stubReports) Resolve(_ context.Context, id int64, res operation.Resolution, _ int64) (operation.Report, error) {
+	r := s.byID[id]
+	r.Status, r.Resolution = operation.ReportResolved, &res
+	s.byID[id] = r
 	return r, nil
 }
 
-func (f *fakeOperationQuerier) ListPendingReportsPage(_ context.Context, arg store.ListPendingReportsPageParams) ([]store.Report, error) {
-	var out []store.Report
-	for id := f.nextReportID - 1; id >= 1; id-- {
-		r, ok := f.reports[id]
-		if !ok || r.Status != "pending" || r.ID >= arg.ID {
-			continue
-		}
-		out = append(out, r)
-		if int32(len(out)) >= arg.Limit {
-			break
+type stubAuditReader struct{ entries []operation.AuditEntry }
+
+func (s *stubAuditReader) ListForActor(_ context.Context, _, beforeID int64, limit int) ([]operation.AuditEntry, error) {
+	var out []operation.AuditEntry
+	for _, e := range s.entries {
+		if e.ID < beforeID && len(out) < limit {
+			out = append(out, e)
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeOperationQuerier) ResolveReport(_ context.Context, arg store.ResolveReportParams) (store.Report, error) {
-	r, ok := f.reports[arg.ID]
-	if !ok {
-		return store.Report{}, pgx.ErrNoRows
+type stubAuditWriter struct{}
+
+func (stubAuditWriter) Record(context.Context, *int64, string, string, string, map[string]any) error {
+	return nil
+}
+
+type stubListings struct{ listing operation.Listing }
+
+func (s *stubListings) ByRef(_ context.Context, ref string) (operation.Listing, error) {
+	if s.listing.Ref != ref {
+		return operation.Listing{}, operation.ErrNotFound
 	}
-	r.Status = "resolved"
-	r.Resolution = arg.Resolution
-	r.ResolvedBy = arg.ResolvedBy
-	f.reports[arg.ID] = r
-	return r, nil
+	return s.listing, nil
 }
 
-func (f *fakeOperationQuerier) SetAgentStatusByID(_ context.Context, arg store.SetAgentStatusByIDParams) error {
-	f.agentStatus[arg.ID] = arg.Status
-	return nil
-}
-func (f *fakeOperationQuerier) SetBundleStatusByID(_ context.Context, arg store.SetBundleStatusByIDParams) error {
-	f.bundleStatus[arg.ID] = arg.Status
-	return nil
-}
-func (f *fakeOperationQuerier) SetSkillStatusByID(_ context.Context, arg store.SetSkillStatusByIDParams) error {
-	f.skillStatus[arg.ID] = arg.Status
-	return nil
-}
-func (f *fakeOperationQuerier) SetMCPServerStatusByID(_ context.Context, arg store.SetMCPServerStatusByIDParams) error {
-	f.mcpStatus[arg.ID] = arg.Status
-	return nil
+func (s *stubListings) ByID(_ context.Context, id int64) (operation.Listing, error) {
+	if s.listing.ID != id {
+		return operation.Listing{}, operation.ErrNotFound
+	}
+	return s.listing, nil
 }
 
-func doOperationRequest(h http.HandlerFunc, userID int64, method, path string, routeParams map[string]string, body any) *httptest.ResponseRecorder {
-	var bodyReader *strings.Reader
+func (s *stubListings) Stop(context.Context, int64) error { return nil }
+
+type stubDisabler struct{}
+
+func (stubDisabler) Disable(context.Context, string, int64) error { return nil }
+
+type stubAdmins struct{ admins map[int64]bool }
+
+func (s stubAdmins) IsAdmin(_ context.Context, userID int64) (bool, error) {
+	return s.admins[userID], nil
+}
+
+const testAdminID int64 = 1
+
+type operationFixture struct {
+	handlers *OperationHandlers
+	reports  *stubReports
+	audit    *stubAuditReader
+	listings *stubListings
+}
+
+func newOperationFixture() *operationFixture {
+	reports := &stubReports{byID: map[int64]operation.Report{}, nextID: 1}
+	audit := &stubAuditReader{}
+	listings := &stubListings{listing: operation.Listing{ID: 10, Ref: "some-bundle", Kind: "bundle", ResourceID: 77, SubscriberCount: 12}}
+	svc := operation.NewService(reports, audit, stubAuditWriter{}, listings, stubDisabler{}, stubAdmins{admins: map[int64]bool{testAdminID: true}})
+	return &operationFixture{handlers: NewOperationHandlers(svc), reports: reports, audit: audit, listings: listings}
+}
+
+func operationRequest(method, url string, userID int64, params map[string]string, body []byte) *http.Request {
+	var r *http.Request
 	if body != nil {
-		b, _ := json.Marshal(body)
-		bodyReader = strings.NewReader(string(b))
+		r = httptest.NewRequest(method, url, bytes.NewReader(body))
 	} else {
-		bodyReader = strings.NewReader("")
+		r = httptest.NewRequest(method, url, nil)
 	}
-	req := httptest.NewRequest(method, path, bodyReader)
-	req = req.WithContext(WithUserID(req.Context(), userID))
-	if len(routeParams) > 0 {
+	if len(params) > 0 {
 		rctx := chi.NewRouteContext()
-		for k, v := range routeParams {
+		for k, v := range params {
 			rctx.URLParams.Add(k, v)
 		}
-		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 	}
-	rr := httptest.NewRecorder()
-	h(rr, req)
-	return rr
+	return r.WithContext(WithUserID(r.Context(), userID))
 }
 
-func decodeEnvelope(t *testing.T, rr *httptest.ResponseRecorder) Envelope {
+func decodeReportDTO(t *testing.T, w *httptest.ResponseRecorder) reportDTO {
 	t.Helper()
 	var env Envelope
-	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
-		t.Fatalf("decode envelope: %v (%s)", err, rr.Body.String())
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
 	}
-	return env
+	dataBytes, _ := json.Marshal(env.Data)
+	var dto reportDTO
+	if err := json.Unmarshal(dataBytes, &dto); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	return dto
 }
 
-func TestSubmitReport_CreatesReportForExistingListing(t *testing.T) {
-	f := newFakeOperationQuerier()
-	f.listings[1] = store.MarketplaceListing{ID: 1, ListingRef: "shady-bundle", ResourceType: "bundle", ResourceID: 9, SubscriberCount: 3}
-	h := NewOperationHandlers(f)
+func TestSubmitReport_ResponseShape(t *testing.T) {
+	f := newOperationFixture()
 
-	rr := doOperationRequest(h.SubmitReport, 5, http.MethodPost, "/marketplace/listings/shady-bundle/report",
-		map[string]string{"ref": "shady-bundle"}, createReportRequest{Reason: "抄袭"})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	w := httptest.NewRecorder()
+	f.handlers.SubmitReport(w, operationRequest(http.MethodPost, "/marketplace/listings/some-bundle/report", 5,
+		map[string]string{"ref": "some-bundle"}, []byte(`{"reason":"抄袭"}`)))
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
 	}
-	if len(f.reports) != 1 {
-		t.Fatalf("expected 1 report stored, got %d", len(f.reports))
+	dto := decodeReportDTO(t, w)
+	if dto.ListingRef != "some-bundle" || dto.Status != string(operation.ReportPending) || dto.SubscriberCount != 12 {
+		t.Fatalf("unexpected report: %+v", dto)
 	}
-}
-
-func TestSubmitReport_UnknownListing_404(t *testing.T) {
-	f := newFakeOperationQuerier()
-	h := NewOperationHandlers(f)
-
-	rr := doOperationRequest(h.SubmitReport, 5, http.MethodPost, "/marketplace/listings/nope/report",
-		map[string]string{"ref": "nope"}, createReportRequest{Reason: "x"})
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", rr.Code)
-	}
-}
-
-func TestListPendingReports_ForbidsNonAdmin(t *testing.T) {
-	f := newFakeOperationQuerier()
-	f.users[1] = store.User{ID: 1, IsAdmin: false}
-	h := NewOperationHandlers(f)
-
-	rr := doOperationRequest(h.ListPendingReports, 1, http.MethodGet, "/moderation/reports", nil, nil)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", rr.Code, rr.Body.String())
+	if dto.Resolution != nil || dto.ResolvedAt != nil {
+		t.Fatalf("a pending report must send null for both resolution fields: %+v", dto)
 	}
 }
 
-func TestListPendingReports_AllowsAdmin(t *testing.T) {
-	f := newFakeOperationQuerier()
-	f.users[1] = store.User{ID: 1, IsAdmin: true}
-	f.listings[1] = store.MarketplaceListing{ID: 1, ListingRef: "shady-bundle"}
-	f.reports[1] = store.Report{ID: 1, ListingID: 1, Status: "pending", Reason: "抄袭"}
-	f.nextReportID = 2
-	h := NewOperationHandlers(f)
+func TestSubmitReport_MalformedBodyReturns400WithDetails(t *testing.T) {
+	f := newOperationFixture()
 
-	rr := doOperationRequest(h.ListPendingReports, 1, http.MethodGet, "/moderation/reports", nil, nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	w := httptest.NewRecorder()
+	f.handlers.SubmitReport(w, operationRequest(http.MethodPost, "/marketplace/listings/some-bundle/report", 5,
+		map[string]string{"ref": "some-bundle"}, []byte("{not json")))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
-	env := decodeEnvelope(t, rr)
-	page, ok := env.Data.(map[string]any)
-	if !ok {
-		t.Fatalf("unexpected data shape: %#v", env.Data)
-	}
-	items, _ := page["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("expected 1 pending report, got %d", len(items))
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	if len(env.Details) == 0 {
+		t.Fatal("expected field-level details")
 	}
 }
 
-func TestResolveReport_TakedownDisablesUnderlyingResourceAndListing(t *testing.T) {
-	f := newFakeOperationQuerier()
-	f.users[1] = store.User{ID: 1, IsAdmin: true}
-	f.listings[1] = store.MarketplaceListing{ID: 1, ListingRef: "shady-bundle", ResourceType: string(marketplace.KindBundle), ResourceID: 42, Distribution: 1, SubscriberCount: 56}
-	f.reports[1] = store.Report{ID: 1, ListingID: 1, Status: "pending"}
-	f.nextReportID = 2
-	h := NewOperationHandlers(f)
+func TestSubmitReport_UnknownListingReturns404(t *testing.T) {
+	f := newOperationFixture()
 
-	rr := doOperationRequest(h.ResolveReport, 1, http.MethodPost, "/moderation/reports/1/resolve",
-		map[string]string{"id": "1"}, resolveReportRequest{Action: "takedown"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if f.bundleStatus[42] != 0 {
-		t.Fatalf("expected underlying bundle disabled (status=0), got %d", f.bundleStatus[42])
-	}
-	if f.listings[1].Distribution != 3 {
-		t.Fatalf("expected listing distribution set to 3 (admin takedown), got %d", f.listings[1].Distribution)
-	}
-	if f.reports[1].Status != "resolved" {
-		t.Fatalf("expected report resolved, got %s", f.reports[1].Status)
-	}
-	if len(f.auditLogs) != 1 || f.auditLogs[0].Action != "moderation.takedown" {
-		t.Fatalf("expected a moderation.takedown audit log entry, got %#v", f.auditLogs)
+	w := httptest.NewRecorder()
+	f.handlers.SubmitReport(w, operationRequest(http.MethodPost, "/marketplace/listings/nope/report", 5,
+		map[string]string{"ref": "nope"}, []byte(`{"reason":"spam"}`)))
+
+	if w.Code != http.StatusNotFound || !containsCode(w.Body.String(), ErrListingNotFound) {
+		t.Fatalf("expected 404/70002, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestResolveReport_Dismiss_DoesNotTouchResource(t *testing.T) {
-	f := newFakeOperationQuerier()
-	f.users[1] = store.User{ID: 1, IsAdmin: true}
-	f.listings[1] = store.MarketplaceListing{ID: 1, ListingRef: "fine-bundle", ResourceType: string(marketplace.KindBundle), ResourceID: 42, Distribution: 1}
-	f.reports[1] = store.Report{ID: 1, ListingID: 1, Status: "pending"}
-	h := NewOperationHandlers(f)
+func TestModerationEndpoints_NonAdminReturns403(t *testing.T) {
+	f := newOperationFixture()
+	_, _ = f.reports.Create(context.Background(), 10, 5, "spam")
 
-	rr := doOperationRequest(h.ResolveReport, 1, http.MethodPost, "/moderation/reports/1/resolve",
-		map[string]string{"id": "1"}, resolveReportRequest{Action: "dismiss"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	w := httptest.NewRecorder()
+	f.handlers.ListPendingReports(w, operationRequest(http.MethodGet, "/moderation/reports", 5, nil, nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("list: status = %d, want 403: %s", w.Code, w.Body.String())
 	}
-	if _, touched := f.bundleStatus[42]; touched {
-		t.Fatalf("dismiss must not disable the underlying resource")
-	}
-	if f.listings[1].Distribution != 1 {
-		t.Fatalf("dismiss must not change listing distribution, got %d", f.listings[1].Distribution)
+
+	w = httptest.NewRecorder()
+	f.handlers.ResolveReport(w, operationRequest(http.MethodPost, "/moderation/reports/1/resolve", 5,
+		map[string]string{"id": "1"}, []byte(`{"action":"takedown"}`)))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("resolve: status = %d, want 403: %s", w.Code, w.Body.String())
 	}
 }
 
-func TestResolveReport_AlreadyResolved_Conflict(t *testing.T) {
-	f := newFakeOperationQuerier()
-	f.users[1] = store.User{ID: 1, IsAdmin: true}
-	f.reports[1] = store.Report{ID: 1, ListingID: 1, Status: "resolved"}
-	h := NewOperationHandlers(f)
+func TestListPendingReports_AdminSeesTheQueue(t *testing.T) {
+	f := newOperationFixture()
+	_, _ = f.reports.Create(context.Background(), 10, 5, "抄袭")
 
-	rr := doOperationRequest(h.ResolveReport, 1, http.MethodPost, "/moderation/reports/1/resolve",
-		map[string]string{"id": "1"}, resolveReportRequest{Action: "dismiss"})
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", rr.Code, rr.Body.String())
+	w := httptest.NewRecorder()
+	f.handlers.ListPendingReports(w, operationRequest(http.MethodGet, "/moderation/reports", testAdminID, nil, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	dataBytes, _ := json.Marshal(env.Data)
+	var page struct {
+		Items []reportDTO `json:"items"`
+	}
+	_ = json.Unmarshal(dataBytes, &page)
+	if len(page.Items) != 1 || page.Items[0].ListingRef != "some-bundle" {
+		t.Fatalf("unexpected queue: %+v", page.Items)
 	}
 }
 
-func TestListMyAuditLogs_ScopedToRequestingUser(t *testing.T) {
-	f := newFakeOperationQuerier()
-	_, _ = f.CreateAuditLog(context.Background(), store.CreateAuditLogParams{ActorUserID: pgtype.Int8{Valid: true, Int64: 1}, Action: "human_gate.approved", TargetType: "human_gate", TargetID: "1"})
-	_, _ = f.CreateAuditLog(context.Background(), store.CreateAuditLogParams{ActorUserID: pgtype.Int8{Valid: true, Int64: 2}, Action: "human_gate.approved", TargetType: "human_gate", TargetID: "2"})
-	h := NewOperationHandlers(f)
+func TestResolveReport_ResponseCarriesTheResolution(t *testing.T) {
+	f := newOperationFixture()
+	_, _ = f.reports.Create(context.Background(), 10, 5, "抄袭")
 
-	rr := doOperationRequest(h.ListMyAuditLogs, 1, http.MethodGet, "/audit-logs", nil, nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	w := httptest.NewRecorder()
+	f.handlers.ResolveReport(w, operationRequest(http.MethodPost, "/moderation/reports/1/resolve", testAdminID,
+		map[string]string{"id": "1"}, []byte(`{"action":"takedown"}`)))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
-	env := decodeEnvelope(t, rr)
-	page, _ := env.Data.(map[string]any)
-	items, _ := page["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("expected 1 log scoped to user 1, got %d", len(items))
+	dto := decodeReportDTO(t, w)
+	if dto.Status != string(operation.ReportResolved) || dto.Resolution == nil || *dto.Resolution != "takedown" {
+		t.Fatalf("unexpected report: %+v", dto)
+	}
+}
+
+func TestResolveReport_NonNumericIDReturns400(t *testing.T) {
+	f := newOperationFixture()
+
+	w := httptest.NewRecorder()
+	f.handlers.ResolveReport(w, operationRequest(http.MethodPost, "/moderation/reports/abc/resolve", testAdminID,
+		map[string]string{"id": "abc"}, []byte(`{"action":"dismiss"}`)))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListMyAuditLogs_ResponseShape(t *testing.T) {
+	f := newOperationFixture()
+	f.audit.entries = []operation.AuditEntry{
+		{ID: 2, Action: "human_gate.approved", TargetType: "human_gate", TargetID: "5", Detail: json.RawMessage(`{"node":"review"}`)},
+	}
+
+	w := httptest.NewRecorder()
+	f.handlers.ListMyAuditLogs(w, operationRequest(http.MethodGet, "/audit-logs", 5, nil, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	dataBytes, _ := json.Marshal(env.Data)
+	var page struct {
+		Items []auditLogDTO `json:"items"`
+	}
+	_ = json.Unmarshal(dataBytes, &page)
+	if len(page.Items) != 1 || page.Items[0].ID != "2" || page.Items[0].Action != "human_gate.approved" {
+		t.Fatalf("unexpected entries: %+v", page.Items)
+	}
+	// Detail is passed through as raw JSON: its shape belongs to whichever
+	// context wrote the entry, not to this one.
+	if string(page.Items[0].Detail) != `{"node":"review"}` {
+		t.Fatalf("detail should pass through untouched, got %s", page.Items[0].Detail)
+	}
+}
+
+func TestListMyAuditLogs_InvalidCursorReturns400(t *testing.T) {
+	f := newOperationFixture()
+
+	w := httptest.NewRecorder()
+	f.handlers.ListMyAuditLogs(w, operationRequest(http.MethodGet, "/audit-logs?cursor=!!!not-base64!!!", 5, nil, nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestOperationHandlers_RequireAuthenticatedUser(t *testing.T) {
+	f := newOperationFixture()
+	for name, handler := range map[string]http.HandlerFunc{
+		"audit-logs": f.handlers.ListMyAuditLogs, "report": f.handlers.SubmitReport,
+		"queue": f.handlers.ListPendingReports, "resolve": f.handlers.ResolveReport,
+	} {
+		w := httptest.NewRecorder()
+		handler(w, httptest.NewRequest(http.MethodGet, "/audit-logs", nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s without a user: status = %d, want 401", name, w.Code)
+		}
 	}
 }

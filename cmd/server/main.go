@@ -28,6 +28,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/agent"
 	"github.com/marcon0203/agentic-kit/internal/domain/bundle"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
+	"github.com/marcon0203/agentic-kit/internal/domain/operation"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	domainrun "github.com/marcon0203/agentic-kit/internal/domain/run"
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
@@ -156,7 +157,14 @@ func run() error {
 		ModelProviders:   api.NewModelProviderHandlers(queries, aesKey),
 		Usage:            api.NewUsageHandlers(queries),
 		Runs:             api.NewRunHandlers(runService),
-		Operations:       api.NewOperationHandlers(queries),
+		Operations: api.NewOperationHandlers(operation.NewService(
+			postgres.NewReportRepository(queries),
+			postgres.NewAuditLogReader(queries),
+			postgres.NewAuditLogWriter(queries),
+			postgres.NewModerationListings(queries),
+			postgres.NewResourceDisabler(queries),
+			postgres.NewAdminDirectory(queries),
+		)),
 	}
 
 	go api.RunGateTimeoutScanner(ctx, runService, logger)

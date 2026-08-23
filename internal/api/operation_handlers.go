@@ -1,44 +1,26 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
-	"math"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
-	"github.com/marcon0203/agentic-kit/internal/store"
+	"github.com/marcon0203/agentic-kit/internal/domain"
+	"github.com/marcon0203/agentic-kit/internal/domain/operation"
 )
 
-// OperationHandlers implements spec-18's 运营中心: browsing the requesting
-// user's own human-gate audit trail, submitting a report against a
-// marketplace listing, and — for is_admin users only — working the report
-// queue and taking a reported listing down.
-//
-// This is deliberately thin: aggregation over other services' own tables
-// (bundle_runs for the run list/cost report, which /runs and /usage/me
-// already serve), not a new business-logic owner. Audit log and the report
-// queue are the two pieces of state that didn't have an endpoint yet.
+// OperationHandlers is the HTTP transport for the 运营中心 context
+// (spec-18): a user's own audit trail, submitting a report, and the
+// admin-only report queue.
 type OperationHandlers struct {
-	Queries store.Querier
+	svc *operation.Service
 }
 
-func NewOperationHandlers(q store.Querier) *OperationHandlers {
-	return &OperationHandlers{Queries: q}
-}
-
-func startCursorDesc(raw string) int64 {
-	if raw == "" {
-		return math.MaxInt64
-	}
-	return decodeCursor(raw)
+func NewOperationHandlers(svc *operation.Service) *OperationHandlers {
+	return &OperationHandlers{svc: svc}
 }
 
 // ── Audit log ────────────────────────────────────────────────────────
@@ -52,54 +34,38 @@ type auditLogDTO struct {
 	CreatedAt  time.Time       `json:"created_at"`
 }
 
-func toAuditLogDTO(row store.AuditLog) auditLogDTO {
-	detail := row.Detail
-	if detail == nil {
-		detail = json.RawMessage("null")
-	}
+func toAuditLogDTO(e operation.AuditEntry) auditLogDTO {
 	return auditLogDTO{
-		ID: strconv.FormatInt(row.ID, 10), Action: row.Action, TargetType: row.TargetType,
-		TargetID: row.TargetID, Detail: detail, CreatedAt: row.CreatedAt.Time,
+		ID: strconv.FormatInt(e.ID, 10), Action: e.Action, TargetType: e.TargetType,
+		TargetID: e.TargetID, Detail: e.Detail, CreatedAt: e.CreatedAt,
 	}
 }
 
-// ListMyAuditLogs handles GET /audit-logs — the requesting user's own
-// actions (human gate approvals/rejections today; append-only, DB-trigger
-// enforced, see migration 0010).
+// ListMyAuditLogs handles GET /audit-logs.
 func (h *OperationHandlers) ListMyAuditLogs(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
 		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
 		return
 	}
-	limit := parseLimit(r.URL.Query().Get("limit"))
-	before := startCursorDesc(r.URL.Query().Get("cursor"))
 
-	rows, err := h.Queries.ListAuditLogsForActorPage(r.Context(), store.ListAuditLogsForActorPageParams{
-		ActorUserID: pgtype.Int8{Valid: true, Int64: userID}, ID: before, Limit: int32(limit + 1),
-	})
+	after, err := cursorAfterString(r)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid cursor")
 		return
 	}
 
-	hasMore := len(rows) > limit
-	if hasMore {
-		rows = rows[:limit]
+	page, err := h.svc.ListMyAuditLog(r.Context(), userID, domain.PageQuery{
+		Limit: parseLimit(r.URL.Query().Get("limit")), After: after,
+	})
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
 	}
-	items := make([]auditLogDTO, len(rows))
-	for i, row := range rows {
-		items[i] = toAuditLogDTO(row)
-	}
-	var nextCursor *string
-	if hasMore {
-		c := encodeCursor(rows[len(rows)-1].ID)
-		nextCursor = &c
-	}
-	writeJSON(w, r, http.StatusOK, NewPage(items, nextCursor, hasMore))
+	writeDomainPage(w, r, mapPage(page, toAuditLogDTO))
 }
 
-// ── Reports (submit) ─────────────────────────────────────────────────
+// ── Reports ──────────────────────────────────────────────────────────
 
 type createReportRequest struct {
 	Reason string `json:"reason"`
@@ -116,125 +82,75 @@ type reportDTO struct {
 	ResolvedAt      *time.Time `json:"resolved_at"`
 }
 
-// SubmitReport handles POST /marketplace/listings/{ref}/report. Any
-// authenticated user may report a listing; the report lands in the admin
-// moderation queue (GET /moderation/reports).
+func toReportDTO(v operation.ReportView) reportDTO {
+	dto := reportDTO{
+		ID: strconv.FormatInt(v.Report.ID, 10), ListingRef: v.Listing.Ref, Reason: v.Report.Reason,
+		Status: string(v.Report.Status), SubscriberCount: v.Listing.SubscriberCount,
+		CreatedAt: v.Report.CreatedAt, ResolvedAt: v.Report.ResolvedAt,
+	}
+	if v.Report.Resolution != nil {
+		res := string(*v.Report.Resolution)
+		dto.Resolution = &res
+	}
+	return dto
+}
+
+// SubmitReport handles POST /marketplace/listings/{ref}/report.
 func (h *OperationHandlers) SubmitReport(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
 		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
 		return
 	}
-	ref := chi.URLParam(r, "ref")
 
 	var req createReportRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Reason == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErrDetails(w, r, http.StatusBadRequest, ErrValidationFailed, "validation failed",
 			[]FieldError{{Field: "reason", Reason: "required"}})
 		return
 	}
 
-	listing, err := h.Queries.GetListingByListingRefLatestPublished(r.Context(), ref)
+	view, err := h.svc.SubmitReport(r.Context(), userID, chi.URLParam(r, "ref"), req.Reason)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeErr(w, r, http.StatusNotFound, ErrListingNotFound, "listing 不存在")
-			return
-		}
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
+		writeDomainErr(w, r, err)
 		return
 	}
-
-	report, err := h.Queries.CreateReport(r.Context(), store.CreateReportParams{
-		ListingID: listing.ID, ReporterUserID: userID, Reason: req.Reason,
-	})
-	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-		return
-	}
-	writeJSON(w, r, http.StatusCreated, reportToDTO(report, listing.ListingRef, listing.SubscriberCount))
-}
-
-func reportToDTO(rep store.Report, listingRef string, subscriberCount int32) reportDTO {
-	dto := reportDTO{
-		ID: strconv.FormatInt(rep.ID, 10), ListingRef: listingRef, Reason: rep.Reason,
-		Status: rep.Status, SubscriberCount: subscriberCount, CreatedAt: rep.CreatedAt.Time,
-	}
-	if rep.Resolution.Valid {
-		dto.Resolution = &rep.Resolution.String
-	}
-	if rep.ResolvedAt.Valid {
-		dto.ResolvedAt = &rep.ResolvedAt.Time
-	}
-	return dto
-}
-
-// ── Moderation (admin only) ─────────────────────────────────────────
-
-// requireAdmin returns 403 + 20003 unless the requesting user has
-// is_admin set. Mirrors RequireOwner's shape (auth_middleware.go).
-func (h *OperationHandlers) requireAdmin(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	userID, ok := UserIDFromContext(r.Context())
-	if !ok {
-		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
-		return 0, false
-	}
-	user, err := h.Queries.GetUserByID(r.Context(), userID)
-	if err != nil || !user.IsAdmin {
-		writeErr(w, r, http.StatusForbidden, ErrForbidden, "admin access required")
-		return 0, false
-	}
-	return userID, true
+	writeJSON(w, r, http.StatusCreated, toReportDTO(view))
 }
 
 // ListPendingReports handles GET /moderation/reports (admin only).
 func (h *OperationHandlers) ListPendingReports(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.requireAdmin(w, r); !ok {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
 		return
 	}
-	limit := parseLimit(r.URL.Query().Get("limit"))
-	before := startCursorDesc(r.URL.Query().Get("cursor"))
 
-	rows, err := h.Queries.ListPendingReportsPage(r.Context(), store.ListPendingReportsPageParams{
-		ID: before, Limit: int32(limit + 1),
+	after, err := cursorAfterString(r)
+	if err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid cursor")
+		return
+	}
+
+	page, err := h.svc.ListPendingReports(r.Context(), userID, domain.PageQuery{
+		Limit: parseLimit(r.URL.Query().Get("limit")), After: after,
 	})
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
+		writeDomainErr(w, r, err)
 		return
 	}
-	hasMore := len(rows) > limit
-	if hasMore {
-		rows = rows[:limit]
-	}
-
-	items := make([]reportDTO, len(rows))
-	for i, rep := range rows {
-		var listingRef string
-		var subscriberCount int32
-		if listing, err := h.Queries.GetListingByID(r.Context(), rep.ListingID); err == nil {
-			listingRef, subscriberCount = listing.ListingRef, listing.SubscriberCount
-		}
-		items[i] = reportToDTO(rep, listingRef, subscriberCount)
-	}
-	var nextCursor *string
-	if hasMore {
-		c := encodeCursor(rows[len(rows)-1].ID)
-		nextCursor = &c
-	}
-	writeJSON(w, r, http.StatusOK, NewPage(items, nextCursor, hasMore))
+	writeDomainPage(w, r, mapPage(page, toReportDTO))
 }
 
 type resolveReportRequest struct {
 	Action string `json:"action"` // dismiss | takedown
 }
 
-// ResolveReport handles POST /moderation/reports/{id}/resolve (admin
-// only). action=takedown disables the underlying resource — new run
-// creation and new subscriptions immediately hit the existing
-// "resource disabled" check (30002/run_authorizer.go), which is how
-// existing subscribers lose access; action=dismiss just closes the report.
+// ResolveReport handles POST /moderation/reports/{id}/resolve (admin only).
 func (h *OperationHandlers) ResolveReport(w http.ResponseWriter, r *http.Request) {
-	adminID, ok := h.requireAdmin(w, r)
+	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
+		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
@@ -242,75 +158,18 @@ func (h *OperationHandlers) ResolveReport(w http.ResponseWriter, r *http.Request
 		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid id")
 		return
 	}
+
 	var req resolveReportRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Action != "dismiss" && req.Action != "takedown") {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErrDetails(w, r, http.StatusBadRequest, ErrValidationFailed, "validation failed",
 			[]FieldError{{Field: "action", Reason: "must be one of dismiss, takedown"}})
 		return
 	}
 
-	report, err := h.Queries.GetReportByID(r.Context(), id)
+	view, err := h.svc.ResolveReport(r.Context(), userID, id, req.Action)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeErr(w, r, http.StatusNotFound, ErrReportNotFound, "举报不存在")
-			return
-		}
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
+		writeDomainErr(w, r, err)
 		return
 	}
-	if report.Status != "pending" {
-		writeErr(w, r, http.StatusConflict, ErrReportAlreadyResolved, "该举报已处理")
-		return
-	}
-
-	if req.Action == "takedown" {
-		listing, err := h.Queries.GetListingByID(r.Context(), report.ListingID)
-		if err != nil {
-			writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-			return
-		}
-		if err := h.disableUnderlyingResource(r.Context(), listing.ResourceType, listing.ResourceID); err != nil {
-			writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-			return
-		}
-		if err := h.Queries.SetListingDistribution(r.Context(), store.SetListingDistributionParams{ID: listing.ID, Distribution: 3}); err != nil {
-			writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-			return
-		}
-		detail, _ := json.Marshal(map[string]any{"listing_ref": listing.ListingRef, "subscriber_count": listing.SubscriberCount})
-		_, _ = h.Queries.CreateAuditLog(r.Context(), store.CreateAuditLogParams{
-			ActorUserID: pgtype.Int8{Valid: true, Int64: adminID}, Action: "moderation.takedown",
-			TargetType: "marketplace_listing", TargetID: strconv.FormatInt(listing.ID, 10), Detail: detail,
-		})
-	}
-
-	resolved, err := h.Queries.ResolveReport(r.Context(), store.ResolveReportParams{
-		ID: id, Resolution: pgtype.Text{Valid: true, String: req.Action}, ResolvedBy: pgtype.Int8{Valid: true, Int64: adminID},
-	})
-	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-		return
-	}
-
-	var listingRef string
-	var subscriberCount int32
-	if listing, err := h.Queries.GetListingByID(r.Context(), resolved.ListingID); err == nil {
-		listingRef, subscriberCount = listing.ListingRef, listing.SubscriberCount
-	}
-	writeJSON(w, r, http.StatusOK, reportToDTO(resolved, listingRef, subscriberCount))
-}
-
-func (h *OperationHandlers) disableUnderlyingResource(ctx context.Context, resourceType string, resourceID int64) error {
-	switch resourceType {
-	case string(marketplace.KindAgent):
-		return h.Queries.SetAgentStatusByID(ctx, store.SetAgentStatusByIDParams{ID: resourceID, Status: 0})
-	case string(marketplace.KindBundle):
-		return h.Queries.SetBundleStatusByID(ctx, store.SetBundleStatusByIDParams{ID: resourceID, Status: 0})
-	case string(marketplace.KindSkill):
-		return h.Queries.SetSkillStatusByID(ctx, store.SetSkillStatusByIDParams{ID: resourceID, Status: 0})
-	case string(marketplace.KindMCP):
-		return h.Queries.SetMCPServerStatusByID(ctx, store.SetMCPServerStatusByIDParams{ID: resourceID, Status: 0})
-	default:
-		return nil
-	}
+	writeJSON(w, r, http.StatusOK, toReportDTO(view))
 }
