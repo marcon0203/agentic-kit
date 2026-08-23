@@ -39,7 +39,12 @@ export function BundleListPage() {
   return (
     <div className="flex flex-col gap-space-8">
       <div className="flex flex-col gap-space-6">
-        <h1 className="text-headline-md text-ink-900">应用中心</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-headline-md text-ink-900">应用中心</h1>
+          <Button size="sm" onClick={() => navigate('/bundles/new')}>
+            新建 Bundle
+          </Button>
+        </div>
 
         {query.isLoading && <ListSkeleton />}
         {query.isError && <ErrorPanel message="Bundle 列表加载失败" onRetry={() => query.refetch()} />}

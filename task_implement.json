@@ -347,7 +347,7 @@
       "id": 17,
       "type": "fe_bundle_editor",
       "name": "Bundle 可视化编排",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-17-fe-bundle-editor.md",
       "depends_on": [
         15,

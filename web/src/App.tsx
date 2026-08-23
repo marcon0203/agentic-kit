@@ -13,6 +13,7 @@ import { ResourceCenterPage } from '@/pages/ResourceCenterPage'
 import { ModelProviderPage } from '@/pages/ModelProviderPage'
 import { MarketplacePage } from '@/pages/MarketplacePage'
 import { ListingDetailPage } from '@/pages/ListingDetailPage'
+import { BundleEditorPage } from '@/pages/BundleEditorPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -52,6 +53,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <AppsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/bundles/new"
+              element={
+                <ProtectedRoute>
+                  <BundleEditorPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/bundles/:ref/edit"
+              element={
+                <ProtectedRoute>
+                  <BundleEditorPage />
                 </ProtectedRoute>
               }
             />
