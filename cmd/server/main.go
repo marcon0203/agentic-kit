@@ -19,6 +19,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/auth"
 	"github.com/marcon0203/agentic-kit/internal/config"
 	"github.com/marcon0203/agentic-kit/internal/crypto"
+	"github.com/marcon0203/agentic-kit/internal/dslschema"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
 
@@ -52,6 +53,11 @@ func run() error {
 		return fmt.Errorf("decode CREDENTIAL_AES_KEY: %w", err)
 	}
 
+	agentValidator, err := dslschema.NewAgentValidator()
+	if err != nil {
+		return fmt.Errorf("compile agent schema: %w", err)
+	}
+
 	queries := store.New(pool)
 	routerCfg := api.RouterConfig{
 		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
@@ -60,6 +66,7 @@ func run() error {
 		Tokens:           auth.NewTokenIssuer(cfg.JWTSecret),
 		APIKeys:          api.NewPostgresAPIKeyLookup(queries),
 		Resources:        api.NewResourceHandlers(queries, api.NewHTTPReachabilityChecker(), aesKey),
+		Agents:           api.NewAgentHandlers(queries, agentValidator, api.NewResourceRefChecker(queries)),
 	}
 
 	handler := api.NewRouter(logger, routerCfg)

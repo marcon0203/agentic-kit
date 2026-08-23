@@ -113,6 +113,22 @@ func (q *Queries) GetMCPServerByIDForOwner(ctx context.Context, arg GetMCPServer
 	return i, err
 }
 
+const getMCPServerLatestStatusByRef = `-- name: GetMCPServerLatestStatusByRef :one
+SELECT status FROM mcp_servers WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1
+`
+
+type GetMCPServerLatestStatusByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Ref         string `json:"ref"`
+}
+
+func (q *Queries) GetMCPServerLatestStatusByRef(ctx context.Context, arg GetMCPServerLatestStatusByRefParams) (int16, error) {
+	row := q.db.QueryRow(ctx, getMCPServerLatestStatusByRef, arg.OwnerUserID, arg.Ref)
+	var status int16
+	err := row.Scan(&status)
+	return status, err
+}
+
 const listMCPServersForOwnerPage = `-- name: ListMCPServersForOwnerPage :many
 SELECT id, owner_user_id, ref, version, config, display_meta, status, health, immutable, created_at FROM mcp_servers WHERE owner_user_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3
 `

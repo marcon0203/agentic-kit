@@ -21,3 +21,6 @@ UPDATE skills SET immutable = true WHERE id = $1;
 SELECT owner_user_id, agent_ref, version FROM agents
 WHERE owner_user_id = $1
   AND (definition->'capabilities'->'skills') ? $2::text;
+
+-- name: GetSkillLatestStatusByRef :one
+SELECT status FROM skills WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1;

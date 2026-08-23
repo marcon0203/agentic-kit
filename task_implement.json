@@ -123,7 +123,7 @@
       "id": 6,
       "type": "agent_center",
       "name": "Agent 定义与版本管理",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-06-agent-center.md",
       "depends_on": [
         5

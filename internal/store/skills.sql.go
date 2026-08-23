@@ -109,6 +109,22 @@ func (q *Queries) GetSkillByIDForOwner(ctx context.Context, arg GetSkillByIDForO
 	return i, err
 }
 
+const getSkillLatestStatusByRef = `-- name: GetSkillLatestStatusByRef :one
+SELECT status FROM skills WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1
+`
+
+type GetSkillLatestStatusByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Ref         string `json:"ref"`
+}
+
+func (q *Queries) GetSkillLatestStatusByRef(ctx context.Context, arg GetSkillLatestStatusByRefParams) (int16, error) {
+	row := q.db.QueryRow(ctx, getSkillLatestStatusByRef, arg.OwnerUserID, arg.Ref)
+	var status int16
+	err := row.Scan(&status)
+	return status, err
+}
+
 const listSkillsForOwnerPage = `-- name: ListSkillsForOwnerPage :many
 SELECT id, owner_user_id, ref, version, config, display_meta, status, immutable, created_at FROM skills WHERE owner_user_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3
 `

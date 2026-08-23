@@ -363,6 +363,21 @@ func decodeCursor(cursor string) int64 {
 	return id
 }
 
+// encodeCursorString/decodeCursorString are the string-keyed counterpart to
+// encodeCursor/decodeCursor, used where the keyset is a string (Agent
+// list's agent_ref) rather than a numeric ID.
+func encodeCursorString(s string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(s))
+}
+
+func decodeCursorString(cursor string) (string, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return "", err
+	}
+	return string(decoded), nil
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

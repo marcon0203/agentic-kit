@@ -16,6 +16,33 @@ SELECT * FROM agents
 WHERE owner_user_id = $1
 ORDER BY agent_ref, created_at DESC;
 
+-- name: ListAgentsForOwnerLatestPage :many
+-- One row per agent_ref (its most recently created version), per
+-- api/openapi.yaml's "每个 ref 返回最新启用版本" list contract.
+SELECT DISTINCT ON (agent_ref) *
+FROM agents
+WHERE owner_user_id = $1 AND agent_ref > $2
+ORDER BY agent_ref ASC, created_at DESC
+LIMIT $3;
+
+-- name: ListAgentVersionsForOwner :many
+SELECT * FROM agents
+WHERE owner_user_id = $1 AND agent_ref = $2
+ORDER BY created_at DESC;
+
+-- name: CountActiveSubscribedListingsForAgentRef :one
+SELECT count(*) FROM marketplace_listings ml
+JOIN agents a ON a.id = ml.resource_id
+WHERE ml.resource_type = 'agent' AND a.owner_user_id = $1 AND a.agent_ref = $2 AND ml.subscriber_count > 0;
+
+-- name: FindBundlesReferencingAgentRef :many
+SELECT bundle_ref, version FROM bundles
+WHERE owner_user_id = $1
+  AND definition->'agents' @> jsonb_build_array(jsonb_build_object('ref', $2::text));
+
+-- name: DeleteAgentsByRef :exec
+DELETE FROM agents WHERE owner_user_id = $1 AND agent_ref = $2;
+
 -- name: GetAgentDisplayForSubscriber :one
 SELECT id, owner_user_id, agent_ref, version, display_meta, status, created_at
 FROM agents

@@ -11,6 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveSubscribedListingsForAgentRef = `-- name: CountActiveSubscribedListingsForAgentRef :one
+SELECT count(*) FROM marketplace_listings ml
+JOIN agents a ON a.id = ml.resource_id
+WHERE ml.resource_type = 'agent' AND a.owner_user_id = $1 AND a.agent_ref = $2 AND ml.subscriber_count > 0
+`
+
+type CountActiveSubscribedListingsForAgentRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	AgentRef    string `json:"agent_ref"`
+}
+
+func (q *Queries) CountActiveSubscribedListingsForAgentRef(ctx context.Context, arg CountActiveSubscribedListingsForAgentRefParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveSubscribedListingsForAgentRef, arg.OwnerUserID, arg.AgentRef)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAgent = `-- name: CreateAgent :one
 
 INSERT INTO agents (owner_user_id, agent_ref, version, definition, display_meta)
@@ -59,6 +77,56 @@ DELETE FROM agents WHERE id = $1
 func (q *Queries) DeleteAgent(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, deleteAgent, id)
 	return err
+}
+
+const deleteAgentsByRef = `-- name: DeleteAgentsByRef :exec
+DELETE FROM agents WHERE owner_user_id = $1 AND agent_ref = $2
+`
+
+type DeleteAgentsByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	AgentRef    string `json:"agent_ref"`
+}
+
+func (q *Queries) DeleteAgentsByRef(ctx context.Context, arg DeleteAgentsByRefParams) error {
+	_, err := q.db.Exec(ctx, deleteAgentsByRef, arg.OwnerUserID, arg.AgentRef)
+	return err
+}
+
+const findBundlesReferencingAgentRef = `-- name: FindBundlesReferencingAgentRef :many
+SELECT bundle_ref, version FROM bundles
+WHERE owner_user_id = $1
+  AND definition->'agents' @> jsonb_build_array(jsonb_build_object('ref', $2::text))
+`
+
+type FindBundlesReferencingAgentRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Column2     string `json:"column_2"`
+}
+
+type FindBundlesReferencingAgentRefRow struct {
+	BundleRef string `json:"bundle_ref"`
+	Version   string `json:"version"`
+}
+
+func (q *Queries) FindBundlesReferencingAgentRef(ctx context.Context, arg FindBundlesReferencingAgentRefParams) ([]FindBundlesReferencingAgentRefRow, error) {
+	rows, err := q.db.Query(ctx, findBundlesReferencingAgentRef, arg.OwnerUserID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FindBundlesReferencingAgentRefRow{}
+	for rows.Next() {
+		var i FindBundlesReferencingAgentRefRow
+		if err := rows.Scan(&i.BundleRef, &i.Version); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getAgentDisplayForSubscriber = `-- name: GetAgentDisplayForSubscriber :one
@@ -120,6 +188,47 @@ func (q *Queries) GetAgentForOwner(ctx context.Context, arg GetAgentForOwnerPara
 	return i, err
 }
 
+const listAgentVersionsForOwner = `-- name: ListAgentVersionsForOwner :many
+SELECT id, owner_user_id, agent_ref, version, definition, display_meta, status, immutable, created_at FROM agents
+WHERE owner_user_id = $1 AND agent_ref = $2
+ORDER BY created_at DESC
+`
+
+type ListAgentVersionsForOwnerParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	AgentRef    string `json:"agent_ref"`
+}
+
+func (q *Queries) ListAgentVersionsForOwner(ctx context.Context, arg ListAgentVersionsForOwnerParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAgentVersionsForOwner, arg.OwnerUserID, arg.AgentRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.AgentRef,
+			&i.Version,
+			&i.Definition,
+			&i.DisplayMeta,
+			&i.Status,
+			&i.Immutable,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentsForOwner = `-- name: ListAgentsForOwner :many
 SELECT id, owner_user_id, agent_ref, version, definition, display_meta, status, immutable, created_at FROM agents
 WHERE owner_user_id = $1
@@ -128,6 +237,52 @@ ORDER BY agent_ref, created_at DESC
 
 func (q *Queries) ListAgentsForOwner(ctx context.Context, ownerUserID int64) ([]Agent, error) {
 	rows, err := q.db.Query(ctx, listAgentsForOwner, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.AgentRef,
+			&i.Version,
+			&i.Definition,
+			&i.DisplayMeta,
+			&i.Status,
+			&i.Immutable,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentsForOwnerLatestPage = `-- name: ListAgentsForOwnerLatestPage :many
+SELECT DISTINCT ON (agent_ref) id, owner_user_id, agent_ref, version, definition, display_meta, status, immutable, created_at
+FROM agents
+WHERE owner_user_id = $1 AND agent_ref > $2
+ORDER BY agent_ref ASC, created_at DESC
+LIMIT $3
+`
+
+type ListAgentsForOwnerLatestPageParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	AgentRef    string `json:"agent_ref"`
+	Limit       int32  `json:"limit"`
+}
+
+// One row per agent_ref (its most recently created version), per
+// api/openapi.yaml's "每个 ref 返回最新启用版本" list contract.
+func (q *Queries) ListAgentsForOwnerLatestPage(ctx context.Context, arg ListAgentsForOwnerLatestPageParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAgentsForOwnerLatestPage, arg.OwnerUserID, arg.AgentRef, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

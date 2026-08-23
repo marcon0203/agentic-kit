@@ -109,6 +109,22 @@ func (q *Queries) GetToolByIDForOwner(ctx context.Context, arg GetToolByIDForOwn
 	return i, err
 }
 
+const getToolLatestStatusByRef = `-- name: GetToolLatestStatusByRef :one
+SELECT status FROM tools WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1
+`
+
+type GetToolLatestStatusByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Ref         string `json:"ref"`
+}
+
+func (q *Queries) GetToolLatestStatusByRef(ctx context.Context, arg GetToolLatestStatusByRefParams) (int16, error) {
+	row := q.db.QueryRow(ctx, getToolLatestStatusByRef, arg.OwnerUserID, arg.Ref)
+	var status int16
+	err := row.Scan(&status)
+	return status, err
+}
+
 const listToolsForOwnerPage = `-- name: ListToolsForOwnerPage :many
 SELECT id, owner_user_id, ref, version, config, display_meta, status, immutable, created_at FROM tools WHERE owner_user_id = $1 AND id > $2 ORDER BY id ASC LIMIT $3
 `

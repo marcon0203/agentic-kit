@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	CountActiveSubscribedListingsForAgentRef(ctx context.Context, arg CountActiveSubscribedListingsForAgentRefParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	// Owner-view and subscriber-view queries are kept physically separate so the
 	// subscriber path can never accidentally SELECT `definition` (see
@@ -26,6 +27,7 @@ type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DecrementListingSubscriberCount(ctx context.Context, id int64) error
 	DeleteAgent(ctx context.Context, id int64) error
+	DeleteAgentsByRef(ctx context.Context, arg DeleteAgentsByRefParams) error
 	DeleteBundle(ctx context.Context, id int64) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
@@ -35,6 +37,7 @@ type Querier interface {
 	FindAgentsReferencingMCPServerRef(ctx context.Context, arg FindAgentsReferencingMCPServerRefParams) ([]FindAgentsReferencingMCPServerRefRow, error)
 	FindAgentsReferencingSkillRef(ctx context.Context, arg FindAgentsReferencingSkillRefParams) ([]FindAgentsReferencingSkillRefRow, error)
 	FindAgentsReferencingToolRef(ctx context.Context, arg FindAgentsReferencingToolRefParams) ([]FindAgentsReferencingToolRefRow, error)
+	FindBundlesReferencingAgentRef(ctx context.Context, arg FindBundlesReferencingAgentRefParams) ([]FindBundlesReferencingAgentRefRow, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetAgentDisplayForSubscriber(ctx context.Context, id int64) (GetAgentDisplayForSubscriberRow, error)
 	GetAgentForOwner(ctx context.Context, arg GetAgentForOwnerParams) (Agent, error)
@@ -43,17 +46,25 @@ type Querier interface {
 	GetBundleRun(ctx context.Context, id string) (BundleRun, error)
 	GetIdempotencyKey(ctx context.Context, key string) (IdempotencyKey, error)
 	GetKnowledgeBaseByIDForOwner(ctx context.Context, arg GetKnowledgeBaseByIDForOwnerParams) (KnowledgeBasis, error)
+	GetKnowledgeBaseLatestStatusByRef(ctx context.Context, arg GetKnowledgeBaseLatestStatusByRefParams) (int16, error)
 	GetListingByRefVersion(ctx context.Context, arg GetListingByRefVersionParams) (MarketplaceListing, error)
 	GetMCPServerByIDForOwner(ctx context.Context, arg GetMCPServerByIDForOwnerParams) (McpServer, error)
+	GetMCPServerLatestStatusByRef(ctx context.Context, arg GetMCPServerLatestStatusByRefParams) (int16, error)
 	GetModelProviderCredentials(ctx context.Context, arg GetModelProviderCredentialsParams) ([]byte, error)
 	GetSkillByIDForOwner(ctx context.Context, arg GetSkillByIDForOwnerParams) (Skill, error)
+	GetSkillLatestStatusByRef(ctx context.Context, arg GetSkillLatestStatusByRefParams) (int16, error)
 	GetToolByIDForOwner(ctx context.Context, arg GetToolByIDForOwnerParams) (Tool, error)
+	GetToolLatestStatusByRef(ctx context.Context, arg GetToolLatestStatusByRefParams) (int16, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	IncrementListingSubscriberCount(ctx context.Context, id int64) error
 	InsertBundleRunEvent(ctx context.Context, arg InsertBundleRunEventParams) (BundleRunEvent, error)
 	ListAPIKeysForOwner(ctx context.Context, ownerUserID int64) ([]ListAPIKeysForOwnerRow, error)
+	ListAgentVersionsForOwner(ctx context.Context, arg ListAgentVersionsForOwnerParams) ([]Agent, error)
 	ListAgentsForOwner(ctx context.Context, ownerUserID int64) ([]Agent, error)
+	// One row per agent_ref (its most recently created version), per
+	// api/openapi.yaml's "每个 ref 返回最新启用版本" list contract.
+	ListAgentsForOwnerLatestPage(ctx context.Context, arg ListAgentsForOwnerLatestPageParams) ([]Agent, error)
 	ListBundleRunEventsAfter(ctx context.Context, arg ListBundleRunEventsAfterParams) ([]BundleRunEvent, error)
 	ListBundleRunEventsAfterExternal(ctx context.Context, arg ListBundleRunEventsAfterExternalParams) ([]BundleRunEvent, error)
 	ListBundleRunsByBundleAndStatus(ctx context.Context, arg ListBundleRunsByBundleAndStatusParams) ([]BundleRun, error)
