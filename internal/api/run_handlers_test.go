@@ -7,303 +7,138 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/marcon0203/agentic-kit/internal/store"
+	"github.com/marcon0203/agentic-kit/internal/domain/run"
 )
 
-// fakeRunHandlersQuerier is an in-memory store.Querier covering exactly
-// what run_handlers.go / run_gate_handlers.go call.
-type fakeRunHandlersQuerier struct {
-	store.Querier
+// The run rules — the launch chain, who may approve a gate, what a
+// subscriber may see — are tested against the service in
+// internal/domain/run. What is left here is transport, and above all the
+// stream: NDJSON framing, the headers nginx needs, resume-by-after_id, and
+// closing on a terminal run.
 
-	runs       map[string]store.BundleRun
-	bundles    map[int64]store.Bundle
-	gates      map[int64]store.HumanGate
-	nextGateID int64
-	audits     []store.AuditLog
-	events     []store.BundleRunEvent
-
-	cancelRequested map[string]bool
+type stubRunRepo struct {
+	runs map[string]run.Run
 }
 
-func newFakeRunHandlersQuerier() *fakeRunHandlersQuerier {
-	return &fakeRunHandlersQuerier{
-		runs: map[string]store.BundleRun{}, bundles: map[int64]store.Bundle{},
-		gates: map[int64]store.HumanGate{}, nextGateID: 1,
-		cancelRequested: map[string]bool{},
+func (s *stubRunRepo) Create(_ context.Context, r run.Run) (run.Run, error) {
+	r.CreatedAt = time.Now()
+	s.runs[r.ID] = r
+	return r, nil
+}
+
+func (s *stubRunRepo) Get(_ context.Context, runID string) (run.Run, error) {
+	r, ok := s.runs[runID]
+	if !ok {
+		return run.Run{}, run.ErrNotFound
 	}
+	return r, nil
 }
 
-func (f *fakeRunHandlersQuerier) GetBundleRun(_ context.Context, id string) (store.BundleRun, error) {
-	if r, ok := f.runs[id]; ok {
-		return r, nil
-	}
-	return store.BundleRun{}, pgx.ErrNoRows
-}
+func (s *stubRunRepo) ListPage(context.Context, run.ListQuery) ([]run.Run, error)     { return nil, nil }
+func (s *stubRunRepo) UpdateStatus(context.Context, string, run.Status, string) error { return nil }
+func (s *stubRunRepo) MarkCancelRequested(context.Context, string) error              { return nil }
+func (s *stubRunRepo) AddUsage(context.Context, string, int64, float64) error         { return nil }
 
-func (f *fakeRunHandlersQuerier) GetBundleByID(_ context.Context, id int64) (store.Bundle, error) {
-	if b, ok := f.bundles[id]; ok {
-		return b, nil
-	}
-	return store.Bundle{}, pgx.ErrNoRows
-}
+type stubEventStore struct{ events []run.Event }
 
-func (f *fakeRunHandlersQuerier) MarkBundleRunCancelRequested(_ context.Context, id string) error {
-	f.cancelRequested[id] = true
+func (s *stubEventStore) Append(_ context.Context, ev run.Event) error {
+	s.events = append(s.events, ev)
 	return nil
 }
 
-func (f *fakeRunHandlersQuerier) ListBundleRunEventsAfter(_ context.Context, arg store.ListBundleRunEventsAfterParams) ([]store.BundleRunEvent, error) {
-	var out []store.BundleRunEvent
-	for _, ev := range f.events {
-		if ev.RunID == arg.RunID && ev.ID > arg.ID {
-			out = append(out, ev)
+func (s *stubEventStore) ListAfter(_ context.Context, runID string, afterID int64, includeInternal bool) ([]run.Event, error) {
+	var out []run.Event
+	for _, ev := range s.events {
+		if ev.RunID != runID || ev.ID <= afterID {
+			continue
 		}
+		if ev.IsInternal && !includeInternal {
+			continue
+		}
+		out = append(out, ev)
 	}
 	return out, nil
 }
 
-func (f *fakeRunHandlersQuerier) ListBundleRunEventsAfterExternal(_ context.Context, arg store.ListBundleRunEventsAfterExternalParams) ([]store.BundleRunEvent, error) {
-	var out []store.BundleRunEvent
-	for _, ev := range f.events {
-		if ev.RunID == arg.RunID && ev.ID > arg.ID && !ev.IsInternal {
-			out = append(out, ev)
-		}
-	}
-	return out, nil
+type stubResolver struct{ bundle run.ResolvedBundle }
+
+func (s *stubResolver) Resolve(context.Context, int64, string, string) (run.ResolvedBundle, error) {
+	return s.bundle, nil
 }
 
-func (f *fakeRunHandlersQuerier) GetPendingHumanGateForRunNode(_ context.Context, arg store.GetPendingHumanGateForRunNodeParams) (store.HumanGate, error) {
-	for i := f.nextGateID - 1; i >= 1; i-- {
-		g, ok := f.gates[i]
-		if ok && g.RunID == arg.RunID && g.Node == arg.Node && g.Status == "pending" {
-			return g, nil
-		}
-	}
-	return store.HumanGate{}, pgx.ErrNoRows
+func (s *stubResolver) LoadForRun(context.Context, int64) (run.ResolvedBundle, error) {
+	return s.bundle, nil
 }
 
-func (f *fakeRunHandlersQuerier) ResolveHumanGate(_ context.Context, arg store.ResolveHumanGateParams) (store.HumanGate, error) {
-	g, ok := f.gates[arg.ID]
-	if !ok || g.Status != "pending" {
-		return store.HumanGate{}, pgx.ErrNoRows
-	}
-	g.Status = arg.Status
-	g.ResolvedBy = arg.ResolvedBy
-	g.Comment = arg.Comment
-	f.gates[arg.ID] = g
-	return g, nil
+type stubDeps struct{}
+
+func (stubDeps) Check(context.Context, int64, map[string]any) (run.DependencyStatus, error) {
+	return run.DependenciesOK, nil
 }
 
-func (f *fakeRunHandlersQuerier) InsertBundleRunEvent(_ context.Context, arg store.InsertBundleRunEventParams) (store.BundleRunEvent, error) {
-	ev := store.BundleRunEvent{ID: int64(len(f.events) + 1), RunID: arg.RunID, Type: arg.Type, Node: arg.Node, Payload: arg.Payload, IsInternal: arg.IsInternal}
-	f.events = append(f.events, ev)
-	return ev, nil
+type stubOrchestrator struct{}
+
+func (stubOrchestrator) Prepare(context.Context, string, run.ResolvedBundle, map[string]run.GateConfig) (run.Execution, error) {
+	return nil, nil
+}
+func (stubOrchestrator) Cancel(string) bool { return true }
+
+type stubGates struct{}
+
+func (stubGates) CreatePending(context.Context, string, run.GateConfig) (run.Gate, error) {
+	return run.Gate{}, nil
+}
+func (stubGates) FindPending(context.Context, string, string) (run.Gate, error) {
+	return run.Gate{}, run.ErrNotFound
+}
+func (stubGates) Resolve(context.Context, int64, run.Decision, *int64) error { return nil }
+func (stubGates) ListPastTimeout(context.Context) ([]run.Gate, error)        { return nil, nil }
+
+type stubNotifier struct{}
+
+func (stubNotifier) Notify(int64, run.Decision) bool { return true }
+
+type stubAudit struct{}
+
+func (stubAudit) Record(context.Context, *int64, string, string, string, map[string]any) error {
+	return nil
 }
 
-func (f *fakeRunHandlersQuerier) CreateAuditLog(_ context.Context, arg store.CreateAuditLogParams) (store.AuditLog, error) {
-	row := store.AuditLog{ID: int64(len(f.audits) + 1), ActorUserID: arg.ActorUserID, Action: arg.Action, TargetType: arg.TargetType, TargetID: arg.TargetID, Detail: arg.Detail}
-	f.audits = append(f.audits, row)
-	return row, nil
+type stubIDs struct{}
+
+func (stubIDs) NewRunID() (string, error) { return "run-0000000000000001", nil }
+
+type runFixture struct {
+	handlers *RunHandlers
+	runs     *stubRunRepo
+	events   *stubEventStore
+	resolver *stubResolver
 }
 
-func (f *fakeRunHandlersQuerier) addGate(id int64, runID, node, status string) store.HumanGate {
-	g := store.HumanGate{ID: id, RunID: runID, Node: node, Status: status, OnTimeout: "abort", ApproverRoles: []byte("[]")}
-	f.gates[id] = g
-	if id >= f.nextGateID {
-		f.nextGateID = id + 1
-	}
-	return g
+func newRunFixture() *runFixture {
+	runs := &stubRunRepo{runs: map[string]run.Run{}}
+	events := &stubEventStore{}
+	resolver := &stubResolver{}
+	svc := run.NewService(runs, events, resolver, stubDeps{}, stubOrchestrator{}, stubGates{}, stubNotifier{}, stubAudit{}, stubIDs{})
+	return &runFixture{handlers: NewRunHandlers(svc), runs: runs, events: events, resolver: resolver}
 }
 
-func newTestRunHandlers(f *fakeRunHandlersQuerier) *RunHandlers {
-	engine := NewRunEngine(f, nil, newGateRegistry(), NewResourceRefChecker(f))
-	return NewRunHandlers(f, engine)
-}
-
-func withUser(r *http.Request, userID int64) *http.Request {
-	return r.WithContext(WithUserID(r.Context(), userID))
-}
-
-// ── Get: shared_state black-box filtering ───────────────────────────
-
-func TestRunHandlers_Get_FiltersSharedStateForSubscriber(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	sharedState, _ := json.Marshal(map[string]any{"final_answer": "42", "internal_scratch": "secret prompt"})
-	displayMeta, _ := json.Marshal(map[string]any{"io_description": map[string]any{"outputs": []string{"final_answer"}}})
-	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 99, BundleRef: "b1", Version: "v1", DisplayMeta: displayMeta}
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 30, Status: "finished", SharedState: sharedState, CreatedAt: pgtype.Timestamptz{Valid: true}}
-
-	h := newTestRunHandlers(f)
-	req := httptest.NewRequest(http.MethodGet, "/runs/run-1", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "run-1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	req = withUser(req, 30)
-
-	w := httptest.NewRecorder()
-	h.Get(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+func runRequest(method, url, runID string, userID int64, body []byte) *http.Request {
+	var r *http.Request
+	if body != nil {
+		r = httptest.NewRequest(method, url, bytes.NewReader(body))
+	} else {
+		r = httptest.NewRequest(method, url, nil)
 	}
-	var body struct {
-		Data struct {
-			SharedState map[string]any `json:"shared_state"`
-			IsOwner     bool           `json:"is_owner"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if _, leaked := body.Data.SharedState["internal_scratch"]; leaked {
-		t.Fatalf("internal_scratch leaked to subscriber: %+v", body.Data.SharedState)
-	}
-	if body.Data.SharedState["final_answer"] != "42" {
-		t.Fatalf("expected declared output to be visible, got %+v", body.Data.SharedState)
-	}
-	if body.Data.IsOwner {
-		t.Fatal("expected is_owner=false for a subscriber, so the frontend renders black-box chrome")
-	}
-}
-
-func TestRunHandlers_Get_OwnerSeesFullSharedState(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	sharedState, _ := json.Marshal(map[string]any{"final_answer": "42", "internal_scratch": "secret prompt"})
-	displayMeta, _ := json.Marshal(map[string]any{"io_description": map[string]any{"outputs": []string{"final_answer"}}})
-	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 99, BundleRef: "b1", Version: "v1", DisplayMeta: displayMeta}
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 99, Status: "finished", SharedState: sharedState, CreatedAt: pgtype.Timestamptz{Valid: true}}
-
-	h := newTestRunHandlers(f)
-	req := httptest.NewRequest(http.MethodGet, "/runs/run-1", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "run-1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	req = withUser(req, 99)
-
-	w := httptest.NewRecorder()
-	h.Get(w, req)
-
-	var body struct {
-		Data struct {
-			SharedState map[string]any `json:"shared_state"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body.Data.SharedState["internal_scratch"] != "secret prompt" {
-		t.Fatalf("owner should see full shared_state, got %+v", body.Data.SharedState)
-	}
-}
-
-// ── Cancel ───────────────────────────────────────────────────────────
-
-func TestRunHandlers_Cancel_AlreadyFinished(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 5, BundleRef: "b1", Version: "v1", DisplayMeta: []byte("{}")}
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: "finished", SharedState: []byte("{}"), CreatedAt: pgtype.Timestamptz{Valid: true}}
-
-	h := newTestRunHandlers(f)
-	req := httptest.NewRequest(http.MethodPost, "/runs/run-1/cancel", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "run-1")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	req = withUser(req, 5)
-
-	w := httptest.NewRecorder()
-	h.Cancel(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-// ── ResolveGate ──────────────────────────────────────────────────────
-
-func gateRequest(t *testing.T, runID string, userID int64, body map[string]any) *http.Request {
-	t.Helper()
-	b, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/runs/"+runID+"/gate", bytes.NewReader(b))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", runID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	return withUser(req, userID)
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+	return r.WithContext(WithUserID(r.Context(), userID))
 }
-
-func TestRunHandlers_ResolveGate_ApproverForbidden(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", TriggeredBy: 5, Status: "running"}
-	h := newTestRunHandlers(f)
-
-	req := gateRequest(t, "run-1", 999, map[string]any{"node": "review", "approved": true})
-	w := httptest.NewRecorder()
-	h.ResolveGate(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestRunHandlers_ResolveGate_RunAlreadyFinished(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", TriggeredBy: 5, Status: "finished"}
-	h := newTestRunHandlers(f)
-
-	req := gateRequest(t, "run-1", 5, map[string]any{"node": "review", "approved": true})
-	w := httptest.NewRecorder()
-	h.ResolveGate(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestRunHandlers_ResolveGate_AlreadyResolved(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", TriggeredBy: 5, Status: "running"}
-	h := newTestRunHandlers(f)
-
-	req := gateRequest(t, "run-1", 5, map[string]any{"node": "review", "approved": true})
-	w := httptest.NewRecorder()
-	h.ResolveGate(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409 (no pending gate), got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestRunHandlers_ResolveGate_Success(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", TriggeredBy: 5, Status: "running"}
-	f.addGate(1, "run-1", "review", "pending")
-	h := newTestRunHandlers(f)
-
-	waitCh := h.Engine.Gates.register(1)
-
-	req := gateRequest(t, "run-1", 5, map[string]any{"node": "review", "approved": true})
-	w := httptest.NewRecorder()
-	h.ResolveGate(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
-	}
-	if f.gates[1].Status != "approved" {
-		t.Fatalf("expected gate row resolved to approved, got %+v", f.gates[1])
-	}
-	if len(f.audits) != 1 || f.audits[0].Action != "human_gate.approved" {
-		t.Fatalf("expected an audit log row, got %+v", f.audits)
-	}
-	select {
-	case res := <-waitCh:
-		if !res.approved {
-			t.Fatalf("expected approved resolution, got %+v", res)
-		}
-	default:
-		t.Fatal("expected the registry channel to receive a resolution")
-	}
-}
-
-// ── Stream ───────────────────────────────────────────────────────────
 
 func decodeNDJSONLines(t *testing.T, body []byte) []runEventDTO {
 	t.Helper()
@@ -321,98 +156,209 @@ func decodeNDJSONLines(t *testing.T, body []byte) []runEventDTO {
 	return out
 }
 
-func streamRequest(runID string, userID int64, afterID string) *http.Request {
-	url := "/runs/" + runID + "/stream"
-	if afterID != "" {
-		url += "?after_id=" + afterID
-	}
-	req := httptest.NewRequest(http.MethodGet, url, nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", runID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	return withUser(req, userID)
+// finishedRunWithEvents sets up a terminal run, which lets the stream tests
+// exercise the full replay path and then close without waiting out a poll
+// interval — no test-only timing hooks needed.
+func finishedRunWithEvents(f *runFixture, triggeredBy, ownerID int64, events []run.Event) {
+	f.runs.runs["run-1"] = run.Run{ID: "run-1", BundleID: 1, TriggeredBy: triggeredBy, Status: run.StatusFinished}
+	f.resolver.bundle = run.ResolvedBundle{BundleID: 1, Ref: "b1", Version: "v1", OwnerUserID: ownerID}
+	f.events.events = events
 }
 
-// A terminal run (status finished/failed at connect time) replays history
-// and closes immediately — spec-12's "遇 bundle.finished/failed...主动关闭"
-// — without needing to wait out a poll interval, so this exercises the
-// full history-replay path without any test-only timing hacks.
-func TestRunHandlers_Stream_ReplaysHistoryAndClosesOnTerminalStatus(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 5, BundleRef: "b1", Version: "v1", DisplayMeta: []byte("{}")}
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: "finished"}
-	f.events = []store.BundleRunEvent{
-		{ID: 1, RunID: "run-1", Type: "node.start", Payload: []byte("{}")},
-		{ID: 2, RunID: "run-1", Type: "bundle.finished", Payload: []byte("{}")},
-	}
-	h := newTestRunHandlers(f)
+func TestStream_ReplaysHistoryAndClosesOnTerminalStatus(t *testing.T) {
+	f := newRunFixture()
+	finishedRunWithEvents(f, 5, 5, []run.Event{
+		{ID: 1, RunID: "run-1", Type: "node.start", Node: "writer"},
+		{ID: 2, RunID: "run-1", Type: run.EventBundleFinished},
+	})
 
 	w := httptest.NewRecorder()
-	h.Stream(w, streamRequest("run-1", 5, ""))
+	f.handlers.Stream(w, runRequest(http.MethodGet, "/runs/run-1/stream", "run-1", 5, nil))
 
 	if ct := w.Header().Get("Content-Type"); ct != "application/x-ndjson" {
-		t.Fatalf("expected NDJSON content type, got %q", ct)
+		t.Fatalf("content type = %q, want application/x-ndjson", ct)
 	}
 	if w.Header().Get("X-Accel-Buffering") != "no" {
-		t.Fatal("expected X-Accel-Buffering: no (required so nginx doesn't buffer the stream)")
+		t.Fatal("X-Accel-Buffering: no is required, or nginx buffers the whole stream to its end")
 	}
 	events := decodeNDJSONLines(t, w.Body.Bytes())
 	if len(events) != 2 || events[0].ID != 1 || events[1].ID != 2 {
-		t.Fatalf("expected both history events replayed in order, got %+v", events)
+		t.Fatalf("expected both events replayed in order, got %+v", events)
+	}
+	if events[0].Node == nil || *events[0].Node != "writer" {
+		t.Fatalf("node should be carried through: %+v", events[0])
+	}
+	if events[1].Node != nil {
+		t.Fatal("a run-level event has no node, and must omit the field rather than send null")
 	}
 }
 
-func TestRunHandlers_Stream_AfterIDResumesWithoutReplay(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 5, BundleRef: "b1", Version: "v1", DisplayMeta: []byte("{}")}
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: "finished"}
-	f.events = []store.BundleRunEvent{
-		{ID: 1, RunID: "run-1", Type: "node.start", Payload: []byte("{}")},
-		{ID: 2, RunID: "run-1", Type: "bundle.finished", Payload: []byte("{}")},
-	}
-	h := newTestRunHandlers(f)
+func TestStream_AfterIDResumesWithoutReplay(t *testing.T) {
+	f := newRunFixture()
+	finishedRunWithEvents(f, 5, 5, []run.Event{
+		{ID: 1, RunID: "run-1", Type: "node.start"},
+		{ID: 2, RunID: "run-1", Type: run.EventBundleFinished},
+	})
 
 	w := httptest.NewRecorder()
-	h.Stream(w, streamRequest("run-1", 5, "1"))
+	f.handlers.Stream(w, runRequest(http.MethodGet, "/runs/run-1/stream?after_id=1", "run-1", 5, nil))
 
 	events := decodeNDJSONLines(t, w.Body.Bytes())
 	if len(events) != 1 || events[0].ID != 2 {
-		t.Fatalf("expected only the event after id=1 to be resent, got %+v", events)
+		t.Fatalf("expected only the event after id=1, got %+v", events)
 	}
 }
 
-func TestRunHandlers_Stream_FiltersInternalEventsForSubscriber(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 99, BundleRef: "b1", Version: "v1", DisplayMeta: []byte("{}")}
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 30, Status: "finished"}
-	f.events = []store.BundleRunEvent{
-		{ID: 1, RunID: "run-1", Type: "tool.call", Payload: []byte("{}"), IsInternal: true},
-		{ID: 2, RunID: "run-1", Type: "bundle.finished", Payload: []byte("{}"), IsInternal: false},
-	}
-	h := newTestRunHandlers(f)
+func TestStream_FiltersInternalEventsForSubscriber(t *testing.T) {
+	f := newRunFixture()
+	finishedRunWithEvents(f, 30, 99, []run.Event{
+		{ID: 1, RunID: "run-1", Type: "tool.call", IsInternal: true},
+		{ID: 2, RunID: "run-1", Type: run.EventBundleFinished},
+	})
 
 	w := httptest.NewRecorder()
-	h.Stream(w, streamRequest("run-1", 30, ""))
+	f.handlers.Stream(w, runRequest(http.MethodGet, "/runs/run-1/stream", "run-1", 30, nil))
+
 	events := decodeNDJSONLines(t, w.Body.Bytes())
 	if len(events) != 1 || events[0].ID != 2 {
-		t.Fatalf("expected only the external event visible to a subscriber, got %+v", events)
+		t.Fatalf("a subscriber must not receive internal events, got %+v", events)
 	}
 }
 
-func TestRunHandlers_Stream_OwnerSeesInternalEvents(t *testing.T) {
-	f := newFakeRunHandlersQuerier()
-	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 99, BundleRef: "b1", Version: "v1", DisplayMeta: []byte("{}")}
-	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 99, Status: "finished"}
-	f.events = []store.BundleRunEvent{
-		{ID: 1, RunID: "run-1", Type: "tool.call", Payload: []byte("{}"), IsInternal: true},
-		{ID: 2, RunID: "run-1", Type: "bundle.finished", Payload: []byte("{}"), IsInternal: false},
-	}
-	h := newTestRunHandlers(f)
+// A stream that cannot start must fail as a normal envelope, before any
+// header is written — a 200 with an error line inside it would be
+// indistinguishable from a run that produced nothing.
+func TestStream_UnknownRunFailsAsAnEnvelope(t *testing.T) {
+	f := newRunFixture()
 
 	w := httptest.NewRecorder()
-	h.Stream(w, streamRequest("run-1", 99, ""))
-	events := decodeNDJSONLines(t, w.Body.Bytes())
-	if len(events) != 2 {
-		t.Fatalf("expected the Bundle owner to see internal events too, got %+v", events)
+	f.handlers.Stream(w, runRequest(http.MethodGet, "/runs/nope/stream", "nope", 5, nil))
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct == "application/x-ndjson" {
+		t.Fatal("a failed stream must not claim to be NDJSON")
+	}
+	if !containsCode(w.Body.String(), ErrRunNotFound) {
+		t.Fatalf("body should carry ErrRunNotFound: %s", w.Body.String())
+	}
+}
+
+func TestGet_ResponseShape(t *testing.T) {
+	f := newRunFixture()
+	finished := time.Now()
+	created := finished.Add(-90 * time.Second)
+	f.runs.runs["run-1"] = run.Run{
+		ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: run.StatusFinished,
+		SharedState: map[string]any{"final_answer": "42"},
+		Usage:       run.Usage{TotalTokens: 1200, CostUSD: 0.42},
+		CreatedAt:   created, FinishedAt: &finished,
+	}
+	f.resolver.bundle = run.ResolvedBundle{BundleID: 1, Ref: "content-pipeline", Version: "2.1", OwnerUserID: 5}
+
+	w := httptest.NewRecorder()
+	f.handlers.Get(w, runRequest(http.MethodGet, "/runs/run-1", "run-1", 5, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	var env Envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	dataBytes, _ := json.Marshal(env.Data)
+	var dto runDetailDTO
+	if err := json.Unmarshal(dataBytes, &dto); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if dto.RunID != "run-1" || dto.BundleRef != "content-pipeline" || dto.BundleVersion != "2.1" {
+		t.Fatalf("unexpected summary: %+v", dto.runSummaryDTO)
+	}
+	if !dto.IsOwner || dto.SharedState["final_answer"] != "42" {
+		t.Fatalf("unexpected detail: %+v", dto)
+	}
+	if dto.Usage.TotalTokens != 1200 || dto.Usage.CostUSD != 0.42 || dto.Usage.DurationSeconds != 90 {
+		t.Fatalf("usage = %+v, want duration derived from created/finished", dto.Usage)
+	}
+	if dto.Error != nil {
+		t.Fatalf("a successful run must send error: null, got %q", *dto.Error)
+	}
+}
+
+func TestGet_FailedRunCarriesItsError(t *testing.T) {
+	f := newRunFixture()
+	f.runs.runs["run-1"] = run.Run{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: run.StatusFailed, Error: run.FailGeneric}
+	f.resolver.bundle = run.ResolvedBundle{BundleID: 1, OwnerUserID: 5}
+
+	w := httptest.NewRecorder()
+	f.handlers.Get(w, runRequest(http.MethodGet, "/runs/run-1", "run-1", 5, nil))
+
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	dataBytes, _ := json.Marshal(env.Data)
+	var dto runDetailDTO
+	_ = json.Unmarshal(dataBytes, &dto)
+	if dto.Error == nil || *dto.Error != run.FailGeneric {
+		t.Fatalf("expected the sanitised failure message, got %+v", dto.Error)
+	}
+}
+
+func TestCancel_FinishedRunReturns409(t *testing.T) {
+	f := newRunFixture()
+	f.runs.runs["run-1"] = run.Run{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: run.StatusFinished}
+
+	w := httptest.NewRecorder()
+	f.handlers.Cancel(w, runRequest(http.MethodPost, "/runs/run-1/cancel", "run-1", 5, nil))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCancel_RunningRunReturns204(t *testing.T) {
+	f := newRunFixture()
+	f.runs.runs["run-1"] = run.Run{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: run.StatusRunning}
+
+	w := httptest.NewRecorder()
+	f.handlers.Cancel(w, runRequest(http.MethodPost, "/runs/run-1/cancel", "run-1", 5, nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", w.Code, w.Body.String())
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("204 must have an empty body, got %q", w.Body.String())
+	}
+}
+
+func TestResolveGate_MalformedBodyReturns400(t *testing.T) {
+	f := newRunFixture()
+	f.runs.runs["run-1"] = run.Run{ID: "run-1", TriggeredBy: 5, Status: run.StatusRunning}
+
+	w := httptest.NewRecorder()
+	f.handlers.ResolveGate(w, runRequest(http.MethodPost, "/runs/run-1/gate", "run-1", 5, []byte("{not json")))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRunHandlers_RequireAuthenticatedUser(t *testing.T) {
+	f := newRunFixture()
+	for name, handler := range map[string]http.HandlerFunc{
+		"create": f.handlers.Create, "list": f.handlers.List, "get": f.handlers.Get,
+		"stream": f.handlers.Stream, "cancel": f.handlers.Cancel, "gate": f.handlers.ResolveGate,
+	} {
+		w := httptest.NewRecorder()
+		handler(w, httptest.NewRequest(http.MethodGet, "/runs/run-1", nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s without a user: status = %d, want 401", name, w.Code)
+		}
+	}
+}
+
+func TestList_InvalidCursorReturns400(t *testing.T) {
+	f := newRunFixture()
+	w := httptest.NewRecorder()
+	f.handlers.List(w, runRequest(http.MethodGet, "/runs?cursor=!!!not-base64!!!", "", 5, nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
 }

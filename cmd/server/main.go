@@ -18,6 +18,7 @@ import (
 
 	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
+	"github.com/marcon0203/agentic-kit/internal/adapter/orchestrator"
 	"github.com/marcon0203/agentic-kit/internal/adapter/postgres"
 	adapterschema "github.com/marcon0203/agentic-kit/internal/adapter/schema"
 	"github.com/marcon0203/agentic-kit/internal/api"
@@ -28,6 +29,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/bundle"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
+	domainrun "github.com/marcon0203/agentic-kit/internal/domain/run"
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
 	"github.com/marcon0203/agentic-kit/internal/observability"
 	"github.com/marcon0203/agentic-kit/internal/store"
@@ -88,9 +90,13 @@ func run() error {
 
 	// Domain wiring: repository adapters implement the ports each context
 	// declares, services own the rules, handlers only do transport.
+	// The catalog is shared: "is this resource usable?" must mean the same
+	// thing when an Agent version is published and when a run starts.
+	resourceCatalog := postgres.NewResourceCatalog(queries)
+
 	agentService := agent.NewService(
 		postgres.NewAgentRepository(queries),
-		postgres.NewResourceCatalog(queries),
+		resourceCatalog,
 		adapterschema.NewValidator(agentValidator),
 	)
 
@@ -114,8 +120,27 @@ func run() error {
 		mcp.NewReachabilityProbe(),
 	)
 
-	gates := api.NewGateRegistry()
-	runEngine := api.NewRunEngine(queries, aesKey, gates, api.NewResourceRefChecker(queries))
+	// The run context is assembled from more parts than the others: it
+	// needs persistence, the ADK orchestrator behind it, and the gate
+	// registry that both the orchestrator (which blocks on gates) and the
+	// timeout scanner (which resolves them) must share.
+	runRepo := postgres.NewRunRepository(queries)
+	runEvents := postgres.NewRunEventStore(queries)
+	gateRepo := postgres.NewGateRepository(queries)
+	gateRegistry := orchestrator.NewGateRegistry()
+	providerKeys := postgres.NewProviderKeyStore(queries, aesKey)
+
+	runService := domainrun.NewService(
+		runRepo,
+		runEvents,
+		postgres.NewRunBundleResolver(queries),
+		postgres.NewRunDependencyChecker(queries, resourceCatalog, providerKeys),
+		orchestrator.NewEngine(queries, runRepo, runEvents, gateRepo, gateRegistry, providerKeys, aesKey),
+		gateRepo,
+		gateRegistry,
+		postgres.NewAuditLogWriter(queries),
+		orchestrator.NewRunIDGenerator(),
+	)
 
 	routerCfg := api.RouterConfig{
 		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
@@ -130,11 +155,11 @@ func run() error {
 		Marketplace:      api.NewMarketplaceHandlers(marketplaceService),
 		ModelProviders:   api.NewModelProviderHandlers(queries, aesKey),
 		Usage:            api.NewUsageHandlers(queries),
-		Runs:             api.NewRunHandlers(queries, runEngine),
+		Runs:             api.NewRunHandlers(runService),
 		Operations:       api.NewOperationHandlers(queries),
 	}
 
-	go api.RunGateTimeoutScanner(ctx, queries, gates, logger)
+	go api.RunGateTimeoutScanner(ctx, runService, logger)
 
 	// otelhttp wraps everything so a span (and its trace ID) exists before
 	// api.NewRouter's own middleware chain runs — RequestIDMiddleware reads

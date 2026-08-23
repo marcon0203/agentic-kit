@@ -82,6 +82,14 @@ func (s *Service) encryptCredentials(config Config) (Config, error) {
 // which is why the read paths in this service return Redact()ed configs
 // instead.
 func (s *Service) DecryptCredentials(config Config) (Config, error) {
+	return DecryptConfig(s.cipher, config)
+}
+
+// DecryptConfig is DecryptCredentials without a Service, for the run-time
+// path that needs a usable config and nothing else this context offers.
+// Which fields it touches is still IsCredentialKey's decision, so encrypt
+// and decrypt cannot disagree about what a credential is.
+func DecryptConfig(cipher CredentialCipher, config Config) (Config, error) {
 	out := make(Config, len(config))
 	for k, v := range config {
 		if !IsCredentialKey(k) {
@@ -92,7 +100,7 @@ func (s *Service) DecryptCredentials(config Config) (Config, error) {
 		if !ok {
 			return nil, fmt.Errorf("resource config: credential field %q must be a string", k)
 		}
-		plaintext, err := s.cipher.Decrypt(str)
+		plaintext, err := cipher.Decrypt(str)
 		if err != nil {
 			return nil, fmt.Errorf("resource config: decrypt %q: %w", k, err)
 		}

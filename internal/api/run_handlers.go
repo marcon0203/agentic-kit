@@ -1,31 +1,29 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/marcon0203/agentic-kit/internal/modelgateway"
-	"github.com/marcon0203/agentic-kit/internal/store"
+	"github.com/marcon0203/agentic-kit/internal/domain"
+	"github.com/marcon0203/agentic-kit/internal/domain/run"
 )
 
-// RunHandlers implements the /runs endpoint group (spec-11).
+// RunHandlers is the HTTP transport for the 编排运行时 context (spec-11).
+// The launch chain, the black-box filter and the gate rules live in
+// internal/domain/run; what is left here is JSON, status codes and the one
+// endpoint that streams.
 type RunHandlers struct {
-	Queries store.Querier
-	Engine  *RunEngine
+	svc *run.Service
 	// now is overridable in tests.
 	now func() time.Time
 }
 
-func NewRunHandlers(q store.Querier, engine *RunEngine) *RunHandlers {
-	return &RunHandlers{Queries: q, Engine: engine, now: time.Now}
+func NewRunHandlers(svc *run.Service) *RunHandlers {
+	return &RunHandlers{svc: svc, now: time.Now}
 }
 
 // ── DTOs ─────────────────────────────────────────────────────────────
@@ -53,13 +51,14 @@ type runDetailDTO struct {
 	Usage       runUsageDTO    `json:"usage"`
 }
 
-func toRunSummaryDTO(id string, bundleRef, bundleVersion, status string, errText pgtype.Text, createdAt, finishedAt pgtype.Timestamptz) runSummaryDTO {
-	dto := runSummaryDTO{RunID: id, BundleRef: bundleRef, BundleVersion: bundleVersion, Status: status, CreatedAt: createdAt.Time}
-	if errText.Valid {
-		dto.Error = &errText.String
+func toRunSummaryDTO(r run.Run) runSummaryDTO {
+	dto := runSummaryDTO{
+		RunID: r.ID, BundleRef: r.BundleRef, BundleVersion: r.BundleVersion,
+		Status: string(r.Status), CreatedAt: r.CreatedAt, FinishedAt: r.FinishedAt,
 	}
-	if finishedAt.Valid {
-		dto.FinishedAt = &finishedAt.Time
+	if r.Error != "" {
+		errText := r.Error
+		dto.Error = &errText
 	}
 	return dto
 }
@@ -72,10 +71,9 @@ type createRunRequest struct {
 	Input         map[string]any `json:"input"`
 }
 
-// Create handles POST /runs — spec-11's full chain: auth (done by
-// middleware) → subscription check → version resolution (snapshot
-// isolation) → dependency recheck (sanitized errors) → compile → launch
-// async, returning immediately per openapi's "异步启动，立即返回 run_id".
+// Create handles POST /runs. The run starts asynchronously — openapi's
+// "异步启动，立即返回 run_id" — so the response is the freshly created run,
+// still in `running`.
 func (h *RunHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
@@ -88,71 +86,20 @@ func (h *RunHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
 		return
 	}
-	if req.BundleRef == "" {
-		writeErrDetails(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid request",
-			[]FieldError{{Field: "bundle_ref", Reason: "required"}})
-		return
-	}
-	if req.Input == nil {
-		req.Input = map[string]any{}
-	}
 
-	resolved, rerr := h.Engine.ResolveBundle(r.Context(), userID, req.BundleRef, req.BundleVersion)
-	if rerr != nil {
-		writeErr(w, r, rerr.Status, rerr.Code, rerr.Message)
-		return
-	}
-
-	var bundleDef map[string]any
-	if err := json.Unmarshal(resolved.Row.Definition, &bundleDef); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-		return
-	}
-
-	apiKeys, err := h.Engine.DecryptedAPIKeys(r.Context(), resolved.OwnerUserID)
-	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-		return
-	}
-
-	if rerr := h.Engine.CheckDependencies(r.Context(), resolved.OwnerUserID, bundleDef, apiKeys); rerr != nil {
-		writeErr(w, r, rerr.Status, rerr.Code, rerr.Message)
-		return
-	}
-
-	runID, err := newRunID()
-	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-		return
-	}
-
-	gw := modelgateway.NewGateway(nil)
-	root, err := h.Engine.Compile(r.Context(), runID, resolved.OwnerUserID, bundleDef, apiKeys, gw)
-	if err != nil {
-		writeErr(w, r, http.StatusUnprocessableEntity, ErrAgentVersionNotFound, "该 Bundle 当前无法编译执行")
-		return
-	}
-
-	var viaListingID pgtype.Int8
-	if resolved.ViaListingID != nil {
-		viaListingID = pgtype.Int8{Valid: true, Int64: *resolved.ViaListingID}
-	}
-	runRow, err := h.Queries.CreateBundleRun(r.Context(), store.CreateBundleRunParams{
-		ID: runID, BundleID: resolved.Row.ID, TriggeredBy: userID, ViaListingID: viaListingID, Status: "running",
+	created, err := h.svc.Start(r.Context(), userID, run.StartCommand{
+		BundleRef: req.BundleRef, BundleVersion: req.BundleVersion, Input: req.Input,
 	})
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
+		writeDomainErr(w, r, err)
 		return
 	}
-
-	limits := parseRunLimits(bundleDef)
-	go h.Engine.Execute(runID, root, userID, req.Input, limits)
-
-	writeJSON(w, r, http.StatusCreated, toRunSummaryDTO(runRow.ID, resolved.Row.BundleRef, resolved.Row.Version, runRow.Status, runRow.Error, runRow.CreatedAt, runRow.FinishedAt))
+	writeJSON(w, r, http.StatusCreated, toRunSummaryDTO(created))
 }
 
 // ── List ─────────────────────────────────────────────────────────────
 
+// List handles GET /runs.
 func (h *RunHandlers) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
@@ -160,7 +107,9 @@ func (h *RunHandlers) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := parseLimit(r.URL.Query().Get("limit"))
+	// Runs paginate by offset: run ids are random rather than monotonic,
+	// so there is no keyset to resume from. The offset still travels as an
+	// opaque cursor so the wire contract matches every other list.
 	offset := 0
 	if cursor := r.URL.Query().Get("cursor"); cursor != "" {
 		decoded, err := decodeCursorString(cursor)
@@ -171,125 +120,49 @@ func (h *RunHandlers) List(w http.ResponseWriter, r *http.Request) {
 		offset, _ = strconv.Atoi(decoded)
 	}
 
-	rows, err := h.Queries.ListBundleRunsForUserFiltered(r.Context(), store.ListBundleRunsForUserFilteredParams{
-		TriggeredBy: userID, BundleRef: r.URL.Query().Get("bundle_ref"), RunStatus: r.URL.Query().Get("status"),
-		PageLimit: int32(limit + 1), PageOffset: int32(offset),
+	page, err := h.svc.List(r.Context(), userID, run.ListQuery{
+		BundleRef: r.URL.Query().Get("bundle_ref"), Status: r.URL.Query().Get("status"),
+		Limit: parseLimit(r.URL.Query().Get("limit")), Offset: offset,
 	})
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
+		writeDomainErr(w, r, err)
 		return
 	}
-
-	hasMore := len(rows) > limit
-	if hasMore {
-		rows = rows[:limit]
-	}
-	items := make([]runSummaryDTO, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, toRunSummaryDTO(row.ID, row.BundleRef, row.BundleVersion, row.Status, row.Error, row.CreatedAt, row.FinishedAt))
-	}
-
-	var nextCursor *string
-	if hasMore {
-		c := encodeCursorString(strconv.Itoa(offset + limit))
-		nextCursor = &c
-	}
-	writeJSON(w, r, http.StatusOK, NewPage(items, nextCursor, hasMore))
+	writeDomainPage(w, r, mapPage(page, toRunSummaryDTO))
 }
 
 // ── Get ──────────────────────────────────────────────────────────────
 
-// Get handles GET /runs/{id}. shared_state is filtered to only the
-// output fields the resource's display_meta declares whenever the
-// requester isn't the Bundle's own owner (spec-11: 黑盒 shared_state
-// filtering; 架构文档's own clarification is that the filter keys off
-// "requester != author", not merely "ran via a listing").
+// Get handles GET /runs/{id}.
 func (h *RunHandlers) Get(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
 		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
 		return
 	}
-	id := chi.URLParam(r, "id")
 
-	run, bundle, apiErr := h.loadRunAndBundle(r.Context(), id, userID)
-	if apiErr != nil {
-		writeErr(w, r, apiErr.Status, apiErr.Code, apiErr.Message)
+	detail, err := h.svc.Get(r.Context(), userID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeDomainErr(w, r, err)
 		return
 	}
-
-	isOwner := bundle.OwnerUserID == userID
-	var sharedState map[string]any
-	if err := json.Unmarshal(run.SharedState, &sharedState); err != nil {
-		sharedState = map[string]any{}
-	}
-	if !isOwner {
-		sharedState = filterSharedStateForSubscriber(sharedState, bundle.DisplayMeta)
-	}
-
-	duration := int64(0)
-	if run.FinishedAt.Valid {
-		duration = int64(run.FinishedAt.Time.Sub(run.CreatedAt.Time).Seconds())
-	}
-	dto := runDetailDTO{
-		runSummaryDTO: toRunSummaryDTO(run.ID, bundle.BundleRef, bundle.Version, run.Status, run.Error, run.CreatedAt, run.FinishedAt),
-		SharedState:   sharedState,
-		IsOwner:       isOwner,
-		Usage:         runUsageDTO{TotalTokens: run.TotalTokens, CostUSD: numericToFloat64(run.CostUsd), DurationSeconds: duration},
-	}
-	writeJSON(w, r, http.StatusOK, dto)
-}
-
-// filterSharedStateForSubscriber keeps only the keys the resource's own
-// display_meta.io_description.outputs[] declares (spec-08/11's black-box
-// boundary: intermediate nodes may have written internal prompt
-// fragments into shared_state, and only the declared output surface is
-// safe to expose).
-func filterSharedStateForSubscriber(state map[string]any, displayMeta []byte) map[string]any {
-	var meta struct {
-		IODescription struct {
-			Outputs []string `json:"outputs"`
-		} `json:"io_description"`
-	}
-	_ = json.Unmarshal(displayMeta, &meta)
-
-	out := map[string]any{}
-	for _, key := range meta.IODescription.Outputs {
-		if v, ok := state[key]; ok {
-			out[key] = v
-		}
-	}
-	return out
-}
-
-func (h *RunHandlers) loadRunAndBundle(ctx context.Context, runID string, userID int64) (store.BundleRun, store.Bundle, *runEngineError) {
-	run, err := h.Queries.GetBundleRun(ctx, runID)
-	if err != nil {
-		if pgxErrNoRows(err) {
-			return store.BundleRun{}, store.Bundle{}, newRunEngineError(http.StatusNotFound, ErrRunNotFound, "run not found")
-		}
-		return store.BundleRun{}, store.Bundle{}, errInternal
-	}
-	if run.TriggeredBy != userID {
-		return store.BundleRun{}, store.Bundle{}, newRunEngineError(http.StatusNotFound, ErrRunNotFound, "run not found")
-	}
-	bundle, err := h.Queries.GetBundleByID(ctx, run.BundleID)
-	if err != nil {
-		return store.BundleRun{}, store.Bundle{}, errInternal
-	}
-	return run, bundle, nil
-}
-
-func pgxErrNoRows(err error) bool {
-	return errors.Is(err, pgx.ErrNoRows)
+	writeJSON(w, r, http.StatusOK, runDetailDTO{
+		runSummaryDTO: toRunSummaryDTO(detail.Run),
+		SharedState:   detail.SharedState,
+		IsOwner:       detail.IsOwner,
+		Usage: runUsageDTO{
+			TotalTokens: detail.Run.Usage.TotalTokens, CostUSD: detail.Run.Usage.CostUSD,
+			DurationSeconds: detail.Run.DurationSeconds(),
+		},
+	})
 }
 
 // ── Stream ───────────────────────────────────────────────────────────
 
 // streamPollInterval is spec-12's "服务端检查间隔（300ms）" — how often the
-// stream re-polls for new events/status once it's caught up, bounding
-// end-to-end latency and how quickly the connection closes after the run
-// reaches a terminal state (spec-12's "~400ms 内自动关闭" acceptance check).
+// stream re-polls for new events and status once caught up, which bounds
+// both end-to-end latency and how quickly the connection closes after the
+// run finishes (spec-12's "~400ms 内自动关闭" acceptance check).
 const streamPollInterval = 300 * time.Millisecond
 
 type runEventDTO struct {
@@ -301,10 +174,8 @@ type runEventDTO struct {
 	Payload   map[string]any `json:"payload"`
 }
 
-// Stream handles GET /runs/{id}/stream — NDJSON, per openapi.yaml the one
-// endpoint that doesn't use the unified envelope. is_internal events are
-// only ever included for the Bundle's own owner (spec-10 §3 / 架构文档's
-// "请求者非作者" rule); everyone else gets the black-box-safe subset.
+// Stream handles GET /runs/{id}/stream — NDJSON, and per openapi.yaml the
+// one endpoint that does not use the unified envelope.
 func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
@@ -313,16 +184,23 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 
-	run, bundle, apiErr := h.loadRunAndBundle(r.Context(), id, userID)
-	if apiErr != nil {
-		writeErr(w, r, apiErr.Status, apiErr.Code, apiErr.Message)
-		return
-	}
-	includeInternal := bundle.OwnerUserID == userID
-
 	afterID := int64(0)
 	if v := r.URL.Query().Get("after_id"); v != "" {
 		afterID, _ = strconv.ParseInt(v, 10, 64)
+	}
+
+	// The first fetch happens before any header is written, so an
+	// unauthorized or missing run still gets a normal error envelope
+	// rather than a 200 with an error line inside the stream.
+	events, err := h.svc.EventsAfter(r.Context(), userID, id, afterID)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	status, err := h.svc.Status(r.Context(), id)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
@@ -331,19 +209,12 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 
-	status := run.Status
 	for {
-		events, err := h.fetchEvents(r.Context(), id, afterID, includeInternal)
-		if err != nil {
-			_ = writeNDJSONLine(w, runEventDTO{Type: "stream.error", RunID: id, Timestamp: h.now()})
-			return
-		}
 		for _, ev := range events {
-			var payload map[string]any
-			_ = json.Unmarshal(ev.Payload, &payload)
-			dto := runEventDTO{ID: ev.ID, Type: ev.Type, RunID: id, Timestamp: ev.CreatedAt.Time, Payload: payload}
-			if ev.Node.Valid {
-				dto.Node = &ev.Node.String
+			dto := runEventDTO{ID: ev.ID, Type: ev.Type, RunID: id, Timestamp: ev.CreatedAt, Payload: ev.Payload}
+			if ev.Node != "" {
+				node := ev.Node
+				dto.Node = &node
 			}
 			if err := writeNDJSONLine(w, dto); err != nil {
 				return
@@ -354,7 +225,7 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 
-		if status == "finished" || status == "failed" {
+		if status.Terminal() {
 			return
 		}
 		select {
@@ -362,17 +233,15 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-time.After(streamPollInterval):
 		}
-		if run, err := h.Queries.GetBundleRun(r.Context(), id); err == nil {
-			status = run.Status
+
+		if events, err = h.svc.EventsAfter(r.Context(), userID, id, afterID); err != nil {
+			_ = writeNDJSONLine(w, runEventDTO{Type: "stream.error", RunID: id, Timestamp: h.now()})
+			return
+		}
+		if status, err = h.svc.Status(r.Context(), id); err != nil {
+			return
 		}
 	}
-}
-
-func (h *RunHandlers) fetchEvents(ctx context.Context, runID string, afterID int64, includeInternal bool) ([]store.BundleRunEvent, error) {
-	if includeInternal {
-		return h.Queries.ListBundleRunEventsAfter(ctx, store.ListBundleRunEventsAfterParams{RunID: runID, ID: afterID})
-	}
-	return h.Queries.ListBundleRunEventsAfterExternal(ctx, store.ListBundleRunEventsAfterExternalParams{RunID: runID, ID: afterID})
 }
 
 func writeNDJSONLine(w http.ResponseWriter, v any) error {
@@ -394,19 +263,12 @@ func (h *RunHandlers) Cancel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
 		return
 	}
-	id := chi.URLParam(r, "id")
-
-	run, _, apiErr := h.loadRunAndBundle(r.Context(), id, userID)
-	if apiErr != nil {
-		writeErr(w, r, apiErr.Status, apiErr.Code, apiErr.Message)
+	if err := h.svc.Cancel(r.Context(), userID, chi.URLParam(r, "id")); err != nil {
+		writeDomainErr(w, r, err)
 		return
 	}
-	if run.Status != "running" {
-		writeErr(w, r, http.StatusConflict, ErrRunAlreadyFinished, "运行已结束")
-		return
-	}
-
-	_ = h.Queries.MarkBundleRunCancelRequested(r.Context(), id)
-	h.Engine.Cancel(id)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// compile-time guard: the page helper must keep producing a domain.Page.
+var _ = domain.Page[run.Run]{}
