@@ -306,10 +306,14 @@ CREATE TABLE bundles (
     UNIQUE (owner_user_id, bundle_ref, version)
 );
 
-CREATE TABLE resources (
+-- 资源中心四类资源各自独立建表（tools/skills/mcp_servers/knowledge_bases），
+-- 不共用一张 resources 表 —— 见「十、风险与演进路径」当初权衡共享表的理由，
+-- 现已改为分表：四类资源的字段/生命周期差异（尤其 mcp_servers 的
+-- health 健康检查字段，tools/skills 没有这个概念）比共性更值得优先体现在
+-- schema 上；Agent 引用校验按 ref 分别查对应表，不是四次查询变成的负担。
+CREATE TABLE tools (
     id              BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
     owner_user_id   BIGINT        NOT NULL REFERENCES users(id),
-    type            VARCHAR(16)   NOT NULL,  -- tool/skill/mcp/knowledge_base
     ref             VARCHAR(64)   NOT NULL,
     version         VARCHAR(16)   NOT NULL DEFAULT '1.0',
     config          JSONB         NOT NULL,  -- 连接配置，含凭证引用，黑盒内容
@@ -317,7 +321,47 @@ CREATE TABLE resources (
     status          SMALLINT      NOT NULL DEFAULT 1,
     immutable       BOOLEAN       NOT NULL DEFAULT false,
     created_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
-    UNIQUE (owner_user_id, type, ref, version)
+    UNIQUE (owner_user_id, ref, version)
+);
+
+CREATE TABLE skills (
+    id              BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    owner_user_id   BIGINT        NOT NULL REFERENCES users(id),
+    ref             VARCHAR(64)   NOT NULL,
+    version         VARCHAR(16)   NOT NULL DEFAULT '1.0',
+    config          JSONB         NOT NULL,
+    display_meta    JSONB         NOT NULL DEFAULT '{}',
+    status          SMALLINT      NOT NULL DEFAULT 1,
+    immutable       BOOLEAN       NOT NULL DEFAULT false,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    UNIQUE (owner_user_id, ref, version)
+);
+
+CREATE TABLE mcp_servers (
+    id              BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    owner_user_id   BIGINT        NOT NULL REFERENCES users(id),
+    ref             VARCHAR(64)   NOT NULL,
+    version         VARCHAR(16)   NOT NULL DEFAULT '1.0',
+    config          JSONB         NOT NULL,
+    display_meta    JSONB         NOT NULL DEFAULT '{}',
+    status          SMALLINT      NOT NULL DEFAULT 1,
+    health          VARCHAR(16)   NOT NULL DEFAULT 'unknown',  -- unknown/healthy/unhealthy
+    immutable       BOOLEAN       NOT NULL DEFAULT false,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    UNIQUE (owner_user_id, ref, version)
+);
+
+CREATE TABLE knowledge_bases (
+    id              BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+    owner_user_id   BIGINT        NOT NULL REFERENCES users(id),
+    ref             VARCHAR(64)   NOT NULL,
+    version         VARCHAR(16)   NOT NULL DEFAULT '1.0',
+    config          JSONB         NOT NULL,
+    display_meta    JSONB         NOT NULL DEFAULT '{}',
+    status          SMALLINT      NOT NULL DEFAULT 1,
+    immutable       BOOLEAN       NOT NULL DEFAULT false,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    UNIQUE (owner_user_id, ref, version)
 );
 
 -- ── 广场发布与订阅 ────────────────────────────────────────
@@ -799,7 +843,7 @@ CI/CD 流程：
 
 - **风险 1：ADK Go 2.0 选型未经 spike 验证** → 缓解措施：M1 阶段并行做 spike，架构里编排引擎相关的接口（`AgentRunner` 抽象）保持可替换，不管 spike 结果如何都不影响其他模块
 - **风险 2：多实例下的事件流方案（会话粘性）在实例故障时有短暂中断** → 缓解措施：客户端重连 + 补历史事件的逻辑已在 POC 阶段验证过机制可行，M1 阶段需要补充自动重连的前端逻辑
-- **风险 3：资源中心的四类资源（tool/skill/mcp/知识库）目前用一张表统一抽象，实际接入时可能发现类型差异大到不适合共享表结构** → 缓解措施：`config` 字段用 JSONB 承载差异化配置，真出现无法共享的情况再拆分表，不提前过度设计
+- **风险 3（已决，不再是风险）：资源中心四类资源最初设计成一张表统一抽象，`config` 字段用 JSONB 承载差异化配置** → 实现阶段直接改为 `tools`/`skills`/`mcp_servers`/`knowledge_bases` 四张独立表：`mcp_servers` 需要 `health` 健康检查字段而其余三类没有这个概念，字段差异在设计早期就已明确，不必等"真出现无法共享的情况"——分表本身成本很低（四张表结构高度相似，直接复制），共享表反而让 `health` 这类字段要么污染其他三类的 schema，要么单独开洞，都不如分开干净。Agent 引用校验按 `ref` 查对应类型的表，不是四次查询的负担
 - **风险 4：用户级权限模型在真正多租户场景下不够用** → **已决**：V1 明确不做多租户（PRD 非目标第 5 条），资源归属到 `owner_user_id`，权限规则为「自己的 + 订阅的」。真要做多租户时的演进路径是加 `tenant_id` 并启用 PostgreSQL 行级安全策略（RLS），届时 `owner_user_id` 的语义不变，是可加法演进而非重构
 
 **演进路径**：

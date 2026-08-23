@@ -16,17 +16,25 @@ type Querier interface {
 	CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error)
 	CreateBundle(ctx context.Context, arg CreateBundleParams) (Bundle, error)
 	CreateBundleRun(ctx context.Context, arg CreateBundleRunParams) (BundleRun, error)
+	CreateKnowledgeBase(ctx context.Context, arg CreateKnowledgeBaseParams) (KnowledgeBasis, error)
 	CreateListing(ctx context.Context, arg CreateListingParams) (MarketplaceListing, error)
+	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
 	CreateModelProvider(ctx context.Context, arg CreateModelProviderParams) (CreateModelProviderRow, error)
-	CreateResource(ctx context.Context, arg CreateResourceParams) (Resource, error)
+	CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error)
 	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error)
+	CreateTool(ctx context.Context, arg CreateToolParams) (Tool, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DecrementListingSubscriberCount(ctx context.Context, id int64) error
 	DeleteAgent(ctx context.Context, id int64) error
 	DeleteBundle(ctx context.Context, id int64) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
-	DeleteResource(ctx context.Context, id int64) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
+	// Knowledge bases surface to an Agent as an entry in capabilities.tools
+	// (the DSL has no separate knowledge_base array) — same lookup as tools.
+	FindAgentsReferencingKnowledgeBaseRef(ctx context.Context, arg FindAgentsReferencingKnowledgeBaseRefParams) ([]FindAgentsReferencingKnowledgeBaseRefRow, error)
+	FindAgentsReferencingMCPServerRef(ctx context.Context, arg FindAgentsReferencingMCPServerRefParams) ([]FindAgentsReferencingMCPServerRefRow, error)
+	FindAgentsReferencingSkillRef(ctx context.Context, arg FindAgentsReferencingSkillRefParams) ([]FindAgentsReferencingSkillRefRow, error)
+	FindAgentsReferencingToolRef(ctx context.Context, arg FindAgentsReferencingToolRefParams) ([]FindAgentsReferencingToolRefRow, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetAgentDisplayForSubscriber(ctx context.Context, id int64) (GetAgentDisplayForSubscriberRow, error)
 	GetAgentForOwner(ctx context.Context, arg GetAgentForOwnerParams) (Agent, error)
@@ -34,10 +42,12 @@ type Querier interface {
 	GetBundleForOwner(ctx context.Context, arg GetBundleForOwnerParams) (Bundle, error)
 	GetBundleRun(ctx context.Context, id string) (BundleRun, error)
 	GetIdempotencyKey(ctx context.Context, key string) (IdempotencyKey, error)
+	GetKnowledgeBaseByIDForOwner(ctx context.Context, arg GetKnowledgeBaseByIDForOwnerParams) (KnowledgeBasis, error)
 	GetListingByRefVersion(ctx context.Context, arg GetListingByRefVersionParams) (MarketplaceListing, error)
+	GetMCPServerByIDForOwner(ctx context.Context, arg GetMCPServerByIDForOwnerParams) (McpServer, error)
 	GetModelProviderCredentials(ctx context.Context, arg GetModelProviderCredentialsParams) ([]byte, error)
-	GetResourceDisplayForSubscriber(ctx context.Context, id int64) (GetResourceDisplayForSubscriberRow, error)
-	GetResourceForOwner(ctx context.Context, arg GetResourceForOwnerParams) (Resource, error)
+	GetSkillByIDForOwner(ctx context.Context, arg GetSkillByIDForOwnerParams) (Skill, error)
+	GetToolByIDForOwner(ctx context.Context, arg GetToolByIDForOwnerParams) (Tool, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	IncrementListingSubscriberCount(ctx context.Context, id int64) error
@@ -49,21 +59,31 @@ type Querier interface {
 	ListBundleRunsByBundleAndStatus(ctx context.Context, arg ListBundleRunsByBundleAndStatusParams) ([]BundleRun, error)
 	ListBundleRunsForUser(ctx context.Context, arg ListBundleRunsForUserParams) ([]BundleRun, error)
 	ListBundlesForOwner(ctx context.Context, ownerUserID int64) ([]Bundle, error)
+	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
 	ListListingsByType(ctx context.Context, arg ListListingsByTypeParams) ([]MarketplaceListing, error)
+	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)
 	ListModelProvidersForOwner(ctx context.Context, ownerUserID int64) ([]ListModelProvidersForOwnerRow, error)
-	ListResourcesForOwner(ctx context.Context, ownerUserID int64) ([]Resource, error)
+	ListSkillsForOwnerPage(ctx context.Context, arg ListSkillsForOwnerPageParams) ([]Skill, error)
 	ListSubscriptionsForUser(ctx context.Context, subscriberID int64) ([]Subscription, error)
+	ListToolsForOwnerPage(ctx context.Context, arg ListToolsForOwnerPageParams) ([]Tool, error)
 	MarkAgentImmutable(ctx context.Context, id int64) error
 	MarkBundleImmutable(ctx context.Context, id int64) error
-	MarkResourceImmutable(ctx context.Context, id int64) error
+	MarkKnowledgeBaseImmutable(ctx context.Context, id int64) error
+	MarkMCPServerImmutable(ctx context.Context, id int64) error
+	MarkSkillImmutable(ctx context.Context, id int64) error
+	MarkToolImmutable(ctx context.Context, id int64) error
 	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error
-	SetResourceStatus(ctx context.Context, arg SetResourceStatusParams) error
 	TouchAPIKeyLastUsed(ctx context.Context, id int64) error
 	UpdateBundleRunStatus(ctx context.Context, arg UpdateBundleRunStatusParams) error
 	UpdateBundleRunUsage(ctx context.Context, arg UpdateBundleRunUsageParams) error
+	UpdateKnowledgeBase(ctx context.Context, arg UpdateKnowledgeBaseParams) (KnowledgeBasis, error)
+	UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error)
+	UpdateMCPServerHealth(ctx context.Context, arg UpdateMCPServerHealthParams) error
+	UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill, error)
+	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)
 }
 
 var _ Querier = (*Queries)(nil)

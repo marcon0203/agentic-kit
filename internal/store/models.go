@@ -75,6 +75,18 @@ type IdempotencyKey struct {
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
 }
 
+type KnowledgeBasis struct {
+	ID          int64              `json:"id"`
+	OwnerUserID int64              `json:"owner_user_id"`
+	Ref         string             `json:"ref"`
+	Version     string             `json:"version"`
+	Config      []byte             `json:"config"`
+	DisplayMeta []byte             `json:"display_meta"`
+	Status      int16              `json:"status"`
+	Immutable   bool               `json:"immutable"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type MarketplaceListing struct {
 	ID              int64              `json:"id"`
 	AuthorUserID    int64              `json:"author_user_id"`
@@ -90,6 +102,19 @@ type MarketplaceListing struct {
 	PublishedAt     pgtype.Timestamptz `json:"published_at"`
 }
 
+type McpServer struct {
+	ID          int64              `json:"id"`
+	OwnerUserID int64              `json:"owner_user_id"`
+	Ref         string             `json:"ref"`
+	Version     string             `json:"version"`
+	Config      []byte             `json:"config"`
+	DisplayMeta []byte             `json:"display_meta"`
+	Status      int16              `json:"status"`
+	Health      string             `json:"health"`
+	Immutable   bool               `json:"immutable"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type ModelProvider struct {
 	ID          int64              `json:"id"`
 	OwnerUserID int64              `json:"owner_user_id"`
@@ -99,10 +124,9 @@ type ModelProvider struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type Resource struct {
+type Skill struct {
 	ID          int64              `json:"id"`
 	OwnerUserID int64              `json:"owner_user_id"`
-	Type        string             `json:"type"`
 	Ref         string             `json:"ref"`
 	Version     string             `json:"version"`
 	Config      []byte             `json:"config"`
@@ -118,6 +142,18 @@ type Subscription struct {
 	ListingID    int64              `json:"listing_id"`
 	LocalAlias   pgtype.Text        `json:"local_alias"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type Tool struct {
+	ID          int64              `json:"id"`
+	OwnerUserID int64              `json:"owner_user_id"`
+	Ref         string             `json:"ref"`
+	Version     string             `json:"version"`
+	Config      []byte             `json:"config"`
+	DisplayMeta []byte             `json:"display_meta"`
+	Status      int16              `json:"status"`
+	Immutable   bool               `json:"immutable"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type User struct {

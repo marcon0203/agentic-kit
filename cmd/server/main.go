@@ -18,6 +18,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/api"
 	"github.com/marcon0203/agentic-kit/internal/auth"
 	"github.com/marcon0203/agentic-kit/internal/config"
+	"github.com/marcon0203/agentic-kit/internal/crypto"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
 
@@ -46,6 +47,11 @@ func run() error {
 	}
 	defer pool.Close()
 
+	aesKey, err := crypto.DecodeKey(cfg.CredentialAESKey)
+	if err != nil {
+		return fmt.Errorf("decode CREDENTIAL_AES_KEY: %w", err)
+	}
+
 	queries := store.New(pool)
 	routerCfg := api.RouterConfig{
 		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
@@ -53,6 +59,7 @@ func run() error {
 		Users:            api.NewPostgresAuthUserStore(queries),
 		Tokens:           auth.NewTokenIssuer(cfg.JWTSecret),
 		APIKeys:          api.NewPostgresAPIKeyLookup(queries),
+		Resources:        api.NewResourceHandlers(queries, api.NewHTTPReachabilityChecker(), aesKey),
 	}
 
 	handler := api.NewRouter(logger, routerCfg)

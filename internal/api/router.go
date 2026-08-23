@@ -22,6 +22,7 @@ type RouterConfig struct {
 	Users            AuthUserStore
 	Tokens           *auth.TokenIssuer
 	APIKeys          APIKeyLookup
+	Resources        *ResourceHandlers
 }
 
 // NewRouter assembles the top-level chi router with the shared middleware
@@ -68,7 +69,13 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 			if cfg.IdempotencyStore != nil {
 				r.Use(IdempotencyMiddleware(cfg.IdempotencyStore))
 			}
-			// Feature routers (Resources, Agents, Bundles, Runs, ...) are
+			if cfg.Resources != nil {
+				r.Get("/resources", cfg.Resources.List)
+				r.Post("/resources", cfg.Resources.Create)
+				r.Patch("/resources/{id}", cfg.Resources.Update)
+				r.Get("/resources/{id}/delete-check", cfg.Resources.DeleteCheck)
+			}
+			// Further feature routers (Agents, Bundles, Runs, ...) are
 			// mounted here by their respective spec tasks. Endpoints that
 			// need a tighter limit (e.g. run creation: 20/min) apply an
 			// additional NewRateLimiter(20, time.Minute, ...) at the route

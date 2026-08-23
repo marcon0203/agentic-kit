@@ -106,7 +106,7 @@
       "id": 5,
       "type": "resource_center",
       "name": "资源中心",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-05-resource-center.md",
       "depends_on": [
         4
