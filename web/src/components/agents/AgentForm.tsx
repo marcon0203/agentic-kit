@@ -272,7 +272,7 @@ export function AgentForm({
   }
 
   return (
-    <div ref={formRef} className="mx-auto flex max-w-[720px] flex-col gap-space-8">
+    <div ref={formRef} className="mx-auto flex w-full max-w-[720px] flex-col gap-space-8">
       <Section title="基本信息">
         <Field label="agent（唯一标识）" htmlFor="agent-agent" error={errors.agent} valid={touched.agent}>
           <Input

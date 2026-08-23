@@ -85,7 +85,7 @@ export function PublishForm({ onPublished }: { onPublished: () => void }) {
   }
 
   return (
-    <div className="flex max-w-[720px] flex-col gap-space-6">
+    <div className="flex w-full max-w-[720px] flex-col gap-space-6">
       <div className="flex flex-col gap-space-2">
         <label htmlFor="publish-type" className="text-label-md text-ink-700">
           资源类型

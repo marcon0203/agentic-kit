@@ -67,24 +67,16 @@ export function AuthModal() {
 
   return (
     <Dialog open={modalOpen} onOpenChange={handleOpenChange}>
-      <DialogContent
-        className="w-[610px] max-w-[92vw] overflow-y-auto rounded-xl border-none p-8 text-white shadow-lg"
-        style={{
-          background:
-            'radial-gradient(circle at 50% 0%, rgba(101,94,255,0.35), transparent 60%), linear-gradient(180deg, var(--color-navy-950), var(--color-navy-900))',
-        }}
-      >
+      <DialogContent className="w-[420px] max-w-[92vw] rounded-xl p-8">
         <DialogHeader>
-          <DialogTitle className="text-title-modal text-white">
-            {REASON_COPY[modalReason ?? 'manual']}
-          </DialogTitle>
+          <DialogTitle className="text-title-modal text-ink-900">{REASON_COPY[modalReason ?? 'manual']}</DialogTitle>
           <DialogDescription className="sr-only">
             {tab === 'login' ? '使用邮箱和密码登录' : '使用邮箱、密码和昵称注册新账号'}
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as 'login' | 'register')} className="mt-space-4">
-          <TabsList className="w-full bg-white/10">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as 'login' | 'register')} className="mt-space-5">
+          <TabsList className="w-full">
             <TabsTrigger value="login" className="flex-1">
               登录
             </TabsTrigger>
@@ -124,8 +116,7 @@ export function AuthModal() {
         )}
 
         <Button
-          className="mt-space-6 w-full"
-          size="lg"
+          className="mt-space-6 h-11 w-full rounded-full bg-[image:var(--gradient-brand)] text-body-md hover:brightness-[1.04]"
           disabled={pending || !email || !password || (tab === 'register' && !displayName)}
           onClick={submit}
         >
@@ -152,17 +143,10 @@ function Field({
   const id = `auth-field-${label}`
   return (
     <div className="flex flex-col gap-space-2">
-      <Label.Root htmlFor={id} className="text-label-md text-white/80">
+      <Label.Root htmlFor={id} className="text-label-md text-ink-700">
         {label}
       </Label.Root>
-      <Input
-        id={id}
-        type={type}
-        value={value}
-        autoComplete={autoComplete}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-12 rounded-sm border-white/20 bg-white/5 text-white placeholder:text-white/40"
-      />
+      <Input id={id} type={type} value={value} autoComplete={autoComplete} onChange={(e) => onChange(e.target.value)} className="h-11 rounded-lg" />
     </div>
   )
 }

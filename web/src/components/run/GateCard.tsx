@@ -67,12 +67,12 @@ export function GateCard({
           <div className="mt-space-4 flex justify-end gap-space-3">
             {canApprove ? (
               <>
-                {/* size="default" (44px) not "sm" — design-system.md's
-                    explicit ≥40×40px requirement for approval actions. */}
-                <Button variant="secondary" disabled={pending !== null} onClick={() => act(false)}>
+                {/* size="lg" (44px) — design-system.md's explicit
+                    ≥40×40px requirement for approval actions. */}
+                <Button variant="secondary" size="lg" disabled={pending !== null} onClick={() => act(false)}>
                   {pending === 'reject' ? '处理中…' : '驳回'}
                 </Button>
-                <Button disabled={pending !== null} onClick={() => act(true)}>
+                <Button size="lg" disabled={pending !== null} onClick={() => act(true)}>
                   {pending === 'approve' ? '处理中…' : '通过'}
                 </Button>
               </>
