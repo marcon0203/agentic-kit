@@ -182,7 +182,7 @@
       "id": 9,
       "type": "model_gateway",
       "name": "模型网关",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-09-model-gateway.md",
       "depends_on": [
         4

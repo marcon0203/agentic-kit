@@ -73,6 +73,8 @@ func run() error {
 		Agents:           api.NewAgentHandlers(queries, agentValidator, api.NewResourceRefChecker(queries)),
 		Bundles:          api.NewBundleHandlers(queries, bundleValidator),
 		Marketplace:      api.NewMarketplaceHandlers(queries),
+		ModelProviders:   api.NewModelProviderHandlers(queries, aesKey),
+		Usage:            api.NewUsageHandlers(queries),
 	}
 
 	handler := api.NewRouter(logger, routerCfg)

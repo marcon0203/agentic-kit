@@ -26,6 +26,8 @@ type RouterConfig struct {
 	Agents           *AgentHandlers
 	Bundles          *BundleHandlers
 	Marketplace      *MarketplaceHandlers
+	ModelProviders   *ModelProviderHandlers
+	Usage            *UsageHandlers
 }
 
 // NewRouter assembles the top-level chi router with the shared middleware
@@ -98,6 +100,13 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Get("/marketplace/subscriptions", cfg.Marketplace.ListSubscriptions)
 				r.Delete("/marketplace/subscriptions/{id}", cfg.Marketplace.Unsubscribe)
 				r.Post("/marketplace/subscriptions/{id}/upgrade", cfg.Marketplace.Upgrade)
+			}
+			if cfg.ModelProviders != nil {
+				r.Get("/model-providers", cfg.ModelProviders.List)
+				r.Post("/model-providers", cfg.ModelProviders.Create)
+			}
+			if cfg.Usage != nil {
+				r.Get("/usage/me", cfg.Usage.GetMyUsage)
 			}
 			// Further feature routers (Runs, ...) are mounted here by
 			// their respective spec tasks. Endpoints that need a tighter

@@ -114,6 +114,14 @@ type Querier interface {
 	GetSubscriptionForSubscriberByListingRef(ctx context.Context, arg GetSubscriptionForSubscriberByListingRefParams) (Subscription, error)
 	GetToolByIDForOwner(ctx context.Context, arg GetToolByIDForOwnerParams) (Tool, error)
 	GetToolLatestStatusByRef(ctx context.Context, arg GetToolLatestStatusByRefParams) (int16, error)
+	GetUsageBreakdownByBundleForUser(ctx context.Context, arg GetUsageBreakdownByBundleForUserParams) ([]GetUsageBreakdownByBundleForUserRow, error)
+	GetUsageBreakdownByDayForUser(ctx context.Context, arg GetUsageBreakdownByDayForUserParams) ([]GetUsageBreakdownByDayForUserRow, error)
+	// ── Usage & cost (/usage/me) ─────────────────────────────────────────
+	// Usage is always scoped to the person who triggered the run — spec-09:
+	// "黑盒资源的用量算订阅者的" — a subscriber running someone else's
+	// published Bundle is the one whose usage this counts against, which
+	// `triggered_by` already captures regardless of `via_listing_id`.
+	GetUsageSummaryForUser(ctx context.Context, arg GetUsageSummaryForUserParams) (GetUsageSummaryForUserRow, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	IncrementListingSubscriberCount(ctx context.Context, id int64) error

@@ -73,6 +73,138 @@ func (q *Queries) GetBundleRun(ctx context.Context, id string) (BundleRun, error
 	return i, err
 }
 
+const getUsageBreakdownByBundleForUser = `-- name: GetUsageBreakdownByBundleForUser :many
+SELECT
+    b.bundle_ref AS key,
+    COALESCE(SUM(br.total_tokens), 0)::bigint AS tokens,
+    COALESCE(SUM(br.cost_usd), 0)::numeric AS cost_usd,
+    COUNT(*)::bigint AS run_count
+FROM bundle_runs br
+JOIN bundles b ON b.id = br.bundle_id
+WHERE br.triggered_by = $1 AND br.created_at >= $2
+GROUP BY b.bundle_ref
+ORDER BY tokens DESC
+`
+
+type GetUsageBreakdownByBundleForUserParams struct {
+	TriggeredBy int64              `json:"triggered_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type GetUsageBreakdownByBundleForUserRow struct {
+	Key      string         `json:"key"`
+	Tokens   int64          `json:"tokens"`
+	CostUsd  pgtype.Numeric `json:"cost_usd"`
+	RunCount int64          `json:"run_count"`
+}
+
+func (q *Queries) GetUsageBreakdownByBundleForUser(ctx context.Context, arg GetUsageBreakdownByBundleForUserParams) ([]GetUsageBreakdownByBundleForUserRow, error) {
+	rows, err := q.db.Query(ctx, getUsageBreakdownByBundleForUser, arg.TriggeredBy, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetUsageBreakdownByBundleForUserRow{}
+	for rows.Next() {
+		var i GetUsageBreakdownByBundleForUserRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.Tokens,
+			&i.CostUsd,
+			&i.RunCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUsageBreakdownByDayForUser = `-- name: GetUsageBreakdownByDayForUser :many
+SELECT
+    to_char(br.created_at, 'YYYY-MM-DD') AS key,
+    COALESCE(SUM(br.total_tokens), 0)::bigint AS tokens,
+    COALESCE(SUM(br.cost_usd), 0)::numeric AS cost_usd,
+    COUNT(*)::bigint AS run_count
+FROM bundle_runs br
+WHERE br.triggered_by = $1 AND br.created_at >= $2
+GROUP BY to_char(br.created_at, 'YYYY-MM-DD')
+ORDER BY key DESC
+`
+
+type GetUsageBreakdownByDayForUserParams struct {
+	TriggeredBy int64              `json:"triggered_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type GetUsageBreakdownByDayForUserRow struct {
+	Key      string         `json:"key"`
+	Tokens   int64          `json:"tokens"`
+	CostUsd  pgtype.Numeric `json:"cost_usd"`
+	RunCount int64          `json:"run_count"`
+}
+
+func (q *Queries) GetUsageBreakdownByDayForUser(ctx context.Context, arg GetUsageBreakdownByDayForUserParams) ([]GetUsageBreakdownByDayForUserRow, error) {
+	rows, err := q.db.Query(ctx, getUsageBreakdownByDayForUser, arg.TriggeredBy, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetUsageBreakdownByDayForUserRow{}
+	for rows.Next() {
+		var i GetUsageBreakdownByDayForUserRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.Tokens,
+			&i.CostUsd,
+			&i.RunCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUsageSummaryForUser = `-- name: GetUsageSummaryForUser :one
+
+SELECT
+    COALESCE(SUM(total_tokens), 0)::bigint AS total_tokens,
+    COALESCE(SUM(cost_usd), 0)::numeric AS total_cost_usd,
+    COUNT(*)::bigint AS run_count
+FROM bundle_runs
+WHERE triggered_by = $1 AND created_at >= $2
+`
+
+type GetUsageSummaryForUserParams struct {
+	TriggeredBy int64              `json:"triggered_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type GetUsageSummaryForUserRow struct {
+	TotalTokens  int64          `json:"total_tokens"`
+	TotalCostUsd pgtype.Numeric `json:"total_cost_usd"`
+	RunCount     int64          `json:"run_count"`
+}
+
+// ── Usage & cost (/usage/me) ─────────────────────────────────────────
+// Usage is always scoped to the person who triggered the run — spec-09:
+// "黑盒资源的用量算订阅者的" — a subscriber running someone else's
+// published Bundle is the one whose usage this counts against, which
+// `triggered_by` already captures regardless of `via_listing_id`.
+func (q *Queries) GetUsageSummaryForUser(ctx context.Context, arg GetUsageSummaryForUserParams) (GetUsageSummaryForUserRow, error) {
+	row := q.db.QueryRow(ctx, getUsageSummaryForUser, arg.TriggeredBy, arg.CreatedAt)
+	var i GetUsageSummaryForUserRow
+	err := row.Scan(&i.TotalTokens, &i.TotalCostUsd, &i.RunCount)
+	return i, err
+}
+
 const insertBundleRunEvent = `-- name: InsertBundleRunEvent :one
 INSERT INTO bundle_run_events (run_id, type, node, payload, is_internal)
 VALUES ($1, $2, $3, $4, $5)
