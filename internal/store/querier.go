@@ -10,6 +10,7 @@ import (
 
 type Querier interface {
 	CountActiveSubscribedListingsForAgentRef(ctx context.Context, arg CountActiveSubscribedListingsForAgentRefParams) (int64, error)
+	CountActiveSubscribedListingsForBundleRef(ctx context.Context, arg CountActiveSubscribedListingsForBundleRefParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	// Owner-view and subscriber-view queries are kept physically separate so the
 	// subscriber path can never accidentally SELECT `definition` (see
@@ -29,6 +30,7 @@ type Querier interface {
 	DeleteAgent(ctx context.Context, id int64) error
 	DeleteAgentsByRef(ctx context.Context, arg DeleteAgentsByRefParams) error
 	DeleteBundle(ctx context.Context, id int64) error
+	DeleteBundlesByRef(ctx context.Context, arg DeleteBundlesByRefParams) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
 	// Knowledge bases surface to an Agent as an entry in capabilities.tools
@@ -41,6 +43,7 @@ type Querier interface {
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetAgentDisplayForSubscriber(ctx context.Context, id int64) (GetAgentDisplayForSubscriberRow, error)
 	GetAgentForOwner(ctx context.Context, arg GetAgentForOwnerParams) (Agent, error)
+	GetAgentLatestByRef(ctx context.Context, arg GetAgentLatestByRefParams) (Agent, error)
 	GetBundleDisplayForSubscriber(ctx context.Context, id int64) (GetBundleDisplayForSubscriberRow, error)
 	GetBundleForOwner(ctx context.Context, arg GetBundleForOwnerParams) (Bundle, error)
 	GetBundleRun(ctx context.Context, id string) (BundleRun, error)
@@ -69,7 +72,10 @@ type Querier interface {
 	ListBundleRunEventsAfterExternal(ctx context.Context, arg ListBundleRunEventsAfterExternalParams) ([]BundleRunEvent, error)
 	ListBundleRunsByBundleAndStatus(ctx context.Context, arg ListBundleRunsByBundleAndStatusParams) ([]BundleRun, error)
 	ListBundleRunsForUser(ctx context.Context, arg ListBundleRunsForUserParams) ([]BundleRun, error)
+	ListBundleVersionsForOwner(ctx context.Context, arg ListBundleVersionsForOwnerParams) ([]Bundle, error)
 	ListBundlesForOwner(ctx context.Context, ownerUserID int64) ([]Bundle, error)
+	// One row per bundle_ref (its most recently created version).
+	ListBundlesForOwnerLatestPage(ctx context.Context, arg ListBundlesForOwnerLatestPageParams) ([]Bundle, error)
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
 	ListListingsByType(ctx context.Context, arg ListListingsByTypeParams) ([]MarketplaceListing, error)
 	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)

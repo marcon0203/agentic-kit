@@ -11,6 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveSubscribedListingsForBundleRef = `-- name: CountActiveSubscribedListingsForBundleRef :one
+SELECT count(*) FROM marketplace_listings ml
+JOIN bundles b ON b.id = ml.resource_id
+WHERE ml.resource_type = 'bundle' AND b.owner_user_id = $1 AND b.bundle_ref = $2 AND ml.subscriber_count > 0
+`
+
+type CountActiveSubscribedListingsForBundleRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	BundleRef   string `json:"bundle_ref"`
+}
+
+func (q *Queries) CountActiveSubscribedListingsForBundleRef(ctx context.Context, arg CountActiveSubscribedListingsForBundleRefParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveSubscribedListingsForBundleRef, arg.OwnerUserID, arg.BundleRef)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createBundle = `-- name: CreateBundle :one
 INSERT INTO bundles (owner_user_id, bundle_ref, version, definition, display_meta)
 VALUES ($1, $2, $3, $4, $5)
@@ -54,6 +72,20 @@ DELETE FROM bundles WHERE id = $1
 
 func (q *Queries) DeleteBundle(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, deleteBundle, id)
+	return err
+}
+
+const deleteBundlesByRef = `-- name: DeleteBundlesByRef :exec
+DELETE FROM bundles WHERE owner_user_id = $1 AND bundle_ref = $2
+`
+
+type DeleteBundlesByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	BundleRef   string `json:"bundle_ref"`
+}
+
+func (q *Queries) DeleteBundlesByRef(ctx context.Context, arg DeleteBundlesByRefParams) error {
+	_, err := q.db.Exec(ctx, deleteBundlesByRef, arg.OwnerUserID, arg.BundleRef)
 	return err
 }
 
@@ -116,6 +148,47 @@ func (q *Queries) GetBundleForOwner(ctx context.Context, arg GetBundleForOwnerPa
 	return i, err
 }
 
+const listBundleVersionsForOwner = `-- name: ListBundleVersionsForOwner :many
+SELECT id, owner_user_id, bundle_ref, version, definition, display_meta, status, immutable, created_at FROM bundles
+WHERE owner_user_id = $1 AND bundle_ref = $2
+ORDER BY created_at DESC
+`
+
+type ListBundleVersionsForOwnerParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	BundleRef   string `json:"bundle_ref"`
+}
+
+func (q *Queries) ListBundleVersionsForOwner(ctx context.Context, arg ListBundleVersionsForOwnerParams) ([]Bundle, error) {
+	rows, err := q.db.Query(ctx, listBundleVersionsForOwner, arg.OwnerUserID, arg.BundleRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Bundle{}
+	for rows.Next() {
+		var i Bundle
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.BundleRef,
+			&i.Version,
+			&i.Definition,
+			&i.DisplayMeta,
+			&i.Status,
+			&i.Immutable,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBundlesForOwner = `-- name: ListBundlesForOwner :many
 SELECT id, owner_user_id, bundle_ref, version, definition, display_meta, status, immutable, created_at FROM bundles
 WHERE owner_user_id = $1
@@ -124,6 +197,51 @@ ORDER BY bundle_ref, created_at DESC
 
 func (q *Queries) ListBundlesForOwner(ctx context.Context, ownerUserID int64) ([]Bundle, error) {
 	rows, err := q.db.Query(ctx, listBundlesForOwner, ownerUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Bundle{}
+	for rows.Next() {
+		var i Bundle
+		if err := rows.Scan(
+			&i.ID,
+			&i.OwnerUserID,
+			&i.BundleRef,
+			&i.Version,
+			&i.Definition,
+			&i.DisplayMeta,
+			&i.Status,
+			&i.Immutable,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBundlesForOwnerLatestPage = `-- name: ListBundlesForOwnerLatestPage :many
+SELECT DISTINCT ON (bundle_ref) id, owner_user_id, bundle_ref, version, definition, display_meta, status, immutable, created_at
+FROM bundles
+WHERE owner_user_id = $1 AND bundle_ref > $2
+ORDER BY bundle_ref ASC, created_at DESC
+LIMIT $3
+`
+
+type ListBundlesForOwnerLatestPageParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	BundleRef   string `json:"bundle_ref"`
+	Limit       int32  `json:"limit"`
+}
+
+// One row per bundle_ref (its most recently created version).
+func (q *Queries) ListBundlesForOwnerLatestPage(ctx context.Context, arg ListBundlesForOwnerLatestPageParams) ([]Bundle, error) {
+	rows, err := q.db.Query(ctx, listBundlesForOwnerLatestPage, arg.OwnerUserID, arg.BundleRef, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

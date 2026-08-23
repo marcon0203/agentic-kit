@@ -143,13 +143,13 @@ func (h *ResourceHandlers) Create(w http.ResponseWriter, r *http.Request) {
 
 	var details []FieldError
 	if !isValidResourceKind(req.Type) {
-		details = append(details, FieldError{Field: "type", Message: "must be one of tool, skill, mcp, knowledge_base"})
+		details = append(details, FieldError{Field: "type", Reason: "must be one of tool, skill, mcp, knowledge_base"})
 	}
 	if !resourceRefPattern.MatchString(req.Ref) {
-		details = append(details, FieldError{Field: "ref", Message: "must match ^[a-z][a-z0-9_-]*$"})
+		details = append(details, FieldError{Field: "ref", Reason: "must match ^[a-z][a-z0-9_-]*$"})
 	}
 	if req.Config == nil {
-		details = append(details, FieldError{Field: "config", Message: "required"})
+		details = append(details, FieldError{Field: "config", Reason: "required"})
 	}
 	if len(details) > 0 {
 		writeErrDetails(w, r, http.StatusBadRequest, ErrValidationFailed, "validation failed", details)

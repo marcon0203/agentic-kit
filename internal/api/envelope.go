@@ -22,9 +22,11 @@ type Envelope struct {
 
 // FieldError describes a single field-level validation failure, used in
 // the `details` payload of schema-validation error responses (40001/40002).
+// The wire field is `reason`, not `message` — api/openapi.yaml's Envelope
+// schema requires [field, reason] on every details entry.
 type FieldError struct {
-	Field   string `json:"field"`
-	Message string `json:"message"`
+	Field  string `json:"field"`
+	Reason string `json:"reason"`
 }
 
 // Page wraps a cursor-paginated list per 架构设计文档 6.4. Items must never

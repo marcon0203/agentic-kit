@@ -231,7 +231,7 @@ func (h *AgentHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 	if len(bundleRefs) > 0 {
 		details := make([]FieldError, 0, len(bundleRefs))
 		for _, b := range bundleRefs {
-			details = append(details, FieldError{Field: "referenced_by", Message: "Bundle " + b.BundleRef + " v" + b.Version + " 正在引用"})
+			details = append(details, FieldError{Field: "referenced_by", Reason: "Bundle " + b.BundleRef + " v" + b.Version + " 正在引用"})
 		}
 		writeErrDetails(w, r, http.StatusConflict, ErrAgentVersionNotFound, "该 Agent 正被其他 Bundle 引用，无法删除", details)
 		return
@@ -248,7 +248,7 @@ func (h *AgentHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 func toAPIFieldErrors(errs []dslschema.FieldError) []FieldError {
 	out := make([]FieldError, len(errs))
 	for i, e := range errs {
-		out[i] = FieldError{Field: e.Field, Message: e.Message}
+		out[i] = FieldError{Field: e.Field, Reason: e.Message}
 	}
 	return out
 }

@@ -188,6 +188,35 @@ func (q *Queries) GetAgentForOwner(ctx context.Context, arg GetAgentForOwnerPara
 	return i, err
 }
 
+const getAgentLatestByRef = `-- name: GetAgentLatestByRef :one
+SELECT id, owner_user_id, agent_ref, version, definition, display_meta, status, immutable, created_at FROM agents
+WHERE owner_user_id = $1 AND agent_ref = $2
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetAgentLatestByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	AgentRef    string `json:"agent_ref"`
+}
+
+func (q *Queries) GetAgentLatestByRef(ctx context.Context, arg GetAgentLatestByRefParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, getAgentLatestByRef, arg.OwnerUserID, arg.AgentRef)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.AgentRef,
+		&i.Version,
+		&i.Definition,
+		&i.DisplayMeta,
+		&i.Status,
+		&i.Immutable,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listAgentVersionsForOwner = `-- name: ListAgentVersionsForOwner :many
 SELECT id, owner_user_id, agent_ref, version, definition, display_meta, status, immutable, created_at FROM agents
 WHERE owner_user_id = $1 AND agent_ref = $2

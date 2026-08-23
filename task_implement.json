@@ -141,7 +141,7 @@
       "id": 7,
       "type": "bundle_center",
       "name": "Bundle 编排定义与图校验",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-07-bundle-center.md",
       "depends_on": [
         6

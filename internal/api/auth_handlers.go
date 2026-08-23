@@ -57,13 +57,13 @@ func (h *AuthHandlers) Register(w http.ResponseWriter, r *http.Request) {
 
 	var details []FieldError
 	if req.Email == "" {
-		details = append(details, FieldError{Field: "email", Message: "required"})
+		details = append(details, FieldError{Field: "email", Reason: "required"})
 	}
 	if len(req.Password) < 8 {
-		details = append(details, FieldError{Field: "password", Message: "must be at least 8 characters"})
+		details = append(details, FieldError{Field: "password", Reason: "must be at least 8 characters"})
 	}
 	if req.DisplayName == "" {
-		details = append(details, FieldError{Field: "display_name", Message: "required"})
+		details = append(details, FieldError{Field: "display_name", Reason: "required"})
 	}
 	if len(details) > 0 {
 		writeErrDetails(w, r, http.StatusBadRequest, ErrValidationFailed, "validation failed", details)

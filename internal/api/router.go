@@ -24,6 +24,7 @@ type RouterConfig struct {
 	APIKeys          APIKeyLookup
 	Resources        *ResourceHandlers
 	Agents           *AgentHandlers
+	Bundles          *BundleHandlers
 }
 
 // NewRouter assembles the top-level chi router with the shared middleware
@@ -82,11 +83,16 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Get("/agents/{ref}/versions", cfg.Agents.ListVersions)
 				r.Delete("/agents/{ref}", cfg.Agents.Delete)
 			}
-			// Further feature routers (Bundles, Runs, ...) are mounted here
-			// by their respective spec tasks. Endpoints that need a
-			// tighter limit (e.g. run creation: 20/min) apply an
-			// additional NewRateLimiter(20, time.Minute, ...) at the route
-			// group level.
+			if cfg.Bundles != nil {
+				r.Get("/bundles", cfg.Bundles.List)
+				r.Post("/bundles", cfg.Bundles.Create)
+				r.Delete("/bundles/{ref}", cfg.Bundles.Delete)
+			}
+			// Further feature routers (Runs, ...) are mounted here by
+			// their respective spec tasks. Endpoints that need a tighter
+			// limit (e.g. run creation: 20/min) apply an additional
+			// NewRateLimiter(20, time.Minute, ...) at the route group
+			// level.
 		})
 	})
 

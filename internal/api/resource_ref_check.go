@@ -97,9 +97,9 @@ func (c *ResourceRefChecker) CheckCapabilities(ctx context.Context, ownerID int6
 			return nil, err
 		}
 		if !status.found {
-			errs = append(errs, FieldError{Field: fmt.Sprintf("capabilities.tools[%d]", i), Message: fmt.Sprintf("resource %q does not exist", ref)})
+			errs = append(errs, FieldError{Field: fmt.Sprintf("capabilities.tools[%d]", i), Reason: fmt.Sprintf("resource %q does not exist", ref)})
 		} else if !status.enabled {
-			errs = append(errs, FieldError{Field: fmt.Sprintf("capabilities.tools[%d]", i), Message: fmt.Sprintf("resource %q is disabled", ref)})
+			errs = append(errs, FieldError{Field: fmt.Sprintf("capabilities.tools[%d]", i), Reason: fmt.Sprintf("resource %q is disabled", ref)})
 		}
 	}
 
@@ -109,9 +109,9 @@ func (c *ResourceRefChecker) CheckCapabilities(ctx context.Context, ownerID int6
 			return nil, err
 		}
 		if !status.found {
-			errs = append(errs, FieldError{Field: fmt.Sprintf("capabilities.skills[%d]", i), Message: fmt.Sprintf("skill %q does not exist", ref)})
+			errs = append(errs, FieldError{Field: fmt.Sprintf("capabilities.skills[%d]", i), Reason: fmt.Sprintf("skill %q does not exist", ref)})
 		} else if !status.enabled {
-			errs = append(errs, FieldError{Field: fmt.Sprintf("capabilities.skills[%d]", i), Message: fmt.Sprintf("skill %q is disabled", ref)})
+			errs = append(errs, FieldError{Field: fmt.Sprintf("capabilities.skills[%d]", i), Reason: fmt.Sprintf("skill %q is disabled", ref)})
 		}
 	}
 

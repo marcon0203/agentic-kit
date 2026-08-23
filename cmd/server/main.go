@@ -57,6 +57,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("compile agent schema: %w", err)
 	}
+	bundleValidator, err := dslschema.NewBundleValidator()
+	if err != nil {
+		return fmt.Errorf("compile bundle schema: %w", err)
+	}
 
 	queries := store.New(pool)
 	routerCfg := api.RouterConfig{
@@ -67,6 +71,7 @@ func run() error {
 		APIKeys:          api.NewPostgresAPIKeyLookup(queries),
 		Resources:        api.NewResourceHandlers(queries, api.NewHTTPReachabilityChecker(), aesKey),
 		Agents:           api.NewAgentHandlers(queries, agentValidator, api.NewResourceRefChecker(queries)),
+		Bundles:          api.NewBundleHandlers(queries, bundleValidator),
 	}
 
 	handler := api.NewRouter(logger, routerCfg)

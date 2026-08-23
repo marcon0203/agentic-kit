@@ -30,6 +30,12 @@ SELECT * FROM agents
 WHERE owner_user_id = $1 AND agent_ref = $2
 ORDER BY created_at DESC;
 
+-- name: GetAgentLatestByRef :one
+SELECT * FROM agents
+WHERE owner_user_id = $1 AND agent_ref = $2
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: CountActiveSubscribedListingsForAgentRef :one
 SELECT count(*) FROM marketplace_listings ml
 JOIN agents a ON a.id = ml.resource_id

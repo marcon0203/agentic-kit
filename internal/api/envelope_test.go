@@ -49,7 +49,7 @@ func TestWriteErrDetails_IncludesFieldErrors(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/agents", nil)
 
 	writeErrDetails(w, r, http.StatusBadRequest, ErrAgentSchemaInvalid, "invalid agent definition",
-		[]FieldError{{Field: "capabilities.tools[2]", Message: "资源 mcp/internal-search 已被禁用"}})
+		[]FieldError{{Field: "capabilities.tools[2]", Reason: "资源 mcp/internal-search 已被禁用"}})
 
 	var env Envelope
 	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
