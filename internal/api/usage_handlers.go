@@ -2,27 +2,16 @@ package api
 
 import (
 	"net/http"
-	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/marcon0203/agentic-kit/internal/store"
+	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 )
 
-// UsageHandlers implements GET /usage/me per api/openapi.yaml and
-// spec-09-model-gateway.md. Usage is always scoped to the requesting
-// user's own `bundle_runs.triggered_by` — spec-09: "黑盒资源的用量算订阅
-// 者的", a subscriber running someone else's published Bundle is billed
-// against their own usage, not the author's.
+// UsageHandlers is the HTTP transport for GET /usage/me (spec-09).
 type UsageHandlers struct {
-	Queries store.Querier
-	// now is overridable in tests so period-boundary math is deterministic.
-	now func() time.Time
+	svc *modelcenter.Service
 }
 
-func NewUsageHandlers(q store.Querier) *UsageHandlers {
-	return &UsageHandlers{Queries: q, now: time.Now}
-}
+func NewUsageHandlers(svc *modelcenter.Service) *UsageHandlers { return &UsageHandlers{svc: svc} }
 
 type usageBreakdownDTO struct {
 	Key      string  `json:"key"`
@@ -39,36 +28,6 @@ type usageSummaryDTO struct {
 	Breakdown    []usageBreakdownDTO `json:"breakdown"`
 }
 
-func numericToFloat64(n pgtype.Numeric) float64 {
-	f, err := n.Float64Value()
-	if err != nil || !f.Valid {
-		return 0
-	}
-	return f.Float64
-}
-
-// periodWindow returns the query cutoff (usage since this instant, UTC)
-// and the human-readable period label the response echoes back.
-func periodWindow(now time.Time, period string) (pgtype.Timestamptz, string) {
-	now = now.UTC()
-	var since time.Time
-	var label string
-	switch period {
-	case "day":
-		since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-		label = since.Format("2006-01-02")
-	case "week":
-		// Monday-anchored week, matching ISO week convention.
-		offset := (int(now.Weekday()) + 6) % 7
-		since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -offset)
-		label = since.Format("2006-01-02")
-	default: // "month"
-		since = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-		label = since.Format("2006-01")
-	}
-	return pgtype.Timestamptz{Valid: true, Time: since}, label
-}
-
 // GetMyUsage handles GET /usage/me.
 func (h *UsageHandlers) GetMyUsage(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
@@ -77,57 +36,20 @@ func (h *UsageHandlers) GetMyUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	period := r.URL.Query().Get("period")
-	if period == "" {
-		period = "month"
-	}
-	if period != "day" && period != "week" && period != "month" {
-		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid period")
-		return
-	}
-	groupBy := r.URL.Query().Get("group_by")
-	if groupBy == "" {
-		groupBy = "bundle"
-	}
-	if groupBy != "bundle" && groupBy != "day" {
-		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid group_by")
-		return
-	}
-
-	since, label := periodWindow(h.now(), period)
-
-	summary, err := h.Queries.GetUsageSummaryForUser(r.Context(), store.GetUsageSummaryForUserParams{TriggeredBy: userID, CreatedAt: since})
+	report, err := h.svc.Usage(r.Context(), userID, modelcenter.UsageQuery{
+		Period: r.URL.Query().Get("period"), GroupBy: r.URL.Query().Get("group_by"),
+	})
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
+		writeDomainErr(w, r, err)
 		return
 	}
 
-	var breakdown []usageBreakdownDTO
-	if groupBy == "bundle" {
-		rows, err := h.Queries.GetUsageBreakdownByBundleForUser(r.Context(), store.GetUsageBreakdownByBundleForUserParams{TriggeredBy: userID, CreatedAt: since})
-		if err != nil {
-			writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-			return
-		}
-		for _, row := range rows {
-			breakdown = append(breakdown, usageBreakdownDTO{Key: row.Key, Tokens: row.Tokens, CostUSD: numericToFloat64(row.CostUsd), RunCount: int32(row.RunCount)})
-		}
-	} else {
-		rows, err := h.Queries.GetUsageBreakdownByDayForUser(r.Context(), store.GetUsageBreakdownByDayForUserParams{TriggeredBy: userID, CreatedAt: since})
-		if err != nil {
-			writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-			return
-		}
-		for _, row := range rows {
-			breakdown = append(breakdown, usageBreakdownDTO{Key: row.Key, Tokens: row.Tokens, CostUSD: numericToFloat64(row.CostUsd), RunCount: int32(row.RunCount)})
-		}
+	breakdown := make([]usageBreakdownDTO, 0, len(report.Breakdown))
+	for _, b := range report.Breakdown {
+		breakdown = append(breakdown, usageBreakdownDTO{Key: b.Key, Tokens: b.Tokens, CostUSD: b.CostUSD, RunCount: b.RunCount})
 	}
-	if breakdown == nil {
-		breakdown = []usageBreakdownDTO{}
-	}
-
 	writeJSON(w, r, http.StatusOK, usageSummaryDTO{
-		Period: label, TotalTokens: summary.TotalTokens, TotalCostUSD: numericToFloat64(summary.TotalCostUsd),
-		RunCount: int32(summary.RunCount), Breakdown: breakdown,
+		Period: report.Period, TotalTokens: report.TotalTokens, TotalCostUSD: report.TotalCostUSD,
+		RunCount: report.RunCount, Breakdown: breakdown,
 	})
 }

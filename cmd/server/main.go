@@ -18,6 +18,7 @@ import (
 
 	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
+	adaptermodelgateway "github.com/marcon0203/agentic-kit/internal/adapter/modelgateway"
 	"github.com/marcon0203/agentic-kit/internal/adapter/orchestrator"
 	"github.com/marcon0203/agentic-kit/internal/adapter/postgres"
 	adapterschema "github.com/marcon0203/agentic-kit/internal/adapter/schema"
@@ -28,6 +29,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/agent"
 	"github.com/marcon0203/agentic-kit/internal/domain/bundle"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
+	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 	"github.com/marcon0203/agentic-kit/internal/domain/operation"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	domainrun "github.com/marcon0203/agentic-kit/internal/domain/run"
@@ -143,6 +145,15 @@ func run() error {
 		orchestrator.NewRunIDGenerator(),
 	)
 
+	// Providers and usage are two halves of one context: which providers
+	// this user may reach, and what reaching them has cost.
+	modelCenter := modelcenter.NewService(
+		postgres.NewModelProviderRepository(queries),
+		adaptercrypto.NewCipher(aesKey),
+		adaptermodelgateway.NewConnectivityChecker(),
+		postgres.NewUsageRepository(queries),
+	)
+
 	routerCfg := api.RouterConfig{
 		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
 		DB:               pool,
@@ -154,8 +165,8 @@ func run() error {
 		Agents:           api.NewAgentHandlers(agentService),
 		Bundles:          api.NewBundleHandlers(bundleService),
 		Marketplace:      api.NewMarketplaceHandlers(marketplaceService),
-		ModelProviders:   api.NewModelProviderHandlers(queries, aesKey),
-		Usage:            api.NewUsageHandlers(queries),
+		ModelProviders:   api.NewModelProviderHandlers(modelCenter),
+		Usage:            api.NewUsageHandlers(modelCenter),
 		Runs:             api.NewRunHandlers(runService),
 		Operations: api.NewOperationHandlers(operation.NewService(
 			postgres.NewReportRepository(queries),

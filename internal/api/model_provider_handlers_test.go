@@ -3,170 +3,266 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/marcon0203/agentic-kit/internal/crypto"
-	"github.com/marcon0203/agentic-kit/internal/modelgateway"
-	"github.com/marcon0203/agentic-kit/internal/store"
+	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 )
 
-type fakeModelProviderQuerier struct {
-	store.Querier
-	rows   []store.ListModelProvidersForOwnerRow
-	nextID int64
-	// keyed by id: the raw (encrypted) credentials, to prove List never
-	// touches this and Create actually stored something non-empty.
-	credentials map[int64][]byte
+// The model-centre rules — check the credential before storing it, never
+// store plaintext, whose usage a report describes, how a period is sliced
+// — are tested against the service in internal/domain/modelcenter. What is
+// left here is transport: the DTO shapes, and the fact that no response
+// body can carry a credential.
+
+type stubProviderRepo struct {
+	providers []modelcenter.Provider
+	stored    []string
+	nextID    int64
 }
 
-func newFakeModelProviderQuerier() *fakeModelProviderQuerier {
-	return &fakeModelProviderQuerier{nextID: 1, credentials: map[int64][]byte{}}
-}
-
-func (f *fakeModelProviderQuerier) ListModelProvidersForOwner(_ context.Context, ownerUserID int64) ([]store.ListModelProvidersForOwnerRow, error) {
-	var out []store.ListModelProvidersForOwnerRow
-	for _, row := range f.rows {
-		if row.OwnerUserID == ownerUserID {
-			out = append(out, row)
+func (s *stubProviderRepo) ListForOwner(_ context.Context, ownerID int64) ([]modelcenter.Provider, error) {
+	var out []modelcenter.Provider
+	for _, p := range s.providers {
+		if p.OwnerID == ownerID {
+			out = append(out, p)
 		}
 	}
 	return out, nil
 }
 
-func (f *fakeModelProviderQuerier) CreateModelProvider(_ context.Context, arg store.CreateModelProviderParams) (store.CreateModelProviderRow, error) {
-	row := store.CreateModelProviderRow{
-		ID: f.nextID, OwnerUserID: arg.OwnerUserID, Provider: arg.Provider, Status: 1,
-		CreatedAt: pgtype.Timestamptz{Valid: true},
-	}
-	f.rows = append(f.rows, store.ListModelProvidersForOwnerRow(row))
-	f.credentials[f.nextID] = arg.Credentials
-	f.nextID++
-	return row, nil
+func (s *stubProviderRepo) Store(_ context.Context, ownerID int64, provider, ciphertext string) (modelcenter.Provider, error) {
+	s.stored = append(s.stored, ciphertext)
+	s.nextID++
+	p := modelcenter.Provider{ID: s.nextID, OwnerID: ownerID, Name: provider, Status: 1, CreatedAt: time.Now()}
+	s.providers = append(s.providers, p)
+	return p, nil
 }
 
-func fixedValidator(name string, err error) func(string) modelgateway.Validator {
-	return func(provider string) modelgateway.Validator {
-		if provider != name {
-			return nil
-		}
-		return fakeValidator{err: err}
+type stubCipher struct{}
+
+func (stubCipher) Encrypt(plaintext string) (string, error) { return "enc(" + plaintext + ")", nil }
+
+type stubChecker struct{ err error }
+
+func (s stubChecker) Check(context.Context, string, string) error { return s.err }
+
+type stubUsageReader struct {
+	tokens   int64
+	cost     float64
+	runCount int32
+	byBundle []modelcenter.UsageBucket
+	byDay    []modelcenter.UsageBucket
+}
+
+func (s *stubUsageReader) Summary(context.Context, int64, time.Time) (int64, float64, int32, error) {
+	return s.tokens, s.cost, s.runCount, nil
+}
+
+func (s *stubUsageReader) BreakdownByBundle(context.Context, int64, time.Time) ([]modelcenter.UsageBucket, error) {
+	return s.byBundle, nil
+}
+
+func (s *stubUsageReader) BreakdownByDay(context.Context, int64, time.Time) ([]modelcenter.UsageBucket, error) {
+	return s.byDay, nil
+}
+
+type modelCenterFixture struct {
+	providers *ModelProviderHandlers
+	usage     *UsageHandlers
+	repo      *stubProviderRepo
+	reader    *stubUsageReader
+}
+
+func newModelCenterFixture(checkErr error) *modelCenterFixture {
+	repo := &stubProviderRepo{}
+	reader := &stubUsageReader{}
+	svc := modelcenter.NewService(repo, stubCipher{}, stubChecker{err: checkErr}, reader)
+	return &modelCenterFixture{
+		providers: NewModelProviderHandlers(svc), usage: NewUsageHandlers(svc),
+		repo: repo, reader: reader,
 	}
 }
 
-type fakeValidator struct{ err error }
-
-func (v fakeValidator) Validate(context.Context, string) error { return v.err }
-
-func doModelProviderRequest(h http.HandlerFunc, userID int64, method, path string, body any) *httptest.ResponseRecorder {
-	var bodyReader *strings.Reader
+func doModelCenterRequest(h http.HandlerFunc, userID int64, method, path string, body any) *httptest.ResponseRecorder {
+	var reader *strings.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
-		bodyReader = strings.NewReader(string(b))
+		reader = strings.NewReader(string(b))
 	} else {
-		bodyReader = strings.NewReader("")
+		reader = strings.NewReader("")
 	}
-	req := httptest.NewRequest(method, path, bodyReader)
+	req := httptest.NewRequest(method, path, reader)
 	req = req.WithContext(WithUserID(req.Context(), userID))
 	rr := httptest.NewRecorder()
 	h(rr, req)
 	return rr
 }
 
-func TestModelProviderCreate_ValidCredentials_Succeeds(t *testing.T) {
-	f := newFakeModelProviderQuerier()
-	aesKey := []byte("01234567890123456789012345678901"[:32])
-	h := &ModelProviderHandlers{Queries: f, AESKey: aesKey, NewValidator: fixedValidator("anthropic", nil)}
+func TestModelProviderCreate_ResponseShape(t *testing.T) {
+	f := newModelCenterFixture(nil)
 
-	rr := doModelProviderRequest(h.Create, 1, http.MethodPost, "/model-providers", createModelProviderRequest{
-		Provider: "anthropic", APIKey: "sk-real-secret-key",
-	})
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
-	}
-	if strings.Contains(rr.Body.String(), "sk-real-secret-key") {
-		t.Fatalf("response leaked the plaintext api_key: %s", rr.Body.String())
-	}
-	if strings.Contains(rr.Body.String(), "credentials") {
-		t.Fatalf("response exposed a credentials field: %s", rr.Body.String())
+	w := doModelCenterRequest(f.providers.Create, 1, http.MethodPost, "/model-providers",
+		createModelProviderRequest{Provider: "anthropic", APIKey: "sk-ant-secret"})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
 	}
 
-	stored := f.credentials[1]
-	if len(stored) == 0 || strings.Contains(string(stored), "sk-real-secret-key") {
-		t.Fatalf("stored credentials must be encrypted, not plaintext: %q", stored)
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	dataBytes, _ := json.Marshal(env.Data)
+	var dto modelProviderDTO
+	if err := json.Unmarshal(dataBytes, &dto); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
 	}
-	plain, err := crypto.Decrypt(aesKey, string(stored))
-	if err != nil || string(plain) != "sk-real-secret-key" {
-		t.Fatalf("expected stored credentials to decrypt back to the original key, got %q, err=%v", plain, err)
+	if dto.Provider != "anthropic" || dto.Status != 1 || dto.ID == "" {
+		t.Fatalf("unexpected provider: %+v", dto)
 	}
 }
 
-func TestModelProviderCreate_InvalidCredentials_Returns422(t *testing.T) {
-	f := newFakeModelProviderQuerier()
-	h := &ModelProviderHandlers{Queries: f, AESKey: make([]byte, 32), NewValidator: fixedValidator("openai", modelgateway.ErrCredentialsInvalid)}
+// The response is checked for both the plaintext key and the ciphertext:
+// echoing back either would be a leak, and the ciphertext is the easier
+// one to return by accident.
+func TestModelProviderCreate_ResponseCarriesNoCredential(t *testing.T) {
+	f := newModelCenterFixture(nil)
 
-	rr := doModelProviderRequest(h.Create, 1, http.MethodPost, "/model-providers", createModelProviderRequest{
-		Provider: "openai", APIKey: "bad-key",
-	})
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("expected 422, got %d: %s", rr.Code, rr.Body.String())
+	w := doModelCenterRequest(f.providers.Create, 1, http.MethodPost, "/model-providers",
+		createModelProviderRequest{Provider: "anthropic", APIKey: "sk-ant-must-not-appear"})
+
+	body := w.Body.String()
+	if strings.Contains(body, "sk-ant-must-not-appear") {
+		t.Fatalf("plaintext key leaked into the response: %s", body)
 	}
-	if !containsCode(rr.Body.String(), ErrProviderCredsInvalid) {
-		t.Fatalf("expected 60002 in body, got %s", rr.Body.String())
-	}
-	if len(f.rows) != 0 {
-		t.Fatalf("expected nothing stored on invalid credentials, got %+v", f.rows)
+	for _, ciphertext := range f.repo.stored {
+		if strings.Contains(body, ciphertext) {
+			t.Fatalf("ciphertext leaked into the response: %s", body)
+		}
 	}
 }
 
-func TestModelProviderCreate_UnknownProvider_Returns400(t *testing.T) {
-	f := newFakeModelProviderQuerier()
-	h := &ModelProviderHandlers{Queries: f, AESKey: make([]byte, 32), NewValidator: func(string) modelgateway.Validator { return nil }}
+func TestModelProviderCreate_InvalidCredentialsReturns422(t *testing.T) {
+	f := newModelCenterFixture(errors.New("provider rejected the credentials"))
 
-	rr := doModelProviderRequest(h.Create, 1, http.MethodPost, "/model-providers", createModelProviderRequest{
-		Provider: "bogus", APIKey: "key",
-	})
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	w := doModelCenterRequest(f.providers.Create, 1, http.MethodPost, "/model-providers",
+		createModelProviderRequest{Provider: "anthropic", APIKey: "sk-bad"})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", w.Code, w.Body.String())
+	}
+	if !containsCode(w.Body.String(), ErrProviderCredsInvalid) {
+		t.Fatalf("body should carry ErrProviderCredsInvalid: %s", w.Body.String())
 	}
 }
 
-func TestModelProviderList_NeverIncludesCredentials(t *testing.T) {
-	f := newFakeModelProviderQuerier()
-	f.rows = []store.ListModelProvidersForOwnerRow{
-		{ID: 1, OwnerUserID: 1, Provider: "anthropic", Status: 1, CreatedAt: pgtype.Timestamptz{Valid: true}},
-	}
-	h := &ModelProviderHandlers{Queries: f, AESKey: make([]byte, 32)}
+func TestModelProviderCreate_UnknownProviderReturns400(t *testing.T) {
+	f := newModelCenterFixture(modelcenter.ErrUnknownProvider)
 
-	rr := doModelProviderRequest(h.List, 1, http.MethodGet, "/model-providers", nil)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	w := doModelCenterRequest(f.providers.Create, 1, http.MethodPost, "/model-providers",
+		createModelProviderRequest{Provider: "wormhole", APIKey: "sk-x"})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
-	if strings.Contains(strings.ToLower(rr.Body.String()), "credential") || strings.Contains(strings.ToLower(rr.Body.String()), "api_key") {
-		t.Fatalf("list response must never mention credentials: %s", rr.Body.String())
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	if len(env.Details) == 0 {
+		t.Fatal("expected a field-level detail naming provider")
 	}
 }
 
-func TestModelProviderList_ScopedToOwner(t *testing.T) {
-	f := newFakeModelProviderQuerier()
-	f.rows = []store.ListModelProvidersForOwnerRow{
-		{ID: 1, OwnerUserID: 1, Provider: "anthropic", Status: 1, CreatedAt: pgtype.Timestamptz{Valid: true}},
-		{ID: 2, OwnerUserID: 2, Provider: "openai", Status: 1, CreatedAt: pgtype.Timestamptz{Valid: true}},
-	}
-	h := &ModelProviderHandlers{Queries: f, AESKey: make([]byte, 32)}
+func TestModelProviderCreate_MalformedBodyReturns400(t *testing.T) {
+	f := newModelCenterFixture(nil)
 
-	rr := doModelProviderRequest(h.List, 1, http.MethodGet, "/model-providers", nil)
-	var env struct {
-		Data []modelProviderDTO `json:"data"`
+	req := httptest.NewRequest(http.MethodPost, "/model-providers", strings.NewReader("{not json"))
+	req = req.WithContext(WithUserID(req.Context(), 1))
+	w := httptest.NewRecorder()
+	f.providers.Create(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &env); err != nil {
-		t.Fatalf("decode: %v", err)
+}
+
+func TestModelProviderList_ScopedToOwnerAndNeverNull(t *testing.T) {
+	f := newModelCenterFixture(nil)
+	doModelCenterRequest(f.providers.Create, 1, http.MethodPost, "/model-providers",
+		createModelProviderRequest{Provider: "anthropic", APIKey: "sk-a"})
+
+	w := doModelCenterRequest(f.providers.List, 1, http.MethodGet, "/model-providers", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
-	if len(env.Data) != 1 || env.Data[0].Provider != "anthropic" {
-		t.Fatalf("expected only owner 1's provider, got %+v", env.Data)
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	dataBytes, _ := json.Marshal(env.Data)
+	var items []modelProviderDTO
+	_ = json.Unmarshal(dataBytes, &items)
+	if len(items) != 1 || items[0].Provider != "anthropic" {
+		t.Fatalf("unexpected list: %+v", items)
+	}
+
+	other := doModelCenterRequest(f.providers.List, 999, http.MethodGet, "/model-providers", nil)
+	if strings.Contains(other.Body.String(), "anthropic") {
+		t.Fatalf("another user saw this provider: %s", other.Body.String())
+	}
+	if strings.Contains(other.Body.String(), "null") {
+		t.Fatalf("an empty list must serialise as []: %s", other.Body.String())
+	}
+}
+
+func TestGetMyUsage_ResponseShape(t *testing.T) {
+	f := newModelCenterFixture(nil)
+	f.reader.tokens, f.reader.cost, f.reader.runCount = 1200, 0.42, 3
+	f.reader.byBundle = []modelcenter.UsageBucket{{Key: "content-pipeline", Tokens: 1200, CostUSD: 0.42, RunCount: 3}}
+
+	w := doModelCenterRequest(f.usage.GetMyUsage, 5, http.MethodGet, "/usage/me", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	dataBytes, _ := json.Marshal(env.Data)
+	var dto usageSummaryDTO
+	if err := json.Unmarshal(dataBytes, &dto); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if dto.TotalTokens != 1200 || dto.TotalCostUSD != 0.42 || dto.RunCount != 3 {
+		t.Fatalf("unexpected totals: %+v", dto)
+	}
+	if len(dto.Breakdown) != 1 || dto.Breakdown[0].Key != "content-pipeline" {
+		t.Fatalf("unexpected breakdown: %+v", dto.Breakdown)
+	}
+}
+
+func TestGetMyUsage_EmptyBreakdownIsNotNull(t *testing.T) {
+	f := newModelCenterFixture(nil)
+
+	w := doModelCenterRequest(f.usage.GetMyUsage, 5, http.MethodGet, "/usage/me", nil)
+	if !strings.Contains(w.Body.String(), `"breakdown":[]`) {
+		t.Fatalf("breakdown must serialise as [] rather than null: %s", w.Body.String())
+	}
+}
+
+func TestGetMyUsage_InvalidPeriodReturns400(t *testing.T) {
+	f := newModelCenterFixture(nil)
+
+	w := doModelCenterRequest(f.usage.GetMyUsage, 5, http.MethodGet, "/usage/me?period=fortnight", nil)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestModelCenterHandlers_RequireAuthenticatedUser(t *testing.T) {
+	f := newModelCenterFixture(nil)
+	for name, handler := range map[string]http.HandlerFunc{
+		"list": f.providers.List, "create": f.providers.Create, "usage": f.usage.GetMyUsage,
+	} {
+		w := httptest.NewRecorder()
+		handler(w, httptest.NewRequest(http.MethodGet, "/model-providers", nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s without a user: status = %d, want 401", name, w.Code)
+		}
 	}
 }
