@@ -30,7 +30,7 @@ type RouterConfig struct {
 	// that don't need it) — /ready then reports ready without checking.
 	DB               Pinger
 	IdempotencyStore IdempotencyStore
-	Users            AuthUserStore
+	Auth             *AuthHandlers
 	Tokens           *auth.TokenIssuer
 	APIKeys          APIKeyLookup
 	Resources        *ResourceHandlers
@@ -53,7 +53,7 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 	r := chi.NewRouter()
 
 	generalLimiter := NewRateLimiter(600, time.Minute, generalRateLimitKey)
-	authHandlers := NewAuthHandlers(cfg.Users, cfg.Tokens)
+	authHandlers := cfg.Auth
 
 	r.Use(RecoverMiddleware(logger))
 	r.Use(RequestIDMiddleware)

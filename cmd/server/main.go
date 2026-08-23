@@ -20,6 +20,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
 	adaptermodelgateway "github.com/marcon0203/agentic-kit/internal/adapter/modelgateway"
 	"github.com/marcon0203/agentic-kit/internal/adapter/orchestrator"
+	"github.com/marcon0203/agentic-kit/internal/adapter/password"
 	"github.com/marcon0203/agentic-kit/internal/adapter/postgres"
 	adapterschema "github.com/marcon0203/agentic-kit/internal/adapter/schema"
 	"github.com/marcon0203/agentic-kit/internal/api"
@@ -28,6 +29,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/crypto"
 	"github.com/marcon0203/agentic-kit/internal/domain/agent"
 	"github.com/marcon0203/agentic-kit/internal/domain/bundle"
+	"github.com/marcon0203/agentic-kit/internal/domain/iam"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 	"github.com/marcon0203/agentic-kit/internal/domain/operation"
@@ -154,11 +156,21 @@ func run() error {
 		postgres.NewUsageRepository(queries),
 	)
 
+	passwordHasher, err := password.NewHasher()
+	if err != nil {
+		return fmt.Errorf("initialise password hasher: %w", err)
+	}
+	iamService := iam.NewService(
+		postgres.NewUserRepository(queries),
+		passwordHasher,
+		auth.NewTokenIssuer(cfg.JWTSecret),
+	)
+
 	routerCfg := api.RouterConfig{
 		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
 		DB:               pool,
 		IdempotencyStore: api.NewPostgresIdempotencyStore(queries),
-		Users:            api.NewPostgresAuthUserStore(queries),
+		Auth:             api.NewAuthHandlers(iamService),
 		Tokens:           auth.NewTokenIssuer(cfg.JWTSecret),
 		APIKeys:          api.NewPostgresAPIKeyLookup(queries),
 		Resources:        api.NewResourceHandlers(resourceService),

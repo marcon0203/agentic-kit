@@ -2,24 +2,20 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/marcon0203/agentic-kit/internal/auth"
+	"github.com/marcon0203/agentic-kit/internal/domain/iam"
 )
 
-// AuthHandlers implements POST /auth/register and /auth/login per
-// api/openapi.yaml's AuthResult contract.
+// AuthHandlers is the HTTP transport for POST /auth/register and
+// /auth/login, per api/openapi.yaml's AuthResult contract.
 type AuthHandlers struct {
-	Users  AuthUserStore
-	Tokens *auth.TokenIssuer
+	svc *iam.Service
 }
 
-func NewAuthHandlers(users AuthUserStore, tokens *auth.TokenIssuer) *AuthHandlers {
-	return &AuthHandlers{Users: users, Tokens: tokens}
-}
+func NewAuthHandlers(svc *iam.Service) *AuthHandlers { return &AuthHandlers{svc: svc} }
 
 type registerRequest struct {
 	Email       string `json:"email"`
@@ -48,6 +44,17 @@ type authResultDTO struct {
 	User         userDTO `json:"user"`
 }
 
+func toAuthResultDTO(s iam.Session) authResultDTO {
+	return authResultDTO{
+		AccessToken:  s.AccessToken,
+		RefreshToken: s.RefreshToken,
+		User: userDTO{
+			ID: strconv.FormatInt(s.User.ID, 10), Email: s.User.Email,
+			DisplayName: s.User.DisplayName, IsAdmin: s.User.IsAdmin, CreatedAt: s.User.CreatedAt,
+		},
+	}
+}
+
 // Register handles POST /auth/register.
 func (h *AuthHandlers) Register(w http.ResponseWriter, r *http.Request) {
 	var req registerRequest
@@ -56,38 +63,14 @@ func (h *AuthHandlers) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var details []FieldError
-	if req.Email == "" {
-		details = append(details, FieldError{Field: "email", Reason: "required"})
-	}
-	if len(req.Password) < 8 {
-		details = append(details, FieldError{Field: "password", Reason: "must be at least 8 characters"})
-	}
-	if req.DisplayName == "" {
-		details = append(details, FieldError{Field: "display_name", Reason: "required"})
-	}
-	if len(details) > 0 {
-		writeErrDetails(w, r, http.StatusBadRequest, ErrValidationFailed, "validation failed", details)
-		return
-	}
-
-	hash, err := auth.HashPassword(req.Password)
+	session, err := h.svc.Register(r.Context(), iam.RegisterCommand{
+		Email: req.Email, Password: req.Password, DisplayName: req.DisplayName,
+	})
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
+		writeDomainErr(w, r, err)
 		return
 	}
-
-	user, err := h.Users.CreateUser(r.Context(), req.Email, hash, req.DisplayName)
-	if err != nil {
-		if errors.Is(err, ErrEmailTaken) {
-			writeErr(w, r, http.StatusConflict, ErrEmailAlreadyRegistered, "email already registered")
-			return
-		}
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-		return
-	}
-
-	h.respondWithTokens(w, r, http.StatusCreated, user)
+	writeJSON(w, r, http.StatusCreated, toAuthResultDTO(session))
 }
 
 // Login handles POST /auth/login.
@@ -98,65 +81,10 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, found, err := h.Users.GetUserByEmail(r.Context(), req.Email)
+	session, err := h.svc.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
+		writeDomainErr(w, r, err)
 		return
 	}
-	// Verify against a hash either way, valid or a fixed dummy, so a
-	// nonexistent-email response takes the same time as a wrong-password
-	// one — an unknown-email fast path is a user-enumeration oracle.
-	hashToCheck := user.PasswordHash
-	if !found {
-		hashToCheck = dummyPasswordHash
-	}
-	ok, err := auth.VerifyPassword(req.Password, hashToCheck)
-	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-		return
-	}
-	if !found || !ok {
-		writeErr(w, r, http.StatusUnauthorized, ErrInvalidCredentials, "invalid email or password")
-		return
-	}
-
-	h.respondWithTokens(w, r, http.StatusOK, user)
-}
-
-// dummyPasswordHash is a valid argon2id-encoded hash of a value nobody will
-// enter, used only to keep Login's timing constant when no such user
-// exists.
-var dummyPasswordHash = mustHash("this-is-not-a-real-password-anyones-account-has")
-
-func mustHash(s string) string {
-	h, err := auth.HashPassword(s)
-	if err != nil {
-		panic(err)
-	}
-	return h
-}
-
-func (h *AuthHandlers) respondWithTokens(w http.ResponseWriter, r *http.Request, status int, user AuthUser) {
-	access, err := h.Tokens.IssueAccessToken(user.ID)
-	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-		return
-	}
-	refresh, err := h.Tokens.IssueRefreshToken(user.ID)
-	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, ErrInternal, "internal server error")
-		return
-	}
-
-	writeJSON(w, r, status, authResultDTO{
-		AccessToken:  access,
-		RefreshToken: refresh,
-		User: userDTO{
-			ID:          strconv.FormatInt(user.ID, 10),
-			Email:       user.Email,
-			DisplayName: user.DisplayName,
-			IsAdmin:     user.IsAdmin,
-			CreatedAt:   user.CreatedAt,
-		},
-	})
+	writeJSON(w, r, http.StatusOK, toAuthResultDTO(session))
 }

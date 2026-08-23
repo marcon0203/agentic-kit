@@ -2,11 +2,16 @@ package api
 
 import "github.com/marcon0203/agentic-kit/internal/domain"
 
-// The business error table now lives in internal/domain (codes.go) — it is
-// business vocabulary, not a transport detail. These aliases keep the
-// transport layer's existing call sites readable while modules are migrated
-// onto domain services one at a time; they are the same constants, not a
-// second table.
+// The business error table lives in internal/domain (codes.go) — it is
+// business vocabulary, decided by a service, not a transport detail.
+//
+// These are aliases to those same constants, not a second table. They exist
+// because a transport-level writeErr reads better naming the error than
+// naming its module ("ErrTokenInvalid", not "domain.CodeTokenInvalid"), and
+// they cover the handful of failures a handler decides for itself — a
+// malformed body, an unparseable id, a missing user in the context. Every
+// error a *service* produces already carries its own code and reaches the
+// wire through writeDomainErr.
 const (
 	ErrValidationFailed = domain.CodeValidationFailed
 	ErrRateLimited      = domain.CodeRateLimited
