@@ -200,7 +200,7 @@
       "id": 10,
       "type": "adk_integration",
       "name": "ADK Go 2.0 集成与 DSL 编译层",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-10-adk-integration.md",
       "depends_on": [
         7,

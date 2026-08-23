@@ -41,6 +41,14 @@ func ParseGraph(def map[string]any) (Graph, error) {
 		}
 		from, _ := edgeMap["from"].(string)
 		condition, _ := edgeMap["condition"].(string)
+		mode, _ := edgeMap["mode"].(string)
+		if mode == "" {
+			mode = "sequential"
+		}
+		join, _ := edgeMap["join"].(string)
+		if join == "" {
+			join = "wait_all"
+		}
 
 		var to []string
 		switch v := edgeMap["to"].(type) {
@@ -58,7 +66,7 @@ func ParseGraph(def map[string]any) (Graph, error) {
 			return Graph{}, fmt.Errorf("bundlegraph: edges[%d].to has an unexpected type", i)
 		}
 
-		g.Edges = append(g.Edges, Edge{Index: i, From: from, To: to, Condition: condition})
+		g.Edges = append(g.Edges, Edge{Index: i, From: from, To: to, Condition: condition, Mode: mode, Join: join})
 	}
 
 	return g, nil

@@ -24,6 +24,12 @@ type Edge struct {
 	From      string
 	To        []string
 	Condition string
+	// Mode and Join are execution hints (internal/orchestrator/adk consumes
+	// them) rather than static-validation inputs — this package's own
+	// Validate never branches on them. Mode defaults to "sequential", Join
+	// to "wait_all", per api/openapi.yaml's edge schema defaults.
+	Mode string
+	Join string
 }
 
 // Graph is the parsed orchestration block ready for validation.
