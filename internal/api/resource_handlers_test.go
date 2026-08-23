@@ -4,104 +4,97 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 )
 
-// fakeKindStore is an in-memory resourceKindStore for handler tests — the
-// real Postgres-backed implementations in resource_kind.go are verified
-// against a live database separately (unique-ref-per-owner constraint,
-// JSONB containment query for delete-check, in particular).
-type fakeKindStore struct {
-	rows       map[int64]resourceRow
-	refTaken   map[string]bool
+// The resource rules — which config keys are credentials, that a redacted
+// config omits rather than masks them, the MCP probe, ownership scoping —
+// are tested against the service in internal/domain/resource. What is left
+// here is transport: the opaque external id, the DTO shapes, and the
+// status codes produced before the service is ever reached.
+
+type fakeResourceRepo struct {
+	rows       map[int64]resource.Resource
 	nextID     int64
-	references map[string][]agentReference
+	references map[string][]resource.AgentReference
 }
 
-func newFakeKindStore() *fakeKindStore {
-	return &fakeKindStore{
-		rows:       map[int64]resourceRow{},
-		refTaken:   map[string]bool{},
-		nextID:     1,
-		references: map[string][]agentReference{},
+func newFakeResourceRepo() *fakeResourceRepo {
+	return &fakeResourceRepo{rows: map[int64]resource.Resource{}, nextID: 1, references: map[string][]resource.AgentReference{}}
+}
+
+func (f *fakeResourceRepo) Create(_ context.Context, r resource.Resource) (resource.Resource, error) {
+	for _, existing := range f.rows {
+		if existing.OwnerID == r.OwnerID && existing.Kind == r.Kind && existing.Ref == r.Ref {
+			return resource.Resource{}, resource.ErrDuplicate
+		}
 	}
+	r.ID = f.nextID
+	f.nextID++
+	f.rows[r.ID] = r
+	return r, nil
 }
 
-func (s *fakeKindStore) Create(_ context.Context, ownerID int64, ref, version string, config, displayMeta []byte) (resourceRow, error) {
-	if s.refTaken[ref] {
-		// A real *pgconn.PgError, not a stand-in — isUniqueViolation must
-		// exercise the same errors.As path it does against production
-		// Postgres (already verified live for the identical pattern in
-		// auth_user_store.go).
-		return resourceRow{}, &pgconn.PgError{Code: "23505"}
-	}
-	s.refTaken[ref] = true
-	row := resourceRow{ID: s.nextID, OwnerUserID: ownerID, Ref: ref, Version: version, Config: config, DisplayMeta: displayMeta, Status: 1, CreatedAt: pgtype.Timestamptz{Valid: true}}
-	s.rows[s.nextID] = row
-	s.nextID++
-	return row, nil
-}
-
-func (s *fakeKindStore) GetByID(_ context.Context, id, ownerID int64) (resourceRow, error) {
-	row, ok := s.rows[id]
-	if !ok || row.OwnerUserID != ownerID {
-		return resourceRow{}, errNotFoundForTest
+func (f *fakeResourceRepo) GetByID(_ context.Context, kind resource.Kind, id, ownerID int64) (resource.Resource, error) {
+	row, ok := f.rows[id]
+	if !ok || row.OwnerID != ownerID || row.Kind != kind {
+		return resource.Resource{}, resource.ErrNotFound
 	}
 	return row, nil
 }
 
-func (s *fakeKindStore) ListPage(_ context.Context, ownerID, afterID int64, limit int32) ([]resourceRow, error) {
-	var out []resourceRow
-	for id := afterID + 1; id < s.nextID && int32(len(out)) < limit; id++ {
-		if row, ok := s.rows[id]; ok && row.OwnerUserID == ownerID {
+func (f *fakeResourceRepo) ListPage(_ context.Context, kind resource.Kind, ownerID, afterID int64, limit int32) ([]resource.Resource, error) {
+	var out []resource.Resource
+	for id := afterID + 1; id < f.nextID && int32(len(out)) < limit; id++ {
+		if row, ok := f.rows[id]; ok && row.OwnerID == ownerID && row.Kind == kind {
 			out = append(out, row)
 		}
 	}
 	return out, nil
 }
 
-func (s *fakeKindStore) Update(_ context.Context, id, ownerID int64, displayMeta, config []byte, status int16) (resourceRow, error) {
-	row, ok := s.rows[id]
-	if !ok || row.OwnerUserID != ownerID {
-		return resourceRow{}, errNotFoundForTest
-	}
-	row.DisplayMeta = displayMeta
-	row.Config = config
-	row.Status = status
-	s.rows[id] = row
-	return row, nil
+func (f *fakeResourceRepo) Update(_ context.Context, r resource.Resource) (resource.Resource, error) {
+	f.rows[r.ID] = r
+	return r, nil
 }
 
-func (s *fakeKindStore) FindReferencingAgents(_ context.Context, _ int64, ref string) ([]agentReference, error) {
-	return s.references[ref], nil
+func (f *fakeResourceRepo) FindReferencingAgents(_ context.Context, _ resource.Kind, _ int64, ref string) ([]resource.AgentReference, error) {
+	return f.references[ref], nil
 }
 
-var errNotFoundForTest = errors.New("not found")
-
-type noopMCPChecker struct{}
-
-func (noopMCPChecker) Check(context.Context, map[string]any) string { return "healthy" }
-
-func newResourceHandlersForTest() (*ResourceHandlers, *fakeKindStore) {
-	tools := newFakeKindStore()
-	h := &ResourceHandlers{
-		Kinds: map[ResourceKind]resourceKindStore{
-			ResourceKindTool:          tools,
-			ResourceKindSkill:         newFakeKindStore(),
-			ResourceKindMCP:           newFakeKindStore(),
-			ResourceKindKnowledgeBase: newFakeKindStore(),
-		},
-		MCP:    noopMCPChecker{},
-		AESKey: testAESKey(),
+func (f *fakeResourceRepo) SetHealth(_ context.Context, id int64, health resource.Health) error {
+	row, ok := f.rows[id]
+	if !ok {
+		return resource.ErrNotFound
 	}
-	return h, tools
+	row.Health = health
+	f.rows[id] = row
+	return nil
+}
+
+// passthroughCipher stands in for AES: these tests are about transport, and
+// a cipher that changes nothing keeps the assertions about *which* fields
+// appear readable.
+type passthroughCipher struct{}
+
+func (passthroughCipher) Encrypt(s string) (string, error) { return s, nil }
+func (passthroughCipher) Decrypt(s string) (string, error) { return s, nil }
+
+type healthyProbe struct{}
+
+func (healthyProbe) Check(context.Context, resource.Config) resource.Health {
+	return resource.HealthHealthy
+}
+
+func newResourceHandlersForTest() (*ResourceHandlers, *fakeResourceRepo) {
+	repo := newFakeResourceRepo()
+	return NewResourceHandlers(resource.NewService(repo, passthroughCipher{}, healthyProbe{})), repo
 }
 
 func doResourceRequest(t *testing.T, handler http.HandlerFunc, method, path string, userID int64, body any, urlParams map[string]string) *httptest.ResponseRecorder {
@@ -128,59 +121,141 @@ func doResourceRequest(t *testing.T, handler http.HandlerFunc, method, path stri
 	return w
 }
 
-func TestCreateResource_Success(t *testing.T) {
-	h, _ := newResourceHandlersForTest()
-
-	w := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
-		Type: ResourceKindTool, Ref: "internal-search", DisplayName: "Internal Search",
-		Config: map[string]any{"endpoint": "https://mcp.internal/search"},
-	}, nil)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
-	}
-
+// decodeResourceDTO unwraps the envelope around a single resource.
+func decodeResourceDTO(t *testing.T, w *httptest.ResponseRecorder) resourceDTO {
+	t.Helper()
 	var env Envelope
 	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+		t.Fatalf("unmarshal envelope: %v", err)
 	}
 	dataBytes, _ := json.Marshal(env.Data)
 	var dto resourceDTO
 	if err := json.Unmarshal(dataBytes, &dto); err != nil {
 		t.Fatalf("unmarshal data: %v", err)
 	}
-	if dto.ID != "tool_1" {
-		t.Fatalf("id = %q, want tool_1", dto.ID)
+	return dto
+}
+
+func createTestResource(t *testing.T, h *ResourceHandlers, kind, ref string, config map[string]any) resourceDTO {
+	t.Helper()
+	w := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
+		Type: kind, Ref: ref, DisplayName: ref, Config: config,
+	}, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create %s: status = %d, want 201: %s", ref, w.Code, w.Body.String())
 	}
-	if dto.DisplayName != "Internal Search" {
-		t.Fatalf("display_name = %q, want Internal Search", dto.DisplayName)
+	return decodeResourceDTO(t, w)
+}
+
+func TestResourceID_RoundTripsKindAndID(t *testing.T) {
+	external := encodeResourceID(resource.KindKnowledgeBase, 42)
+	if external == "knowledge_base:42" {
+		t.Fatal("external id should be opaque, not the raw kind:id pair")
+	}
+	kind, id, err := decodeResourceID(external)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if kind != resource.KindKnowledgeBase || id != 42 {
+		t.Fatalf("round trip = (%q, %d), want (knowledge_base, 42)", kind, id)
+	}
+}
+
+func TestResourceID_RejectsHandCraftedIDs(t *testing.T) {
+	for _, bad := range []string{"not base64!!", encodeCursorString("nosuchkind:1"), encodeCursorString("tool:abc"), encodeCursorString("tool")} {
+		if _, _, err := decodeResourceID(bad); err == nil {
+			t.Fatalf("decodeResourceID(%q) should have failed", bad)
+		}
+	}
+}
+
+func TestUpdateResource_UndecodableIDReturns404(t *testing.T) {
+	h, _ := newResourceHandlersForTest()
+	w := doResourceRequest(t, h.Update, http.MethodPatch, "/api/v1/resources/garbage", 1,
+		updateResourceRequest{}, map[string]string{"id": "!!!not-base64!!!"})
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateResource_MalformedBodyReturns400(t *testing.T) {
+	h, _ := newResourceHandlersForTest()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/resources", bytes.NewBufferString("{not json"))
+	r = r.WithContext(WithUserID(r.Context(), 1))
+	w := httptest.NewRecorder()
+	h.Create(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestResourceHandlers_RequireAuthenticatedUser(t *testing.T) {
+	h, _ := newResourceHandlersForTest()
+	for name, handler := range map[string]http.HandlerFunc{
+		"list": h.List, "create": h.Create, "update": h.Update, "delete-check": h.DeleteCheck,
+	} {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/resources", nil)
+		w := httptest.NewRecorder()
+		handler(w, r)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("%s without a user: status = %d, want 401", name, w.Code)
+		}
+	}
+}
+
+func TestCreateResource_ResponseShape(t *testing.T) {
+	h, _ := newResourceHandlersForTest()
+	dto := createTestResource(t, h, string(resource.KindTool), "internal-search", map[string]any{"endpoint": "https://mcp.internal/search"})
+
+	kind, _, err := decodeResourceID(dto.ID)
+	if err != nil {
+		t.Fatalf("returned id is not decodable: %v", err)
+	}
+	if kind != resource.KindTool {
+		t.Fatalf("id encodes kind %q, want tool", kind)
+	}
+	if dto.Type != string(resource.KindTool) || dto.DisplayName != "internal-search" {
+		t.Fatalf("unexpected dto: %+v", dto)
+	}
+	if dto.Config["endpoint"] != "https://mcp.internal/search" {
+		t.Fatalf("config not echoed back: %+v", dto.Config)
+	}
+}
+
+func TestCreateResource_CredentialNeverInResponse(t *testing.T) {
+	h, _ := newResourceHandlersForTest()
+	w := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
+		Type: string(resource.KindMCP), Ref: "secure-mcp",
+		Config: map[string]any{"endpoint": "https://mcp.internal", "api_key": "sk-should-never-appear"},
+	}, nil)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+	if bytes.Contains(w.Body.Bytes(), []byte("sk-should-never-appear")) {
+		t.Fatalf("credential leaked into create response: %s", w.Body.String())
 	}
 }
 
 func TestCreateResource_DuplicateRefReturns409(t *testing.T) {
 	h, _ := newResourceHandlersForTest()
-	req := createResourceRequest{Type: ResourceKindTool, Ref: "dup-tool", Config: map[string]any{"endpoint": "https://x"}}
+	createTestResource(t, h, string(resource.KindTool), "dup-tool", map[string]any{"endpoint": "https://x"})
 
-	w1 := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, req, nil)
-	if w1.Code != http.StatusCreated {
-		t.Fatalf("first create: got %d, want 201: %s", w1.Code, w1.Body.String())
+	w := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
+		Type: string(resource.KindTool), Ref: "dup-tool", Config: map[string]any{"endpoint": "https://x"},
+	}, nil)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
 	}
-
-	w2 := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, req, nil)
-	if w2.Code != http.StatusConflict {
-		t.Fatalf("duplicate create: got %d, want 409: %s", w2.Code, w2.Body.String())
-	}
-	if !containsCode(w2.Body.String(), ErrResourceRefDuplicate) {
-		t.Fatalf("body should carry ErrResourceRefDuplicate: %s", w2.Body.String())
+	if !containsCode(w.Body.String(), ErrResourceRefDuplicate) {
+		t.Fatalf("body should carry ErrResourceRefDuplicate: %s", w.Body.String())
 	}
 }
 
 func TestCreateResource_InvalidRefReturns400WithDetails(t *testing.T) {
 	h, _ := newResourceHandlersForTest()
 	w := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
-		Type: ResourceKindTool, Ref: "Not-Valid!", Config: map[string]any{"endpoint": "https://x"},
+		Type: string(resource.KindTool), Ref: "Not-Valid!", Config: map[string]any{"endpoint": "https://x"},
 	}, nil)
-
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
@@ -193,132 +268,84 @@ func TestCreateResource_InvalidRefReturns400WithDetails(t *testing.T) {
 	}
 }
 
-func TestCreateResource_CredentialNeverInResponse(t *testing.T) {
+func TestUpdateResource_StatusPatchIsCarriedThrough(t *testing.T) {
 	h, _ := newResourceHandlersForTest()
-	w := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
-		Type: ResourceKindMCP, Ref: "secure-mcp",
-		Config: map[string]any{"endpoint": "https://mcp.internal", "api_key": "sk-should-never-appear"},
-	}, nil)
+	created := createTestResource(t, h, string(resource.KindTool), "toggle-me", map[string]any{"endpoint": "https://x"})
 
-	if w.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
-	}
-	if bytes.Contains(w.Body.Bytes(), []byte("sk-should-never-appear")) {
-		t.Fatalf("credential leaked into create response: %s", w.Body.String())
-	}
-}
-
-func TestUpdateResource_EnablesDisables(t *testing.T) {
-	h, _ := newResourceHandlersForTest()
-	create := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
-		Type: ResourceKindTool, Ref: "toggle-me", Config: map[string]any{"endpoint": "https://x"},
-	}, nil)
-	var env Envelope
-	_ = json.Unmarshal(create.Body.Bytes(), &env)
-	dataBytes, _ := json.Marshal(env.Data)
-	var created resourceDTO
-	_ = json.Unmarshal(dataBytes, &created)
-
-	disabled := int16(2)
+	disabled := int16(resource.StatusDisabled)
 	w := doResourceRequest(t, h.Update, http.MethodPatch, "/api/v1/resources/"+created.ID, 1,
 		updateResourceRequest{Status: &disabled}, map[string]string{"id": created.ID})
-
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
-	var updatedEnv Envelope
-	_ = json.Unmarshal(w.Body.Bytes(), &updatedEnv)
-	updatedBytes, _ := json.Marshal(updatedEnv.Data)
-	var updated resourceDTO
-	_ = json.Unmarshal(updatedBytes, &updated)
-	if updated.Status != 2 {
-		t.Fatalf("status = %d, want 2 (disabled)", updated.Status)
+	if got := decodeResourceDTO(t, w).Status; got != int16(resource.StatusDisabled) {
+		t.Fatalf("status = %d, want %d (disabled)", got, resource.StatusDisabled)
 	}
 }
 
 func TestUpdateResource_WrongOwnerReturns404(t *testing.T) {
 	h, _ := newResourceHandlersForTest()
-	create := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
-		Type: ResourceKindTool, Ref: "owner-only", Config: map[string]any{"endpoint": "https://x"},
-	}, nil)
-	var env Envelope
-	_ = json.Unmarshal(create.Body.Bytes(), &env)
-	dataBytes, _ := json.Marshal(env.Data)
-	var created resourceDTO
-	_ = json.Unmarshal(dataBytes, &created)
+	created := createTestResource(t, h, string(resource.KindTool), "owner-only", map[string]any{"endpoint": "https://x"})
 
 	w := doResourceRequest(t, h.Update, http.MethodPatch, "/api/v1/resources/"+created.ID, 999,
 		updateResourceRequest{}, map[string]string{"id": created.ID})
-
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (resource scoped to a different owner)", w.Code)
 	}
 }
 
+func decodeDeleteCheck(t *testing.T, w *httptest.ResponseRecorder) deleteCheckDTO {
+	t.Helper()
+	var env Envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	dataBytes, _ := json.Marshal(env.Data)
+	var check deleteCheckDTO
+	if err := json.Unmarshal(dataBytes, &check); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	return check
+}
+
 func TestDeleteCheck_DeletableWhenUnreferenced(t *testing.T) {
 	h, _ := newResourceHandlersForTest()
-	create := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
-		Type: ResourceKindTool, Ref: "unreferenced", Config: map[string]any{"endpoint": "https://x"},
-	}, nil)
-	var env Envelope
-	_ = json.Unmarshal(create.Body.Bytes(), &env)
-	dataBytes, _ := json.Marshal(env.Data)
-	var created resourceDTO
-	_ = json.Unmarshal(dataBytes, &created)
+	created := createTestResource(t, h, string(resource.KindTool), "unreferenced", map[string]any{"endpoint": "https://x"})
 
 	w := doResourceRequest(t, h.DeleteCheck, http.MethodGet, "/api/v1/resources/"+created.ID+"/delete-check", 1,
 		nil, map[string]string{"id": created.ID})
-
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
-	var checkEnv Envelope
-	_ = json.Unmarshal(w.Body.Bytes(), &checkEnv)
-	checkBytes, _ := json.Marshal(checkEnv.Data)
-	var check deleteCheckDTO
-	_ = json.Unmarshal(checkBytes, &check)
+	check := decodeDeleteCheck(t, w)
 	if !check.Deletable {
 		t.Fatalf("expected deletable=true for an unreferenced resource: %+v", check)
+	}
+	if check.ReferencedBy == nil {
+		t.Fatal("referenced_by must serialise as [] rather than null")
 	}
 }
 
 func TestDeleteCheck_NotDeletableWhenReferenced(t *testing.T) {
-	h, tools := newResourceHandlersForTest()
-	create := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
-		Type: ResourceKindTool, Ref: "referenced-tool", Config: map[string]any{"endpoint": "https://x"},
-	}, nil)
-	var env Envelope
-	_ = json.Unmarshal(create.Body.Bytes(), &env)
-	dataBytes, _ := json.Marshal(env.Data)
-	var created resourceDTO
-	_ = json.Unmarshal(dataBytes, &created)
-
-	tools.references["referenced-tool"] = []agentReference{{OwnerUserID: 1, AgentRef: "architect", Version: "1.0.0"}}
+	h, repo := newResourceHandlersForTest()
+	created := createTestResource(t, h, string(resource.KindTool), "referenced-tool", map[string]any{"endpoint": "https://x"})
+	repo.references["referenced-tool"] = []resource.AgentReference{{AgentRef: "architect", Version: "1.0.0"}}
 
 	w := doResourceRequest(t, h.DeleteCheck, http.MethodGet, "/api/v1/resources/"+created.ID+"/delete-check", 1,
 		nil, map[string]string{"id": created.ID})
-
-	var checkEnv Envelope
-	_ = json.Unmarshal(w.Body.Bytes(), &checkEnv)
-	checkBytes, _ := json.Marshal(checkEnv.Data)
-	var check deleteCheckDTO
-	_ = json.Unmarshal(checkBytes, &check)
+	check := decodeDeleteCheck(t, w)
 	if check.Deletable {
 		t.Fatal("expected deletable=false when an agent references the resource")
 	}
-	if len(check.ReferencedBy) != 1 || check.ReferencedBy[0].Ref != "architect" {
+	if len(check.ReferencedBy) != 1 || check.ReferencedBy[0].Ref != "architect" || check.ReferencedBy[0].Type != "agent" {
 		t.Fatalf("unexpected referenced_by: %+v", check.ReferencedBy)
 	}
 }
 
 func TestListResources_FiltersByType(t *testing.T) {
 	h, _ := newResourceHandlersForTest()
-	doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
-		Type: ResourceKindTool, Ref: "t1", Config: map[string]any{"endpoint": "https://x"},
-	}, nil)
-	doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/resources", 1, createResourceRequest{
-		Type: ResourceKindSkill, Ref: "s1", Config: map[string]any{"x": "y"},
-	}, nil)
+	createTestResource(t, h, string(resource.KindTool), "t1", map[string]any{"endpoint": "https://x"})
+	createTestResource(t, h, string(resource.KindSkill), "s1", map[string]any{"x": "y"})
 
 	w := doResourceRequest(t, h.List, http.MethodGet, "/api/v1/resources?type=tool", 1, nil, nil)
 	if w.Code != http.StatusOK {
@@ -332,7 +359,15 @@ func TestListResources_FiltersByType(t *testing.T) {
 		Items []resourceDTO `json:"items"`
 	}
 	_ = json.Unmarshal(dataBytes, &page)
-	if len(page.Items) != 1 || page.Items[0].Type != ResourceKindTool {
+	if len(page.Items) != 1 || page.Items[0].Type != string(resource.KindTool) {
 		t.Fatalf("expected exactly 1 tool, got %+v", page.Items)
+	}
+}
+
+func TestListResources_UnknownTypeReturns400(t *testing.T) {
+	h, _ := newResourceHandlersForTest()
+	w := doResourceRequest(t, h.List, http.MethodGet, "/api/v1/resources?type=wormhole", 1, nil, nil)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
 	}
 }

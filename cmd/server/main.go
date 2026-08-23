@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
+	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
 	"github.com/marcon0203/agentic-kit/internal/adapter/postgres"
 	adapterschema "github.com/marcon0203/agentic-kit/internal/adapter/schema"
 	"github.com/marcon0203/agentic-kit/internal/api"
@@ -23,7 +25,9 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/config"
 	"github.com/marcon0203/agentic-kit/internal/crypto"
 	"github.com/marcon0203/agentic-kit/internal/domain/agent"
+	"github.com/marcon0203/agentic-kit/internal/domain/bundle"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
+	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
 	"github.com/marcon0203/agentic-kit/internal/observability"
 	"github.com/marcon0203/agentic-kit/internal/store"
@@ -98,6 +102,18 @@ func run() error {
 		postgres.NewUserDirectory(queries),
 	)
 
+	bundleService := bundle.NewService(
+		postgres.NewBundleRepository(queries),
+		postgres.NewAgentHandoffs(queries),
+		adapterschema.NewValidator(bundleValidator),
+	)
+
+	resourceService := resource.NewService(
+		postgres.NewResourceRepository(queries),
+		adaptercrypto.NewCipher(aesKey),
+		mcp.NewReachabilityProbe(),
+	)
+
 	gates := api.NewGateRegistry()
 	runEngine := api.NewRunEngine(queries, aesKey, gates, api.NewResourceRefChecker(queries))
 
@@ -108,9 +124,9 @@ func run() error {
 		Users:            api.NewPostgresAuthUserStore(queries),
 		Tokens:           auth.NewTokenIssuer(cfg.JWTSecret),
 		APIKeys:          api.NewPostgresAPIKeyLookup(queries),
-		Resources:        api.NewResourceHandlers(queries, api.NewHTTPReachabilityChecker(), aesKey),
+		Resources:        api.NewResourceHandlers(resourceService),
 		Agents:           api.NewAgentHandlers(agentService),
-		Bundles:          api.NewBundleHandlers(queries, bundleValidator),
+		Bundles:          api.NewBundleHandlers(bundleService),
 		Marketplace:      api.NewMarketplaceHandlers(marketplaceService),
 		ModelProviders:   api.NewModelProviderHandlers(queries, aesKey),
 		Usage:            api.NewUsageHandlers(queries),
