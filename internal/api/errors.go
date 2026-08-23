@@ -1,62 +1,55 @@
 package api
 
-// Business error codes: five digits, AABBB — first two digits identify the
-// module, last three are a sequence number within that module. Codes are
-// append-only once published: a retired code stays reserved and is never
-// reused, and a code's meaning never changes (message copy can improve
-// freely). See docs/架构设计文档_AI-Agent平台_V1.md 6.3 for the authoritative
-// table this mirrors.
+import "github.com/marcon0203/agentic-kit/internal/domain"
+
+// The business error table now lives in internal/domain (codes.go) — it is
+// business vocabulary, not a transport detail. These aliases keep the
+// transport layer's existing call sites readable while modules are migrated
+// onto domain services one at a time; they are the same constants, not a
+// second table.
 const (
-	// 10xxx — 通用/网关
-	ErrValidationFailed = 10001
-	ErrRateLimited      = 10002
-	ErrRequestTooLarge  = 10003
-	ErrInternal         = 10099
+	ErrValidationFailed = domain.CodeValidationFailed
+	ErrRateLimited      = domain.CodeRateLimited
+	ErrRequestTooLarge  = domain.CodeRequestTooLarge
+	ErrInternal         = domain.CodeInternal
 
-	// 20xxx — IAM
-	ErrTokenInvalid           = 20001
-	ErrTokenExpired           = 20002
-	ErrForbidden              = 20003
-	ErrAPIKeyRevoked          = 20004
-	ErrEmailAlreadyRegistered = 20005
-	ErrInvalidCredentials     = 20006
+	ErrTokenInvalid           = domain.CodeTokenInvalid
+	ErrTokenExpired           = domain.CodeTokenExpired
+	ErrForbidden              = domain.CodeForbidden
+	ErrAPIKeyRevoked          = domain.CodeAPIKeyRevoked
+	ErrEmailAlreadyRegistered = domain.CodeEmailAlreadyRegistered
+	ErrInvalidCredentials     = domain.CodeInvalidCredentials
 
-	// 30xxx — 资源中心
-	ErrResourceNotFound     = 30001
-	ErrResourceDisabled     = 30002
-	ErrResourceRefDuplicate = 30003
-	ErrMCPHealthCheckFailed = 30004
+	ErrResourceNotFound     = domain.CodeResourceNotFound
+	ErrResourceDisabled     = domain.CodeResourceDisabled
+	ErrResourceRefDuplicate = domain.CodeResourceRefDuplicate
+	ErrMCPHealthCheckFailed = domain.CodeMCPHealthCheckFailed
 
-	// 40xxx — 应用中心（Agent/Bundle）
-	ErrAgentSchemaInvalid   = 40001
-	ErrBundleSchemaInvalid  = 40002
-	ErrBundleGraphInvalid   = 40003
-	ErrAgentVersionNotFound = 40004
+	ErrAgentSchemaInvalid   = domain.CodeAgentSchemaInvalid
+	ErrBundleSchemaInvalid  = domain.CodeBundleSchemaInvalid
+	ErrBundleGraphInvalid   = domain.CodeBundleGraphInvalid
+	ErrAgentVersionNotFound = domain.CodeAgentVersionNotFound
 
-	// 50xxx — 编排运行时
-	ErrRunNotFound           = 50001
-	ErrRunAlreadyFinished    = 50002
-	ErrGateAlreadyResolved   = 50003
-	ErrGateApproverForbidden = 50004
-	ErrRunTimeout            = 50005
+	ErrRunNotFound           = domain.CodeRunNotFound
+	ErrRunAlreadyFinished    = domain.CodeRunAlreadyFinished
+	ErrGateAlreadyResolved   = domain.CodeGateAlreadyResolved
+	ErrGateApproverForbidden = domain.CodeGateApproverForbidden
+	ErrRunTimeout            = domain.CodeRunTimeout
 
-	// 60xxx — 模型中心
-	ErrProviderNotConfigured  = 60001
-	ErrProviderCredsInvalid   = 60002
-	ErrProviderAllUnavailable = 60003
-	ErrTokenQuotaExceeded     = 60004
+	ErrProviderNotConfigured  = domain.CodeProviderNotConfigured
+	ErrProviderCredsInvalid   = domain.CodeProviderCredsInvalid
+	ErrProviderAllUnavailable = domain.CodeProviderAllUnavailable
+	ErrTokenQuotaExceeded     = domain.CodeTokenQuotaExceeded
 
-	// 70xxx — 广场与订阅
-	ErrPublishUnpublishedDeps    = 70001
-	ErrListingNotFound           = 70002
-	ErrNotSubscribed             = 70003
-	ErrAlreadySubscribed         = 70004
-	ErrSubscribedVersionLocked   = 70005
-	ErrBlackboxDefinitionHidden  = 70006
-	ErrDependencyStillReferenced = 70007
-	ErrCircularDependency        = 70008
+	ErrPublishUnpublishedDeps    = domain.CodePublishUnpublishedDeps
+	ErrListingNotFound           = domain.CodeListingNotFound
+	ErrNotSubscribed             = domain.CodeNotSubscribed
+	ErrAlreadySubscribed         = domain.CodeAlreadySubscribed
+	ErrSubscribedVersionLocked   = domain.CodeSubscribedVersionLocked
+	ErrBlackboxDefinitionHidden  = domain.CodeBlackboxDefinitionHidden
+	ErrDependencyStillReferenced = domain.CodeDependencyStillReferenced
+	ErrCircularDependency        = domain.CodeCircularDependency
 
-	// 80xxx — 运营中心
-	ErrReportNotFound        = 80001
-	ErrReportAlreadyResolved = 80002
+	ErrReportNotFound        = domain.CodeReportNotFound
+	ErrReportAlreadyResolved = domain.CodeReportAlreadyResolved
 )

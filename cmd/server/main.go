@@ -16,10 +16,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/marcon0203/agentic-kit/internal/adapter/postgres"
+	adapterschema "github.com/marcon0203/agentic-kit/internal/adapter/schema"
 	"github.com/marcon0203/agentic-kit/internal/api"
 	"github.com/marcon0203/agentic-kit/internal/auth"
 	"github.com/marcon0203/agentic-kit/internal/config"
 	"github.com/marcon0203/agentic-kit/internal/crypto"
+	"github.com/marcon0203/agentic-kit/internal/domain/agent"
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
 	"github.com/marcon0203/agentic-kit/internal/observability"
 	"github.com/marcon0203/agentic-kit/internal/store"
@@ -77,6 +80,15 @@ func run() error {
 	}
 
 	queries := store.New(pool)
+
+	// Domain wiring: repository adapters implement the ports each context
+	// declares, services own the rules, handlers only do transport.
+	agentService := agent.NewService(
+		postgres.NewAgentRepository(queries),
+		postgres.NewResourceCatalog(queries),
+		adapterschema.NewValidator(agentValidator),
+	)
+
 	gates := api.NewGateRegistry()
 	runEngine := api.NewRunEngine(queries, aesKey, gates, api.NewResourceRefChecker(queries))
 
@@ -88,7 +100,7 @@ func run() error {
 		Tokens:           auth.NewTokenIssuer(cfg.JWTSecret),
 		APIKeys:          api.NewPostgresAPIKeyLookup(queries),
 		Resources:        api.NewResourceHandlers(queries, api.NewHTTPReachabilityChecker(), aesKey),
-		Agents:           api.NewAgentHandlers(queries, agentValidator, api.NewResourceRefChecker(queries)),
+		Agents:           api.NewAgentHandlers(agentService),
 		Bundles:          api.NewBundleHandlers(queries, bundleValidator),
 		Marketplace:      api.NewMarketplaceHandlers(queries),
 		ModelProviders:   api.NewModelProviderHandlers(queries, aesKey),
