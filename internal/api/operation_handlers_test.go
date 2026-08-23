@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
 
@@ -248,7 +249,7 @@ func TestListPendingReports_AllowsAdmin(t *testing.T) {
 func TestResolveReport_TakedownDisablesUnderlyingResourceAndListing(t *testing.T) {
 	f := newFakeOperationQuerier()
 	f.users[1] = store.User{ID: 1, IsAdmin: true}
-	f.listings[1] = store.MarketplaceListing{ID: 1, ListingRef: "shady-bundle", ResourceType: DepKindBundle, ResourceID: 42, Distribution: 1, SubscriberCount: 56}
+	f.listings[1] = store.MarketplaceListing{ID: 1, ListingRef: "shady-bundle", ResourceType: string(marketplace.KindBundle), ResourceID: 42, Distribution: 1, SubscriberCount: 56}
 	f.reports[1] = store.Report{ID: 1, ListingID: 1, Status: "pending"}
 	f.nextReportID = 2
 	h := NewOperationHandlers(f)
@@ -275,7 +276,7 @@ func TestResolveReport_TakedownDisablesUnderlyingResourceAndListing(t *testing.T
 func TestResolveReport_Dismiss_DoesNotTouchResource(t *testing.T) {
 	f := newFakeOperationQuerier()
 	f.users[1] = store.User{ID: 1, IsAdmin: true}
-	f.listings[1] = store.MarketplaceListing{ID: 1, ListingRef: "fine-bundle", ResourceType: DepKindBundle, ResourceID: 42, Distribution: 1}
+	f.listings[1] = store.MarketplaceListing{ID: 1, ListingRef: "fine-bundle", ResourceType: string(marketplace.KindBundle), ResourceID: 42, Distribution: 1}
 	f.reports[1] = store.Report{ID: 1, ListingID: 1, Status: "pending"}
 	h := NewOperationHandlers(f)
 

@@ -1,4 +1,4 @@
-package api
+package postgres
 
 import (
 	"context"
@@ -9,22 +9,40 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/marcon0203/agentic-kit/internal/depclosure"
+	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
 
-// Dependency-graph node kinds, matching ListingResourceType in
-// api/openapi.yaml.
-const (
-	DepKindAgent  = "agent"
-	DepKindBundle = "bundle"
-	DepKindSkill  = "skill"
-	DepKindMCP    = "mcp"
-)
+// DependencyValidator implements marketplace.DependencyValidator by walking
+// the real database with internal/depclosure. The traversal algorithm is a
+// pure package; this adapter is only the resolver that answers "does this
+// node exist / is it published / what does it depend on".
+type DependencyValidator struct{ q store.Querier }
 
-// storeResolver implements depclosure.Resolver against the real database,
-// scoped to one owner (spec-08: dependency closure never crosses ownership
-// — a Bundle/Agent only ever references resources in the same owner's
-// space by ref).
+func NewDependencyValidator(q store.Querier) *DependencyValidator {
+	return &DependencyValidator{q: q}
+}
+
+var _ marketplace.DependencyValidator = (*DependencyValidator)(nil)
+
+func (v *DependencyValidator) Validate(ctx context.Context, ownerID int64, kind marketplace.Kind, ref, version string) ([]marketplace.DependencyIssue, error) {
+	root := depclosure.NodeKey{Kind: string(kind), Ref: ref, Version: version}
+	issues, err := depclosure.Validate(root, &storeResolver{ctx: ctx, q: v.q, ownerID: ownerID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]marketplace.DependencyIssue, len(issues))
+	for i, iss := range issues {
+		out[i] = marketplace.DependencyIssue{
+			Field: iss.Field, Reason: iss.Reason, Cycle: iss.Kind == depclosure.ErrCycle,
+		}
+	}
+	return out, nil
+}
+
+// storeResolver answers depclosure's questions against Postgres, scoped to
+// one owner: a dependency closure never crosses ownership (spec-08), since a
+// Bundle/Agent only references resources in its own owner's space by ref.
 type storeResolver struct {
 	ctx     context.Context
 	q       store.Querier
@@ -32,17 +50,17 @@ type storeResolver struct {
 }
 
 func (r *storeResolver) Exists(node depclosure.NodeKey) (bool, error) {
-	switch node.Kind {
-	case DepKindAgent:
+	switch marketplace.Kind(node.Kind) {
+	case marketplace.KindAgent:
 		_, err := r.q.GetAgentForOwner(r.ctx, store.GetAgentForOwnerParams{OwnerUserID: r.ownerID, AgentRef: node.Ref, Version: node.Version})
 		return existsFromErr(err)
-	case DepKindBundle:
+	case marketplace.KindBundle:
 		_, err := r.q.GetBundleForOwner(r.ctx, store.GetBundleForOwnerParams{OwnerUserID: r.ownerID, BundleRef: node.Ref, Version: node.Version})
 		return existsFromErr(err)
-	case DepKindSkill:
+	case marketplace.KindSkill:
 		_, err := r.q.GetSkillLatestStatusByRef(r.ctx, store.GetSkillLatestStatusByRefParams{OwnerUserID: r.ownerID, Ref: node.Ref})
 		return existsFromErr(err)
-	case DepKindMCP:
+	case marketplace.KindMCP:
 		_, err := r.q.GetMCPServerLatestStatusByRef(r.ctx, store.GetMCPServerLatestStatusByRefParams{OwnerUserID: r.ownerID, Ref: node.Ref})
 		return existsFromErr(err)
 	default:
@@ -51,17 +69,17 @@ func (r *storeResolver) Exists(node depclosure.NodeKey) (bool, error) {
 }
 
 func (r *storeResolver) IsPublished(node depclosure.NodeKey) (bool, error) {
-	switch node.Kind {
-	case DepKindAgent:
+	switch marketplace.Kind(node.Kind) {
+	case marketplace.KindAgent:
 		_, err := r.q.GetAgentListingForOwnerByRefVersion(r.ctx, store.GetAgentListingForOwnerByRefVersionParams{OwnerUserID: r.ownerID, AgentRef: node.Ref, Version: node.Version})
 		return existsFromErr(err)
-	case DepKindBundle:
+	case marketplace.KindBundle:
 		_, err := r.q.GetBundleListingForOwnerByRefVersion(r.ctx, store.GetBundleListingForOwnerByRefVersionParams{OwnerUserID: r.ownerID, BundleRef: node.Ref, Version: node.Version})
 		return existsFromErr(err)
-	case DepKindSkill:
+	case marketplace.KindSkill:
 		_, err := r.q.GetSkillListingForOwnerByRef(r.ctx, store.GetSkillListingForOwnerByRefParams{OwnerUserID: r.ownerID, Ref: node.Ref})
 		return existsFromErr(err)
-	case DepKindMCP:
+	case marketplace.KindMCP:
 		_, err := r.q.GetMCPServerListingForOwnerByRef(r.ctx, store.GetMCPServerListingForOwnerByRefParams{OwnerUserID: r.ownerID, Ref: node.Ref})
 		return existsFromErr(err)
 	default:
@@ -70,13 +88,13 @@ func (r *storeResolver) IsPublished(node depclosure.NodeKey) (bool, error) {
 }
 
 func (r *storeResolver) Dependencies(node depclosure.NodeKey) ([]depclosure.DependencyRef, error) {
-	switch node.Kind {
-	case DepKindBundle:
+	switch marketplace.Kind(node.Kind) {
+	case marketplace.KindBundle:
 		return r.bundleDependencies(node)
-	case DepKindAgent:
+	case marketplace.KindAgent:
 		return r.agentDependencies(node)
 	default:
-		// Skill and MCP are leaves: no further dependencies.
+		// Skill and MCP are leaves.
 		return nil, nil
 	}
 }
@@ -103,13 +121,12 @@ func (r *storeResolver) bundleDependencies(node depclosure.NodeKey) ([]depclosur
 		if version == "" {
 			// Bundle.agents[].version isn't required by the schema; fall
 			// back to the owner's current latest version of that ref.
-			latest, err := r.q.GetAgentLatestByRef(r.ctx, store.GetAgentLatestByRefParams{OwnerUserID: r.ownerID, AgentRef: ref})
-			if err == nil {
+			if latest, err := r.q.GetAgentLatestByRef(r.ctx, store.GetAgentLatestByRefParams{OwnerUserID: r.ownerID, AgentRef: ref}); err == nil {
 				version = latest.Version
 			}
 		}
 		deps = append(deps, depclosure.DependencyRef{
-			Node:  depclosure.NodeKey{Kind: DepKindAgent, Ref: ref, Version: version},
+			Node:  depclosure.NodeKey{Kind: string(marketplace.KindAgent), Ref: ref, Version: version},
 			Field: fmt.Sprintf("agents[%d]", i),
 		})
 	}
@@ -126,25 +143,25 @@ func (r *storeResolver) agentDependencies(node depclosure.NodeKey) ([]depclosure
 		return nil, err
 	}
 
-	tools := toStringSlice(deepGet(def, "capabilities", "tools"))
-	skills := toStringSlice(deepGet(def, "capabilities", "skills"))
+	tools := dslStringSlice(def, "capabilities", "tools")
+	skills := dslStringSlice(def, "capabilities", "skills")
 
 	var deps []depclosure.DependencyRef
 	for i, ref := range tools {
-		// Only mcp_servers-backed tool refs are publishable resources in
-		// the closure graph — a plain `tools`/`knowledge_bases` ref has no
-		// publish concept (ListingResourceType doesn't include either), so
-		// it's auto-satisfied and simply not added as a dependency edge.
+		// Only mcp_servers-backed tool refs are publishable resources in the
+		// closure graph — a plain tools/knowledge_bases ref has no publish
+		// concept (ListingResourceType excludes both), so it is
+		// auto-satisfied and simply not added as an edge.
 		if _, err := r.q.GetMCPServerLatestStatusByRef(r.ctx, store.GetMCPServerLatestStatusByRefParams{OwnerUserID: r.ownerID, Ref: ref}); err == nil {
 			deps = append(deps, depclosure.DependencyRef{
-				Node:  depclosure.NodeKey{Kind: DepKindMCP, Ref: ref},
+				Node:  depclosure.NodeKey{Kind: string(marketplace.KindMCP), Ref: ref},
 				Field: fmt.Sprintf("capabilities.tools[%d]", i),
 			})
 		}
 	}
 	for i, ref := range skills {
 		deps = append(deps, depclosure.DependencyRef{
-			Node:  depclosure.NodeKey{Kind: DepKindSkill, Ref: ref},
+			Node:  depclosure.NodeKey{Kind: string(marketplace.KindSkill), Ref: ref},
 			Field: fmt.Sprintf("capabilities.skills[%d]", i),
 		})
 	}
@@ -159,4 +176,27 @@ func existsFromErr(err error) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// dslStringSlice walks a nested DSL path and returns it as a string slice.
+func dslStringSlice(m map[string]any, path ...string) []string {
+	var cur any = m
+	for _, key := range path {
+		asMap, ok := cur.(map[string]any)
+		if !ok {
+			return nil
+		}
+		cur = asMap[key]
+	}
+	arr, ok := cur.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

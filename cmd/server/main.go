@@ -23,6 +23,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/config"
 	"github.com/marcon0203/agentic-kit/internal/crypto"
 	"github.com/marcon0203/agentic-kit/internal/domain/agent"
+	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
 	"github.com/marcon0203/agentic-kit/internal/observability"
 	"github.com/marcon0203/agentic-kit/internal/store"
@@ -89,6 +90,14 @@ func run() error {
 		adapterschema.NewValidator(agentValidator),
 	)
 
+	marketplaceService := marketplace.NewService(
+		postgres.NewListingRepository(queries),
+		postgres.NewSubscriptionRepository(queries),
+		postgres.NewMarketplaceCatalog(queries),
+		postgres.NewDependencyValidator(queries),
+		postgres.NewUserDirectory(queries),
+	)
+
 	gates := api.NewGateRegistry()
 	runEngine := api.NewRunEngine(queries, aesKey, gates, api.NewResourceRefChecker(queries))
 
@@ -102,7 +111,7 @@ func run() error {
 		Resources:        api.NewResourceHandlers(queries, api.NewHTTPReachabilityChecker(), aesKey),
 		Agents:           api.NewAgentHandlers(agentService),
 		Bundles:          api.NewBundleHandlers(queries, bundleValidator),
-		Marketplace:      api.NewMarketplaceHandlers(queries),
+		Marketplace:      api.NewMarketplaceHandlers(marketplaceService),
 		ModelProviders:   api.NewModelProviderHandlers(queries, aesKey),
 		Usage:            api.NewUsageHandlers(queries),
 		Runs:             api.NewRunHandlers(queries, runEngine),

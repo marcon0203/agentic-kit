@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
 
@@ -301,13 +302,13 @@ func (h *OperationHandlers) ResolveReport(w http.ResponseWriter, r *http.Request
 
 func (h *OperationHandlers) disableUnderlyingResource(ctx context.Context, resourceType string, resourceID int64) error {
 	switch resourceType {
-	case DepKindAgent:
+	case string(marketplace.KindAgent):
 		return h.Queries.SetAgentStatusByID(ctx, store.SetAgentStatusByIDParams{ID: resourceID, Status: 0})
-	case DepKindBundle:
+	case string(marketplace.KindBundle):
 		return h.Queries.SetBundleStatusByID(ctx, store.SetBundleStatusByIDParams{ID: resourceID, Status: 0})
-	case DepKindSkill:
+	case string(marketplace.KindSkill):
 		return h.Queries.SetSkillStatusByID(ctx, store.SetSkillStatusByIDParams{ID: resourceID, Status: 0})
-	case DepKindMCP:
+	case string(marketplace.KindMCP):
 		return h.Queries.SetMCPServerStatusByID(ctx, store.SetMCPServerStatusByIDParams{ID: resourceID, Status: 0})
 	default:
 		return nil
