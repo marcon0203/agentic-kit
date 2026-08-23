@@ -8,7 +8,9 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { HomePage } from '@/pages/HomePage'
 import { PagePlaceholder } from '@/pages/PagePlaceholder'
 import { RunPage } from '@/pages/RunPage'
-import { StartRunCard } from '@/components/run/StartRunCard'
+import { AppsPage } from '@/pages/AppsPage'
+import { ResourceCenterPage } from '@/pages/ResourceCenterPage'
+import { ModelProviderPage } from '@/pages/ModelProviderPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,14 +37,7 @@ export default function App() {
               path="/apps"
               element={
                 <ProtectedRoute>
-                  <div className="flex flex-col gap-space-6">
-                    <h1 className="text-headline-md text-ink-900">应用中心</h1>
-                    <p className="text-body-md max-w-[640px] text-ink-700">
-                      完整的 Bundle 列表与可视化编排由 spec-15 / spec-17 实现；这里先提供一个最小的运行入口，
-                      衔接 spec-14 的 Chat 运行详情页。
-                    </p>
-                    <StartRunCard />
-                  </div>
+                  <AppsPage />
                 </ProtectedRoute>
               }
             />
@@ -58,7 +53,7 @@ export default function App() {
               path="/resources"
               element={
                 <ProtectedRoute>
-                  <PagePlaceholder title="资源中心" note="Agent / Tool / MCP / 知识库管理由 spec-15 实现。" />
+                  <ResourceCenterPage />
                 </ProtectedRoute>
               }
             />
@@ -66,7 +61,7 @@ export default function App() {
               path="/models"
               element={
                 <ProtectedRoute>
-                  <PagePlaceholder title="模型中心" note="模型 Provider 接入与凭证管理由 spec-15 实现。" />
+                  <ModelProviderPage />
                 </ProtectedRoute>
               }
             />

@@ -3,7 +3,7 @@ import { useLocation, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown } from 'lucide-react'
 
-import { apiClient, unwrap } from '@/lib/api/client'
+import { apiClient, unwrap, assertOk, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 import { useAuthStore } from '@/lib/auth/store'
 
@@ -75,15 +75,29 @@ export function RunPage() {
     setHasNewMessage(false)
   }
 
+  const [actionError, setActionError] = useState<string | null>(null)
+
   async function resolveGate(node: string, approved: boolean) {
     if (!runId) return
-    await apiClient.POST('/runs/{id}/gate', { params: { path: { id: runId } }, body: { node, approved } })
+    setActionError(null)
+    try {
+      assertOk(await apiClient.POST('/runs/{id}/gate', { params: { path: { id: runId } }, body: { node, approved } }))
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : '操作失败，请稍后重试')
+      throw err
+    }
   }
 
   async function stopRun() {
     if (!runId) return
-    await apiClient.POST('/runs/{id}/cancel', { params: { path: { id: runId } } })
-    queryClient.invalidateQueries({ queryKey: ['run', runId] })
+    setActionError(null)
+    try {
+      assertOk(await apiClient.POST('/runs/{id}/cancel', { params: { path: { id: runId } } }))
+      queryClient.invalidateQueries({ queryKey: ['run', runId] })
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : '停止失败，请稍后重试')
+      throw err
+    }
   }
 
   if (!runId) return null
@@ -116,6 +130,12 @@ export function RunPage() {
           onReconnect={reconnect}
           onStop={stopRun}
         />
+
+        {actionError && (
+          <p role="alert" className="text-body-sm mb-space-4 text-[var(--color-error)]">
+            {actionError}
+          </p>
+        )}
 
         <div className="relative flex-1 rounded-lg border border-border bg-surface p-space-6">
           <div ref={scrollRef} onScroll={handleScroll} className="flex max-h-[65vh] flex-col gap-space-5 overflow-y-auto">

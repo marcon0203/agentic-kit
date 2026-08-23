@@ -304,7 +304,7 @@
       "id": 15,
       "type": "fe_console",
       "name": "资源与应用管理页",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-15-fe-console.md",
       "depends_on": [
         13,

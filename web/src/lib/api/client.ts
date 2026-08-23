@@ -50,8 +50,9 @@ apiClient.use({
 
 /**
  * unwrap pulls the typed payload out of an openapi-fetch result — every
- * response (success or error) is an `Envelope`, so both `res.data` and
- * `res.error` land here; a non-zero `code` throws `ApiError`.
+ * JSON response (success or error) is an `Envelope`, so both `res.data`
+ * and `res.error` land here; a non-zero `code` throws `ApiError`. Use
+ * this for any 200/201 endpoint with a body.
  */
 export function unwrap<T>(res: { data?: Envelope; error?: Envelope }): T {
   const envelope = res.data ?? res.error
@@ -62,4 +63,19 @@ export function unwrap<T>(res: { data?: Envelope; error?: Envelope }): T {
     throw new ApiError(envelope.code, envelope.message, envelope.details)
   }
   return envelope.data as T
+}
+
+/**
+ * assertOk is unwrap's counterpart for the handful of endpoints that
+ * return 204 No Content on success (cancelRun, resolveGate, deleteBundle,
+ * deleteAgent, ...) — there's no envelope to pull data out of, but a
+ * failure still comes back as one via `res.error`, and openapi-fetch
+ * never throws on its own, so skipping this check silently treats every
+ * error response as a success. Every call site MUST route through this
+ * or `unwrap` — never leave a bare `await apiClient.POST/PATCH/DELETE`.
+ */
+export function assertOk(res: { error?: Envelope }): void {
+  if (res.error) {
+    throw new ApiError(res.error.code, res.error.message, res.error.details)
+  }
 }
