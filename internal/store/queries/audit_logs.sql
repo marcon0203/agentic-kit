@@ -5,3 +5,6 @@ RETURNING *;
 
 -- name: ListAuditLogsForTarget :many
 SELECT * FROM audit_logs WHERE target_type = $1 AND target_id = $2 ORDER BY created_at ASC;
+
+-- name: ListAuditLogsForActorPage :many
+SELECT * FROM audit_logs WHERE actor_user_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3;

@@ -20,6 +20,9 @@ UPDATE mcp_servers SET health = $2 WHERE id = $1;
 -- name: MarkMCPServerImmutable :exec
 UPDATE mcp_servers SET immutable = true WHERE id = $1;
 
+-- name: SetMCPServerStatusByID :exec
+UPDATE mcp_servers SET status = $2 WHERE id = $1;
+
 -- name: FindAgentsReferencingMCPServerRef :many
 SELECT owner_user_id, agent_ref, version FROM agents
 WHERE owner_user_id = $1

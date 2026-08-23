@@ -362,3 +362,17 @@ func (q *Queries) SetAgentDisplayMeta(ctx context.Context, arg SetAgentDisplayMe
 	_, err := q.db.Exec(ctx, setAgentDisplayMeta, arg.ID, arg.DisplayMeta)
 	return err
 }
+
+const setAgentStatusByID = `-- name: SetAgentStatusByID :exec
+UPDATE agents SET status = $2 WHERE id = $1
+`
+
+type SetAgentStatusByIDParams struct {
+	ID     int64 `json:"id"`
+	Status int16 `json:"status"`
+}
+
+func (q *Queries) SetAgentStatusByID(ctx context.Context, arg SetAgentStatusByIDParams) error {
+	_, err := q.db.Exec(ctx, setAgentStatusByID, arg.ID, arg.Status)
+	return err
+}

@@ -365,7 +365,7 @@
       "id": 18,
       "type": "operation",
       "name": "运营中心",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-18-operation.md",
       "depends_on": [
         11,

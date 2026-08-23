@@ -85,6 +85,7 @@ func toUserDTO(u store.User) userDTO {
 		ID:          strconv.FormatInt(u.ID, 10),
 		Email:       u.Email,
 		DisplayName: u.DisplayName,
+		IsAdmin:     u.IsAdmin,
 		CreatedAt:   u.CreatedAt.Time,
 	}
 }

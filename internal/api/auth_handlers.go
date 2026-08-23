@@ -38,6 +38,7 @@ type userDTO struct {
 	ID          string    `json:"id"`
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
+	IsAdmin     bool      `json:"is_admin"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 
@@ -154,6 +155,7 @@ func (h *AuthHandlers) respondWithTokens(w http.ResponseWriter, r *http.Request,
 			ID:          strconv.FormatInt(user.ID, 10),
 			Email:       user.Email,
 			DisplayName: user.DisplayName,
+			IsAdmin:     user.IsAdmin,
 			CreatedAt:   user.CreatedAt,
 		},
 	})

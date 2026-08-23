@@ -248,6 +248,20 @@ func (q *Queries) SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerD
 	return err
 }
 
+const setMCPServerStatusByID = `-- name: SetMCPServerStatusByID :exec
+UPDATE mcp_servers SET status = $2 WHERE id = $1
+`
+
+type SetMCPServerStatusByIDParams struct {
+	ID     int64 `json:"id"`
+	Status int16 `json:"status"`
+}
+
+func (q *Queries) SetMCPServerStatusByID(ctx context.Context, arg SetMCPServerStatusByIDParams) error {
+	_, err := q.db.Exec(ctx, setMCPServerStatusByID, arg.ID, arg.Status)
+	return err
+}
+
 const updateMCPServer = `-- name: UpdateMCPServer :one
 UPDATE mcp_servers SET display_meta = $3, config = $4, status = $5
 WHERE id = $1 AND owner_user_id = $2

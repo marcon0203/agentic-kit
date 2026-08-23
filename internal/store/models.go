@@ -149,6 +149,18 @@ type ModelProvider struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Report struct {
+	ID             int64              `json:"id"`
+	ListingID      int64              `json:"listing_id"`
+	ReporterUserID int64              `json:"reporter_user_id"`
+	Reason         string             `json:"reason"`
+	Status         string             `json:"status"`
+	Resolution     pgtype.Text        `json:"resolution"`
+	ResolvedBy     pgtype.Int8        `json:"resolved_by"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type Skill struct {
 	ID          int64              `json:"id"`
 	OwnerUserID int64              `json:"owner_user_id"`
@@ -188,4 +200,5 @@ type User struct {
 	DisplayName  string             `json:"display_name"`
 	Status       int16              `json:"status"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	IsAdmin      bool               `json:"is_admin"`
 }

@@ -14,6 +14,7 @@ import { ModelProviderPage } from '@/pages/ModelProviderPage'
 import { MarketplacePage } from '@/pages/MarketplacePage'
 import { ListingDetailPage } from '@/pages/ListingDetailPage'
 import { BundleEditorPage } from '@/pages/BundleEditorPage'
+import { OperationsPage } from '@/pages/OperationsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -100,7 +101,7 @@ export default function App() {
               path="/ops"
               element={
                 <ProtectedRoute>
-                  <PagePlaceholder title="运营中心" note="用量看板与运行历史由 spec-18 实现。" />
+                  <OperationsPage />
                 </ProtectedRoute>
               }
             />

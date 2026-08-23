@@ -18,6 +18,7 @@ type AuthUser struct {
 	Email        string
 	PasswordHash string
 	DisplayName  string
+	IsAdmin      bool
 	CreatedAt    time.Time
 }
 
@@ -74,6 +75,7 @@ func toAuthUser(row store.User) AuthUser {
 		Email:        row.Email,
 		PasswordHash: row.PasswordHash,
 		DisplayName:  row.DisplayName,
+		IsAdmin:      row.IsAdmin,
 		CreatedAt:    row.CreatedAt.Time,
 	}
 }

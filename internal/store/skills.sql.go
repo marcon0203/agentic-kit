@@ -241,6 +241,20 @@ func (q *Queries) SetSkillDisplayMeta(ctx context.Context, arg SetSkillDisplayMe
 	return err
 }
 
+const setSkillStatusByID = `-- name: SetSkillStatusByID :exec
+UPDATE skills SET status = $2 WHERE id = $1
+`
+
+type SetSkillStatusByIDParams struct {
+	ID     int64 `json:"id"`
+	Status int16 `json:"status"`
+}
+
+func (q *Queries) SetSkillStatusByID(ctx context.Context, arg SetSkillStatusByIDParams) error {
+	_, err := q.db.Exec(ctx, setSkillStatusByID, arg.ID, arg.Status)
+	return err
+}
+
 const updateSkill = `-- name: UpdateSkill :one
 UPDATE skills SET display_meta = $3, config = $4, status = $5
 WHERE id = $1 AND owner_user_id = $2

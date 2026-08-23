@@ -42,6 +42,8 @@ tags:
     description: 用量与成本 — 用户自己的消耗
   - name: ModelProviders
     description: 模型中心 — Provider 接入
+  - name: Operations
+    description: 运营中心 — 审计日志、举报处理
 
 security:
   - BearerAuth: []
@@ -243,6 +245,44 @@ paths:
                       data: { $ref: '#/components/schemas/ListingDetail' }
         '404':
           description: listing 不存在或已下架（70002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /marketplace/listings/{ref}/report:
+    parameters:
+      - name: ref
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Operations]
+      summary: 举报该资源
+      description: 提交后进入运营中心的管理员举报队列（GET /moderation/reports）。
+      operationId: reportListing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, examples: ['描述与实际功能严重不符'] }
+      responses:
+        '201':
+          description: 已提交
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Report' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404':
+          description: listing 不存在（70002）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
@@ -1036,6 +1076,125 @@ paths:
                       data: { $ref: '#/components/schemas/UsageSummary' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  # ────────────────────────── 运营中心 ──────────────────────────
+  /audit-logs:
+    get:
+      tags: [Operations]
+      summary: 我的审计日志
+      description: |
+        当前用户自己发起的操作（V1 仅 human gate 审批/驳回）。
+        Append-only，数据库触发器拒绝 UPDATE/DELETE（迁移 0010）。
+      operationId: listMyAuditLogs
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/AuditLog' }
+                          next_cursor: { type: [string, 'null'] }
+                          has_more: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /moderation/reports:
+    get:
+      tags: [Operations]
+      summary: 待处理举报队列（仅管理员）
+      operationId: listPendingReports
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Report' }
+                          next_cursor: { type: [string, 'null'] }
+                          has_more: { type: boolean }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 非管理员（20003）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /moderation/reports/{id}/resolve:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Operations]
+      summary: 处理举报（仅管理员）
+      description: |
+        `action: takedown` 会禁用被举报资源本身（Agent/Bundle/Skill/MCP 的
+        `status`），使其立即无法通过校验被新的运行引用（30002）——这是存量
+        订阅者失去访问权限的方式；同时把该 listing 标记为管理员下架，
+        广场不再展示。`action: dismiss` 仅关闭举报，不影响资源。
+      operationId: resolveReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [dismiss, takedown] }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Report' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403':
+          description: 非管理员（20003）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '404':
+          description: 举报不存在（80001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '409':
+          description: 该举报已处理（80002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
   # ────────────────────────── 模型中心 ──────────────────────────
   /model-providers:
     get:
@@ -1456,6 +1615,10 @@ components:
         id: { type: string }
         email: { type: string, format: email }
         display_name: { type: string }
+        is_admin:
+          type: boolean
+          description: 是否拥有运营中心的管理员权限（举报处理）。V1 无角色系统，仅此一个布尔位。
+          default: false
         created_at: { type: string, format: date-time }
 
     # ── 广场与订阅 ──
@@ -1574,6 +1737,32 @@ components:
               tokens: { type: integer, format: int64 }
               cost_usd: { type: number }
               run_count: { type: integer }
+
+    AuditLog:
+      type: object
+      required: [id, action, target_type, target_id, created_at]
+      properties:
+        id: { type: string }
+        action: { type: string, examples: ['human_gate.approved'] }
+        target_type: { type: string, examples: ['human_gate'] }
+        target_id: { type: string }
+        detail: { type: [object, 'null'], additionalProperties: true }
+        created_at: { type: string, format: date-time }
+
+    Report:
+      type: object
+      required: [id, listing_ref, reason, status, created_at]
+      properties:
+        id: { type: string }
+        listing_ref: { type: string }
+        reason: { type: string }
+        subscriber_count:
+          type: integer
+          description: 被举报 listing 的存量订阅者数量，供下架确认弹窗展示影响范围
+        status: { type: string, enum: [pending, resolved] }
+        resolution: { type: [string, 'null'], enum: [dismiss, takedown, null] }
+        created_at: { type: string, format: date-time }
+        resolved_at: { type: [string, 'null'], format: date-time }
 
     ModelProvider:
       type: object

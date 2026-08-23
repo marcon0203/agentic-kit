@@ -94,6 +94,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/marketplace/listings/{ref}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 举报该资源
+         * @description 提交后进入运营中心的管理员举报队列（GET /moderation/reports）。
+         */
+        post: operations["reportListing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/marketplace/listings/{id}/unpublish": {
         parameters: {
             query?: never;
@@ -512,6 +534,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我的审计日志
+         * @description 当前用户自己发起的操作（V1 仅 human gate 审批/驳回）。
+         *     Append-only，数据库触发器拒绝 UPDATE/DELETE（迁移 0010）。
+         */
+        get: operations["listMyAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/moderation/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 待处理举报队列（仅管理员） */
+        get: operations["listPendingReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/moderation/reports/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 处理举报（仅管理员）
+         * @description `action: takedown` 会禁用被举报资源本身（Agent/Bundle/Skill/MCP 的
+         *     `status`），使其立即无法通过校验被新的运行引用（30002）——这是存量
+         *     订阅者失去访问权限的方式；同时把该 listing 标记为管理员下架，
+         *     广场不再展示。`action: dismiss` 仅关闭举报，不影响资源。
+         */
+        post: operations["resolveReport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model-providers": {
         parameters: {
             query?: never;
@@ -753,6 +838,11 @@ export interface components {
             /** Format: email */
             email: string;
             display_name: string;
+            /**
+             * @description 是否拥有运营中心的管理员权限（举报处理）。V1 无角色系统，仅此一个布尔位。
+             * @default false
+             */
+            is_admin: boolean;
             /** Format: date-time */
             created_at: string;
         };
@@ -852,6 +942,34 @@ export interface components {
                 cost_usd?: number;
                 run_count?: number;
             }[];
+        };
+        AuditLog: {
+            id: string;
+            /** @example human_gate.approved */
+            action: string;
+            /** @example human_gate */
+            target_type: string;
+            target_id: string;
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        Report: {
+            id: string;
+            listing_ref: string;
+            reason: string;
+            /** @description 被举报 listing 的存量订阅者数量，供下架确认弹窗展示影响范围 */
+            subscriber_count?: number;
+            /** @enum {string} */
+            status: "pending" | "resolved";
+            /** @enum {string|null} */
+            resolution?: "dismiss" | "takedown" | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            resolved_at?: string | null;
         };
         ModelProvider: {
             id: string;
@@ -1093,6 +1211,47 @@ export interface operations {
                 };
             };
             /** @description listing 不存在或已下架（70002） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    reportListing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example 描述与实际功能严重不符 */
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已提交 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Report"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description listing 不存在（70002） */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -1907,6 +2066,138 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listMyAuditLogs: {
+        parameters: {
+            query?: {
+                /** @description 默认 20，上限 100，超出按上限截断而非报错 */
+                limit?: components["parameters"]["Limit"];
+                /** @description 游标分页令牌，来自上一页响应的 next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["AuditLog"][];
+                            next_cursor?: string | null;
+                            has_more: boolean;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listPendingReports: {
+        parameters: {
+            query?: {
+                /** @description 默认 20，上限 100，超出按上限截断而非报错 */
+                limit?: components["parameters"]["Limit"];
+                /** @description 游标分页令牌，来自上一页响应的 next_cursor */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["Report"][];
+                            next_cursor?: string | null;
+                            has_more: boolean;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 非管理员（20003） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    resolveReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    action: "dismiss" | "takedown";
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Report"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description 非管理员（20003） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description 举报不存在（80001） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description 该举报已处理（80002） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
         };
     };
     listModelProviders: {

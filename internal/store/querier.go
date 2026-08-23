@@ -35,6 +35,7 @@ type Querier interface {
 	CreateListing(ctx context.Context, arg CreateListingParams) (MarketplaceListing, error)
 	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
 	CreateModelProvider(ctx context.Context, arg CreateModelProviderParams) (CreateModelProviderRow, error)
+	CreateReport(ctx context.Context, arg CreateReportParams) (Report, error)
 	CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error)
 	// ── Subscriptions ────────────────────────────────────────────────────
 	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error)
@@ -115,6 +116,7 @@ type Querier interface {
 	// self-loop retry), so this always resolves to the most recent occurrence
 	// for that run+node — the one actually blocking right now.
 	GetPendingHumanGateForRunNode(ctx context.Context, arg GetPendingHumanGateForRunNodeParams) (HumanGate, error)
+	GetReportByID(ctx context.Context, id int64) (Report, error)
 	GetSkillByIDForOwner(ctx context.Context, arg GetSkillByIDForOwnerParams) (Skill, error)
 	GetSkillByRefVersionForOwner(ctx context.Context, arg GetSkillByRefVersionForOwnerParams) (Skill, error)
 	GetSkillLatestByRef(ctx context.Context, arg GetSkillLatestByRefParams) (Skill, error)
@@ -155,6 +157,7 @@ type Querier interface {
 	// One row per agent_ref (its most recently created version), per
 	// api/openapi.yaml's "每个 ref 返回最新启用版本" list contract.
 	ListAgentsForOwnerLatestPage(ctx context.Context, arg ListAgentsForOwnerLatestPageParams) ([]Agent, error)
+	ListAuditLogsForActorPage(ctx context.Context, arg ListAuditLogsForActorPageParams) ([]AuditLog, error)
 	ListAuditLogsForTarget(ctx context.Context, arg ListAuditLogsForTargetParams) ([]AuditLog, error)
 	ListBundleRunEventsAfter(ctx context.Context, arg ListBundleRunEventsAfterParams) ([]BundleRunEvent, error)
 	ListBundleRunEventsAfterExternal(ctx context.Context, arg ListBundleRunEventsAfterExternalParams) ([]BundleRunEvent, error)
@@ -178,6 +181,7 @@ type Querier interface {
 	// Backs the timeout-scanning job (spec-11): a pending gate with a
 	// timeout_seconds set, whose deadline has passed.
 	ListPendingHumanGatesPastTimeout(ctx context.Context) ([]HumanGate, error)
+	ListPendingReportsPage(ctx context.Context, arg ListPendingReportsPageParams) ([]Report, error)
 	// ── Browse / detail (blackbox: display_meta only, never definition) ────
 	ListPublishedAgentListingsPage(ctx context.Context, arg ListPublishedAgentListingsPageParams) ([]ListPublishedAgentListingsPageRow, error)
 	ListPublishedBundleListingsPage(ctx context.Context, arg ListPublishedBundleListingsPageParams) ([]ListPublishedBundleListingsPageRow, error)
@@ -195,13 +199,18 @@ type Querier interface {
 	MarkToolImmutable(ctx context.Context, id int64) error
 	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
 	ResolveHumanGate(ctx context.Context, arg ResolveHumanGateParams) (HumanGate, error)
+	ResolveReport(ctx context.Context, arg ResolveReportParams) (Report, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	SetAgentDisplayMeta(ctx context.Context, arg SetAgentDisplayMetaParams) error
+	SetAgentStatusByID(ctx context.Context, arg SetAgentStatusByIDParams) error
 	SetBundleDisplayMeta(ctx context.Context, arg SetBundleDisplayMetaParams) error
+	SetBundleStatusByID(ctx context.Context, arg SetBundleStatusByIDParams) error
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
 	SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerDisplayMetaParams) error
+	SetMCPServerStatusByID(ctx context.Context, arg SetMCPServerStatusByIDParams) error
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error
 	SetSkillDisplayMeta(ctx context.Context, arg SetSkillDisplayMetaParams) error
+	SetSkillStatusByID(ctx context.Context, arg SetSkillStatusByIDParams) error
 	TouchAPIKeyLastUsed(ctx context.Context, id int64) error
 	UpdateBundleRunStatus(ctx context.Context, arg UpdateBundleRunStatusParams) error
 	UpdateBundleRunUsage(ctx context.Context, arg UpdateBundleRunUsageParams) error

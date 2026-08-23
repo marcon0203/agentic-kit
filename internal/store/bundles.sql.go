@@ -349,3 +349,17 @@ func (q *Queries) SetBundleDisplayMeta(ctx context.Context, arg SetBundleDisplay
 	_, err := q.db.Exec(ctx, setBundleDisplayMeta, arg.ID, arg.DisplayMeta)
 	return err
 }
+
+const setBundleStatusByID = `-- name: SetBundleStatusByID :exec
+UPDATE bundles SET status = $2 WHERE id = $1
+`
+
+type SetBundleStatusByIDParams struct {
+	ID     int64 `json:"id"`
+	Status int16 `json:"status"`
+}
+
+func (q *Queries) SetBundleStatusByID(ctx context.Context, arg SetBundleStatusByIDParams) error {
+	_, err := q.db.Exec(ctx, setBundleStatusByID, arg.ID, arg.Status)
+	return err
+}

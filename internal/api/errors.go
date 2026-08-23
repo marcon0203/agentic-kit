@@ -55,4 +55,8 @@ const (
 	ErrBlackboxDefinitionHidden  = 70006
 	ErrDependencyStillReferenced = 70007
 	ErrCircularDependency        = 70008
+
+	// 80xxx — 运营中心
+	ErrReportNotFound        = 80001
+	ErrReportAlreadyResolved = 80002
 )

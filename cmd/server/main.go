@@ -79,6 +79,7 @@ func run() error {
 		ModelProviders:   api.NewModelProviderHandlers(queries, aesKey),
 		Usage:            api.NewUsageHandlers(queries),
 		Runs:             api.NewRunHandlers(queries, runEngine),
+		Operations:       api.NewOperationHandlers(queries),
 	}
 
 	go api.RunGateTimeoutScanner(ctx, queries, gates, logger)

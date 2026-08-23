@@ -12,7 +12,7 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash, display_name)
 VALUES ($1, $2, $3)
-RETURNING id, email, password_hash, display_name, status, created_at
+RETURNING id, email, password_hash, display_name, status, created_at, is_admin
 `
 
 type CreateUserParams struct {
@@ -31,12 +31,13 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.DisplayName,
 		&i.Status,
 		&i.CreatedAt,
+		&i.IsAdmin,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, status, created_at FROM users WHERE email = $1
+SELECT id, email, password_hash, display_name, status, created_at, is_admin FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -49,12 +50,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.DisplayName,
 		&i.Status,
 		&i.CreatedAt,
+		&i.IsAdmin,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, display_name, status, created_at FROM users WHERE id = $1
+SELECT id, email, password_hash, display_name, status, created_at, is_admin FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
@@ -67,6 +69,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
 		&i.DisplayName,
 		&i.Status,
 		&i.CreatedAt,
+		&i.IsAdmin,
 	)
 	return i, err
 }

@@ -17,6 +17,9 @@ RETURNING *;
 -- name: MarkSkillImmutable :exec
 UPDATE skills SET immutable = true WHERE id = $1;
 
+-- name: SetSkillStatusByID :exec
+UPDATE skills SET status = $2 WHERE id = $1;
+
 -- name: FindAgentsReferencingSkillRef :many
 SELECT owner_user_id, agent_ref, version FROM agents
 WHERE owner_user_id = $1

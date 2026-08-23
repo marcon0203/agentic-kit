@@ -62,3 +62,6 @@ UPDATE bundles SET display_meta = $2 WHERE id = $1;
 
 -- name: DeleteBundle :exec
 DELETE FROM bundles WHERE id = $1;
+
+-- name: SetBundleStatusByID :exec
+UPDATE bundles SET status = $2 WHERE id = $1;

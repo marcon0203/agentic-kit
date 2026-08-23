@@ -46,6 +46,44 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 	return i, err
 }
 
+const listAuditLogsForActorPage = `-- name: ListAuditLogsForActorPage :many
+SELECT id, actor_user_id, action, target_type, target_id, detail, created_at FROM audit_logs WHERE actor_user_id = $1 AND id < $2 ORDER BY id DESC LIMIT $3
+`
+
+type ListAuditLogsForActorPageParams struct {
+	ActorUserID pgtype.Int8 `json:"actor_user_id"`
+	ID          int64       `json:"id"`
+	Limit       int32       `json:"limit"`
+}
+
+func (q *Queries) ListAuditLogsForActorPage(ctx context.Context, arg ListAuditLogsForActorPageParams) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, listAuditLogsForActorPage, arg.ActorUserID, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditLog{}
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.ActorUserID,
+			&i.Action,
+			&i.TargetType,
+			&i.TargetID,
+			&i.Detail,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditLogsForTarget = `-- name: ListAuditLogsForTarget :many
 SELECT id, actor_user_id, action, target_type, target_id, detail, created_at FROM audit_logs WHERE target_type = $1 AND target_id = $2 ORDER BY created_at ASC
 `

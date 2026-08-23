@@ -62,3 +62,6 @@ UPDATE agents SET display_meta = $2 WHERE id = $1;
 
 -- name: DeleteAgent :exec
 DELETE FROM agents WHERE id = $1;
+
+-- name: SetAgentStatusByID :exec
+UPDATE agents SET status = $2 WHERE id = $1;

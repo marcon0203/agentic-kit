@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Lock, TriangleAlert } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Flag, Lock, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { SubscribeDialog } from '@/components/marketplace/SubscribeDialog'
-import { apiClient, unwrap } from '@/lib/api/client'
+import { apiClient, unwrap, assertOk, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 
 type ListingDetail = components['schemas']['ListingDetail']
@@ -16,7 +19,27 @@ type ListingDetail = components['schemas']['ListingDetail']
 export function ListingDetailPage() {
   const { ref } = useParams<{ ref: string }>()
   const [subscribeOpen, setSubscribeOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportReason, setReportReason] = useState('')
+  const [reportError, setReportError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  const submitReport = useMutation({
+    mutationFn: async () => {
+      assertOk(
+        await apiClient.POST('/marketplace/listings/{ref}/report', {
+          params: { path: { ref: ref! } },
+          body: { reason: reportReason },
+        }),
+      )
+    },
+    onSuccess: () => {
+      toast('举报已提交，运营团队会尽快处理')
+      setReportOpen(false)
+      setReportReason('')
+    },
+    onError: (err) => setReportError(err instanceof ApiError ? err.message : '提交失败'),
+  })
 
   const query = useQuery({
     queryKey: ['listing', ref],
@@ -87,6 +110,15 @@ export function ListingDetailPage() {
             <Lock className="mt-0.5 size-4 shrink-0 text-ink-700" aria-hidden />
             <p className="text-body-sm text-ink-700">该资源为黑盒发布，内部编排结构与提示词不公开。</p>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setReportOpen(true)}
+            className="text-caption inline-flex w-fit items-center gap-1 text-ink-500 hover:text-ink-700"
+          >
+            <Flag className="size-3" aria-hidden />
+            举报该资源
+          </button>
         </div>
 
         <div className="flex flex-col gap-space-5 self-start lg:sticky lg:top-space-6">
@@ -150,6 +182,45 @@ export function ListingDetailPage() {
           queryClient.invalidateQueries({ queryKey: ['listing', ref] })
         }}
       />
+
+      <Dialog
+        open={reportOpen}
+        onOpenChange={(open) => {
+          setReportOpen(open)
+          if (!open) setReportError(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>举报该资源</DialogTitle>
+          </DialogHeader>
+          <Textarea
+            value={reportReason}
+            onChange={(e) => setReportReason(e.target.value)}
+            placeholder="描述遇到的问题，例如内容不当、功能与描述严重不符……"
+            className="min-h-[100px]"
+          />
+          {reportError && (
+            <p role="alert" className="text-body-sm text-[var(--color-error)]">
+              {reportError}
+            </p>
+          )}
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setReportOpen(false)} disabled={submitReport.isPending}>
+              取消
+            </Button>
+            <Button
+              disabled={!reportReason.trim() || submitReport.isPending}
+              onClick={() => {
+                setReportError(null)
+                submitReport.mutate()
+              }}
+            >
+              提交举报
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
