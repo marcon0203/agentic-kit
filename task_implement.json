@@ -242,7 +242,7 @@
       "id": 12,
       "type": "event_stream",
       "name": "NDJSON 事件流接口",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-12-event-stream.md",
       "depends_on": [
         11

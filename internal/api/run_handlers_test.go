@@ -25,6 +25,7 @@ type fakeRunHandlersQuerier struct {
 	gates      map[int64]store.HumanGate
 	nextGateID int64
 	audits     []store.AuditLog
+	events     []store.BundleRunEvent
 
 	cancelRequested map[string]bool
 }
@@ -57,11 +58,23 @@ func (f *fakeRunHandlersQuerier) MarkBundleRunCancelRequested(_ context.Context,
 }
 
 func (f *fakeRunHandlersQuerier) ListBundleRunEventsAfter(_ context.Context, arg store.ListBundleRunEventsAfterParams) ([]store.BundleRunEvent, error) {
-	return nil, nil
+	var out []store.BundleRunEvent
+	for _, ev := range f.events {
+		if ev.RunID == arg.RunID && ev.ID > arg.ID {
+			out = append(out, ev)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeRunHandlersQuerier) ListBundleRunEventsAfterExternal(_ context.Context, arg store.ListBundleRunEventsAfterExternalParams) ([]store.BundleRunEvent, error) {
-	return nil, nil
+	var out []store.BundleRunEvent
+	for _, ev := range f.events {
+		if ev.RunID == arg.RunID && ev.ID > arg.ID && !ev.IsInternal {
+			out = append(out, ev)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeRunHandlersQuerier) GetPendingHumanGateForRunNode(_ context.Context, arg store.GetPendingHumanGateForRunNodeParams) (store.HumanGate, error) {
@@ -277,5 +290,119 @@ func TestRunHandlers_ResolveGate_Success(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected the registry channel to receive a resolution")
+	}
+}
+
+// ── Stream ───────────────────────────────────────────────────────────
+
+func decodeNDJSONLines(t *testing.T, body []byte) []runEventDTO {
+	t.Helper()
+	var out []runEventDTO
+	for _, line := range bytes.Split(bytes.TrimSpace(body), []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var dto runEventDTO
+		if err := json.Unmarshal(line, &dto); err != nil {
+			t.Fatalf("decode NDJSON line %q: %v", line, err)
+		}
+		out = append(out, dto)
+	}
+	return out
+}
+
+func streamRequest(runID string, userID int64, afterID string) *http.Request {
+	url := "/runs/" + runID + "/stream"
+	if afterID != "" {
+		url += "?after_id=" + afterID
+	}
+	req := httptest.NewRequest(http.MethodGet, url, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", runID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return withUser(req, userID)
+}
+
+// A terminal run (status finished/failed at connect time) replays history
+// and closes immediately — spec-12's "遇 bundle.finished/failed...主动关闭"
+// — without needing to wait out a poll interval, so this exercises the
+// full history-replay path without any test-only timing hacks.
+func TestRunHandlers_Stream_ReplaysHistoryAndClosesOnTerminalStatus(t *testing.T) {
+	f := newFakeRunHandlersQuerier()
+	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 5, BundleRef: "b1", Version: "v1", DisplayMeta: []byte("{}")}
+	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: "finished"}
+	f.events = []store.BundleRunEvent{
+		{ID: 1, RunID: "run-1", Type: "node.start", Payload: []byte("{}")},
+		{ID: 2, RunID: "run-1", Type: "bundle.finished", Payload: []byte("{}")},
+	}
+	h := newTestRunHandlers(f)
+
+	w := httptest.NewRecorder()
+	h.Stream(w, streamRequest("run-1", 5, ""))
+
+	if ct := w.Header().Get("Content-Type"); ct != "application/x-ndjson" {
+		t.Fatalf("expected NDJSON content type, got %q", ct)
+	}
+	if w.Header().Get("X-Accel-Buffering") != "no" {
+		t.Fatal("expected X-Accel-Buffering: no (required so nginx doesn't buffer the stream)")
+	}
+	events := decodeNDJSONLines(t, w.Body.Bytes())
+	if len(events) != 2 || events[0].ID != 1 || events[1].ID != 2 {
+		t.Fatalf("expected both history events replayed in order, got %+v", events)
+	}
+}
+
+func TestRunHandlers_Stream_AfterIDResumesWithoutReplay(t *testing.T) {
+	f := newFakeRunHandlersQuerier()
+	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 5, BundleRef: "b1", Version: "v1", DisplayMeta: []byte("{}")}
+	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: "finished"}
+	f.events = []store.BundleRunEvent{
+		{ID: 1, RunID: "run-1", Type: "node.start", Payload: []byte("{}")},
+		{ID: 2, RunID: "run-1", Type: "bundle.finished", Payload: []byte("{}")},
+	}
+	h := newTestRunHandlers(f)
+
+	w := httptest.NewRecorder()
+	h.Stream(w, streamRequest("run-1", 5, "1"))
+
+	events := decodeNDJSONLines(t, w.Body.Bytes())
+	if len(events) != 1 || events[0].ID != 2 {
+		t.Fatalf("expected only the event after id=1 to be resent, got %+v", events)
+	}
+}
+
+func TestRunHandlers_Stream_FiltersInternalEventsForSubscriber(t *testing.T) {
+	f := newFakeRunHandlersQuerier()
+	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 99, BundleRef: "b1", Version: "v1", DisplayMeta: []byte("{}")}
+	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 30, Status: "finished"}
+	f.events = []store.BundleRunEvent{
+		{ID: 1, RunID: "run-1", Type: "tool.call", Payload: []byte("{}"), IsInternal: true},
+		{ID: 2, RunID: "run-1", Type: "bundle.finished", Payload: []byte("{}"), IsInternal: false},
+	}
+	h := newTestRunHandlers(f)
+
+	w := httptest.NewRecorder()
+	h.Stream(w, streamRequest("run-1", 30, ""))
+	events := decodeNDJSONLines(t, w.Body.Bytes())
+	if len(events) != 1 || events[0].ID != 2 {
+		t.Fatalf("expected only the external event visible to a subscriber, got %+v", events)
+	}
+}
+
+func TestRunHandlers_Stream_OwnerSeesInternalEvents(t *testing.T) {
+	f := newFakeRunHandlersQuerier()
+	f.bundles[1] = store.Bundle{ID: 1, OwnerUserID: 99, BundleRef: "b1", Version: "v1", DisplayMeta: []byte("{}")}
+	f.runs["run-1"] = store.BundleRun{ID: "run-1", BundleID: 1, TriggeredBy: 99, Status: "finished"}
+	f.events = []store.BundleRunEvent{
+		{ID: 1, RunID: "run-1", Type: "tool.call", Payload: []byte("{}"), IsInternal: true},
+		{ID: 2, RunID: "run-1", Type: "bundle.finished", Payload: []byte("{}"), IsInternal: false},
+	}
+	h := newTestRunHandlers(f)
+
+	w := httptest.NewRecorder()
+	h.Stream(w, streamRequest("run-1", 99, ""))
+	events := decodeNDJSONLines(t, w.Body.Bytes())
+	if len(events) != 2 {
+		t.Fatalf("expected the Bundle owner to see internal events too, got %+v", events)
 	}
 }

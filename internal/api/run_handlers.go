@@ -283,7 +283,11 @@ func pgxErrNoRows(err error) bool {
 
 // ── Stream ───────────────────────────────────────────────────────────
 
-const streamPollInterval = 500 * time.Millisecond
+// streamPollInterval is spec-12's "服务端检查间隔（300ms）" — how often the
+// stream re-polls for new events/status once it's caught up, bounding
+// end-to-end latency and how quickly the connection closes after the run
+// reaches a terminal state (spec-12's "~400ms 内自动关闭" acceptance check).
+const streamPollInterval = 300 * time.Millisecond
 
 type runEventDTO struct {
 	ID        int64          `json:"id"`
