@@ -327,7 +327,7 @@
       "id": 16,
       "type": "fe_marketplace",
       "name": "应用广场前端",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-16-fe-marketplace.md",
       "depends_on": [
         13,

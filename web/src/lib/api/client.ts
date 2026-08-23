@@ -5,6 +5,11 @@ import { useAuthStore } from '@/lib/auth/store'
 
 type Envelope = components['schemas']['Envelope']
 
+export interface FieldError {
+  field: string
+  reason: string
+}
+
 /**
  * Thrown for every non-zero `Envelope.code`, whatever the HTTP status —
  * spec-13: "封装统一信封解包...供上层按 code 分支处理（不匹配 message 文案）".
@@ -13,9 +18,9 @@ type Envelope = components['schemas']['Envelope']
  */
 export class ApiError extends Error {
   code: number
-  details?: { field: string; reason: string }[]
+  details?: FieldError[]
 
-  constructor(code: number, message: string, details?: { field: string; reason: string }[]) {
+  constructor(code: number, message: string, details?: FieldError[]) {
     super(message)
     this.name = 'ApiError'
     this.code = code

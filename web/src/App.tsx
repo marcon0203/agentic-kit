@@ -11,6 +11,8 @@ import { RunPage } from '@/pages/RunPage'
 import { AppsPage } from '@/pages/AppsPage'
 import { ResourceCenterPage } from '@/pages/ResourceCenterPage'
 import { ModelProviderPage } from '@/pages/ModelProviderPage'
+import { MarketplacePage } from '@/pages/MarketplacePage'
+import { ListingDetailPage } from '@/pages/ListingDetailPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,7 +33,19 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route
               path="/marketplace"
-              element={<PagePlaceholder title="应用广场" note="订阅、发布与浏览由 spec-16 实现。" />}
+              element={
+                <ProtectedRoute>
+                  <MarketplacePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/marketplace/listing/:ref"
+              element={
+                <ProtectedRoute>
+                  <ListingDetailPage />
+                </ProtectedRoute>
+              }
             />
             <Route
               path="/apps"
