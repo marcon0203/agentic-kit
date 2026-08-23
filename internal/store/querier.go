@@ -19,10 +19,22 @@ type Querier interface {
 	CreateBundle(ctx context.Context, arg CreateBundleParams) (Bundle, error)
 	CreateBundleRun(ctx context.Context, arg CreateBundleRunParams) (BundleRun, error)
 	CreateKnowledgeBase(ctx context.Context, arg CreateKnowledgeBaseParams) (KnowledgeBasis, error)
+	// Dependency closure (spec-08) is always owner-scoped: a Bundle/Agent only
+	// ever references resources in the SAME owner's space by ref, so every
+	// "is X published" check below joins through the resource table's
+	// owner_user_id rather than trusting listing_ref alone (listing_ref is
+	// globally unique across all authors, like an npm package name — see
+	// migration 0003's UNIQUE(listing_ref, version)).
+	//
+	// distribution: 1 distributing / 2 stopped / 3 delisted (admin takedown).
+	// "published" for dependency-satisfaction purposes means distribution != 3
+	// — a stopped listing still satisfies dependents (spec-08 "无影响，继续可用"),
+	// only an admin delisting actually removes it from the graph.
 	CreateListing(ctx context.Context, arg CreateListingParams) (MarketplaceListing, error)
 	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
 	CreateModelProvider(ctx context.Context, arg CreateModelProviderParams) (CreateModelProviderRow, error)
 	CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error)
+	// ── Subscriptions ────────────────────────────────────────────────────
 	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error)
 	CreateTool(ctx context.Context, arg CreateToolParams) (Tool, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
@@ -40,22 +52,66 @@ type Querier interface {
 	FindAgentsReferencingSkillRef(ctx context.Context, arg FindAgentsReferencingSkillRefParams) ([]FindAgentsReferencingSkillRefRow, error)
 	FindAgentsReferencingToolRef(ctx context.Context, arg FindAgentsReferencingToolRefParams) ([]FindAgentsReferencingToolRefRow, error)
 	FindBundlesReferencingAgentRef(ctx context.Context, arg FindBundlesReferencingAgentRefParams) ([]FindBundlesReferencingAgentRefRow, error)
+	FindPublishedAgentsReferencingSkillRef(ctx context.Context, arg FindPublishedAgentsReferencingSkillRefParams) ([]FindPublishedAgentsReferencingSkillRefRow, error)
+	FindPublishedAgentsReferencingToolRef(ctx context.Context, arg FindPublishedAgentsReferencingToolRefParams) ([]FindPublishedAgentsReferencingToolRefRow, error)
+	// ── Reverse-dependency checks (unpublish-time, 70007) ───────────────────
+	// Which of the owner's *currently published* Bundles reference this Agent
+	// ref (any version — used to block unpublishing the Agent entirely; the
+	// exact-version variant used at publish-time doesn't apply here since any
+	// version of the agent being gone would break the dependent Bundle).
+	FindPublishedBundlesReferencingAgentRef(ctx context.Context, arg FindPublishedBundlesReferencingAgentRefParams) ([]FindPublishedBundlesReferencingAgentRefRow, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
+	// Constraints summary is extracted field-by-field via JSONB path operators
+	// so the full `definition` blob never has to leave Postgres — the same
+	// "DAO 层强制隔离" principle as the display-only list queries above, just
+	// applied to a handful of numeric/string fields instead of a whole column.
+	// Every field of Agent.constraints is optional in the DSL (schema defaults
+	// apply at runtime), so a raw ::int/::text cast on a possibly-absent key
+	// would scan a Postgres NULL into a non-nullable Go int32/string and
+	// panic. COALESCE to the DSL's own documented defaults (max_tool_calls 20,
+	// timeout_seconds 300) keeps the value meaningful; estimated_tokens_range
+	// has no default, so it's coalesced to '' and the API layer treats an
+	// empty string as "not disclosed" rather than guessing a range.
+	GetAgentConstraintsSummaryByListingID(ctx context.Context, id int64) (GetAgentConstraintsSummaryByListingIDRow, error)
 	GetAgentDisplayForSubscriber(ctx context.Context, id int64) (GetAgentDisplayForSubscriberRow, error)
 	GetAgentForOwner(ctx context.Context, arg GetAgentForOwnerParams) (Agent, error)
 	GetAgentLatestByRef(ctx context.Context, arg GetAgentLatestByRefParams) (Agent, error)
+	GetAgentListingDisplayByListingID(ctx context.Context, id int64) (GetAgentListingDisplayByListingIDRow, error)
+	// ── Dependency-satisfaction checks (publish-time closure walk) ──────────
+	GetAgentListingForOwnerByRefVersion(ctx context.Context, arg GetAgentListingForOwnerByRefVersionParams) (MarketplaceListing, error)
+	GetBundleConstraintsSummaryByListingID(ctx context.Context, id int64) (GetBundleConstraintsSummaryByListingIDRow, error)
 	GetBundleDisplayForSubscriber(ctx context.Context, id int64) (GetBundleDisplayForSubscriberRow, error)
 	GetBundleForOwner(ctx context.Context, arg GetBundleForOwnerParams) (Bundle, error)
+	GetBundleListingDisplayByListingID(ctx context.Context, id int64) (GetBundleListingDisplayByListingIDRow, error)
+	GetBundleListingForOwnerByRefVersion(ctx context.Context, arg GetBundleListingForOwnerByRefVersionParams) (MarketplaceListing, error)
 	GetBundleRun(ctx context.Context, id string) (BundleRun, error)
 	GetIdempotencyKey(ctx context.Context, key string) (IdempotencyKey, error)
 	GetKnowledgeBaseByIDForOwner(ctx context.Context, arg GetKnowledgeBaseByIDForOwnerParams) (KnowledgeBasis, error)
 	GetKnowledgeBaseLatestStatusByRef(ctx context.Context, arg GetKnowledgeBaseLatestStatusByRefParams) (int16, error)
-	GetListingByRefVersion(ctx context.Context, arg GetListingByRefVersionParams) (MarketplaceListing, error)
+	GetListingByID(ctx context.Context, id int64) (MarketplaceListing, error)
+	GetListingByListingRefAndVersion(ctx context.Context, arg GetListingByListingRefAndVersionParams) (MarketplaceListing, error)
+	GetListingByListingRefLatestPublished(ctx context.Context, listingRef string) (MarketplaceListing, error)
 	GetMCPServerByIDForOwner(ctx context.Context, arg GetMCPServerByIDForOwnerParams) (McpServer, error)
+	GetMCPServerByRefVersionForOwner(ctx context.Context, arg GetMCPServerByRefVersionForOwnerParams) (McpServer, error)
 	GetMCPServerLatestStatusByRef(ctx context.Context, arg GetMCPServerLatestStatusByRefParams) (int16, error)
+	GetMCPServerListingDisplayByListingID(ctx context.Context, id int64) (GetMCPServerListingDisplayByListingIDRow, error)
+	GetMCPServerListingForOwnerByRef(ctx context.Context, arg GetMCPServerListingForOwnerByRefParams) (MarketplaceListing, error)
 	GetModelProviderCredentials(ctx context.Context, arg GetModelProviderCredentialsParams) ([]byte, error)
 	GetSkillByIDForOwner(ctx context.Context, arg GetSkillByIDForOwnerParams) (Skill, error)
+	GetSkillByRefVersionForOwner(ctx context.Context, arg GetSkillByRefVersionForOwnerParams) (Skill, error)
 	GetSkillLatestStatusByRef(ctx context.Context, arg GetSkillLatestStatusByRefParams) (int16, error)
+	GetSkillListingDisplayByListingID(ctx context.Context, id int64) (GetSkillListingDisplayByListingIDRow, error)
+	// Skill/MCP refs in an Agent's capabilities are not version-pinned in the
+	// DSL (unlike Bundle.agents[].version), so satisfaction only requires SOME
+	// published version of the ref to exist — the most recently published one.
+	GetSkillListingForOwnerByRef(ctx context.Context, arg GetSkillListingForOwnerByRefParams) (MarketplaceListing, error)
+	GetSubscriptionByIDForSubscriber(ctx context.Context, arg GetSubscriptionByIDForSubscriberParams) (Subscription, error)
+	GetSubscriptionByListingAndSubscriber(ctx context.Context, arg GetSubscriptionByListingAndSubscriberParams) (Subscription, error)
+	// Enforces "一个 ref 只保留一个生效订阅" (spec-08 已决事项): a subscriber can
+	// have at most one active subscription per listing_ref, regardless of
+	// which version it's bound to — switching versions is an explicit upgrade,
+	// never a second subscribe.
+	GetSubscriptionForSubscriberByListingRef(ctx context.Context, arg GetSubscriptionForSubscriberByListingRefParams) (Subscription, error)
 	GetToolByIDForOwner(ctx context.Context, arg GetToolByIDForOwnerParams) (Tool, error)
 	GetToolLatestStatusByRef(ctx context.Context, arg GetToolLatestStatusByRefParams) (int16, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
@@ -77,11 +133,16 @@ type Querier interface {
 	// One row per bundle_ref (its most recently created version).
 	ListBundlesForOwnerLatestPage(ctx context.Context, arg ListBundlesForOwnerLatestPageParams) ([]Bundle, error)
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
-	ListListingsByType(ctx context.Context, arg ListListingsByTypeParams) ([]MarketplaceListing, error)
+	ListListingVersionHistory(ctx context.Context, listingRef string) ([]ListListingVersionHistoryRow, error)
 	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)
 	ListModelProvidersForOwner(ctx context.Context, ownerUserID int64) ([]ListModelProvidersForOwnerRow, error)
+	// ── Browse / detail (blackbox: display_meta only, never definition) ────
+	ListPublishedAgentListingsPage(ctx context.Context, arg ListPublishedAgentListingsPageParams) ([]ListPublishedAgentListingsPageRow, error)
+	ListPublishedBundleListingsPage(ctx context.Context, arg ListPublishedBundleListingsPageParams) ([]ListPublishedBundleListingsPageRow, error)
+	ListPublishedMCPServerListingsPage(ctx context.Context, arg ListPublishedMCPServerListingsPageParams) ([]ListPublishedMCPServerListingsPageRow, error)
+	ListPublishedSkillListingsPage(ctx context.Context, arg ListPublishedSkillListingsPageParams) ([]ListPublishedSkillListingsPageRow, error)
 	ListSkillsForOwnerPage(ctx context.Context, arg ListSkillsForOwnerPageParams) ([]Skill, error)
-	ListSubscriptionsForUser(ctx context.Context, subscriberID int64) ([]Subscription, error)
+	ListSubscriptionsForUserPage(ctx context.Context, arg ListSubscriptionsForUserPageParams) ([]Subscription, error)
 	ListToolsForOwnerPage(ctx context.Context, arg ListToolsForOwnerPageParams) ([]Tool, error)
 	MarkAgentImmutable(ctx context.Context, id int64) error
 	MarkBundleImmutable(ctx context.Context, id int64) error
@@ -91,8 +152,12 @@ type Querier interface {
 	MarkToolImmutable(ctx context.Context, id int64) error
 	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
+	SetAgentDisplayMeta(ctx context.Context, arg SetAgentDisplayMetaParams) error
+	SetBundleDisplayMeta(ctx context.Context, arg SetBundleDisplayMetaParams) error
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
+	SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerDisplayMetaParams) error
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error
+	SetSkillDisplayMeta(ctx context.Context, arg SetSkillDisplayMetaParams) error
 	TouchAPIKeyLastUsed(ctx context.Context, id int64) error
 	UpdateBundleRunStatus(ctx context.Context, arg UpdateBundleRunStatusParams) error
 	UpdateBundleRunUsage(ctx context.Context, arg UpdateBundleRunUsageParams) error
@@ -100,6 +165,7 @@ type Querier interface {
 	UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error)
 	UpdateMCPServerHealth(ctx context.Context, arg UpdateMCPServerHealthParams) error
 	UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill, error)
+	UpdateSubscriptionListing(ctx context.Context, arg UpdateSubscriptionListingParams) (Subscription, error)
 	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)
 }
 

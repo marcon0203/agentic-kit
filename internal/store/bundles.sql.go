@@ -278,3 +278,17 @@ func (q *Queries) MarkBundleImmutable(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markBundleImmutable, id)
 	return err
 }
+
+const setBundleDisplayMeta = `-- name: SetBundleDisplayMeta :exec
+UPDATE bundles SET display_meta = $2 WHERE id = $1
+`
+
+type SetBundleDisplayMetaParams struct {
+	ID          int64  `json:"id"`
+	DisplayMeta []byte `json:"display_meta"`
+}
+
+func (q *Queries) SetBundleDisplayMeta(ctx context.Context, arg SetBundleDisplayMetaParams) error {
+	_, err := q.db.Exec(ctx, setBundleDisplayMeta, arg.ID, arg.DisplayMeta)
+	return err
+}

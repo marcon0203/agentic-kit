@@ -12,6 +12,7 @@ import (
 )
 
 const createListing = `-- name: CreateListing :one
+
 INSERT INTO marketplace_listings
     (author_user_id, resource_type, resource_id, listing_ref, version, changelog)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -27,6 +28,17 @@ type CreateListingParams struct {
 	Changelog    pgtype.Text `json:"changelog"`
 }
 
+// Dependency closure (spec-08) is always owner-scoped: a Bundle/Agent only
+// ever references resources in the SAME owner's space by ref, so every
+// "is X published" check below joins through the resource table's
+// owner_user_id rather than trusting listing_ref alone (listing_ref is
+// globally unique across all authors, like an npm package name — see
+// migration 0003's UNIQUE(listing_ref, version)).
+//
+// distribution: 1 distributing / 2 stopped / 3 delisted (admin takedown).
+// "published" for dependency-satisfaction purposes means distribution != 3
+// — a stopped listing still satisfies dependents (spec-08 "无影响，继续可用"),
+// only an admin delisting actually removes it from the graph.
 func (q *Queries) CreateListing(ctx context.Context, arg CreateListingParams) (MarketplaceListing, error) {
 	row := q.db.QueryRow(ctx, createListing,
 		arg.AuthorUserID,
@@ -55,6 +67,7 @@ func (q *Queries) CreateListing(ctx context.Context, arg CreateListingParams) (M
 }
 
 const createSubscription = `-- name: CreateSubscription :one
+
 INSERT INTO subscriptions (subscriber_id, listing_id, local_alias)
 VALUES ($1, $2, $3)
 RETURNING id, subscriber_id, listing_id, local_alias, created_at
@@ -66,6 +79,7 @@ type CreateSubscriptionParams struct {
 	LocalAlias   pgtype.Text `json:"local_alias"`
 }
 
+// ── Subscriptions ────────────────────────────────────────────────────
 func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error) {
 	row := q.db.QueryRow(ctx, createSubscription, arg.SubscriberID, arg.ListingID, arg.LocalAlias)
 	var i Subscription
@@ -102,18 +116,218 @@ func (q *Queries) DeleteSubscription(ctx context.Context, arg DeleteSubscription
 	return err
 }
 
-const getListingByRefVersion = `-- name: GetListingByRefVersion :one
-SELECT id, author_user_id, resource_type, resource_id, listing_ref, version, visibility, changelog, distribution, subscriber_count, run_count, published_at FROM marketplace_listings
-WHERE listing_ref = $1 AND version = $2
+const findPublishedAgentsReferencingSkillRef = `-- name: FindPublishedAgentsReferencingSkillRef :many
+SELECT a.agent_ref, a.version FROM agents a
+JOIN marketplace_listings ml ON ml.resource_type = 'agent' AND ml.resource_id = a.id
+WHERE a.owner_user_id = $1
+  AND ml.distribution != 3
+  AND (a.definition->'capabilities'->'skills') ? $2::text
 `
 
-type GetListingByRefVersionParams struct {
-	ListingRef string `json:"listing_ref"`
-	Version    string `json:"version"`
+type FindPublishedAgentsReferencingSkillRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	SkillRef    string `json:"skill_ref"`
 }
 
-func (q *Queries) GetListingByRefVersion(ctx context.Context, arg GetListingByRefVersionParams) (MarketplaceListing, error) {
-	row := q.db.QueryRow(ctx, getListingByRefVersion, arg.ListingRef, arg.Version)
+type FindPublishedAgentsReferencingSkillRefRow struct {
+	AgentRef string `json:"agent_ref"`
+	Version  string `json:"version"`
+}
+
+func (q *Queries) FindPublishedAgentsReferencingSkillRef(ctx context.Context, arg FindPublishedAgentsReferencingSkillRefParams) ([]FindPublishedAgentsReferencingSkillRefRow, error) {
+	rows, err := q.db.Query(ctx, findPublishedAgentsReferencingSkillRef, arg.OwnerUserID, arg.SkillRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FindPublishedAgentsReferencingSkillRefRow{}
+	for rows.Next() {
+		var i FindPublishedAgentsReferencingSkillRefRow
+		if err := rows.Scan(&i.AgentRef, &i.Version); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const findPublishedAgentsReferencingToolRef = `-- name: FindPublishedAgentsReferencingToolRef :many
+SELECT a.agent_ref, a.version FROM agents a
+JOIN marketplace_listings ml ON ml.resource_type = 'agent' AND ml.resource_id = a.id
+WHERE a.owner_user_id = $1
+  AND ml.distribution != 3
+  AND (a.definition->'capabilities'->'tools') ? $2::text
+`
+
+type FindPublishedAgentsReferencingToolRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	ToolRef     string `json:"tool_ref"`
+}
+
+type FindPublishedAgentsReferencingToolRefRow struct {
+	AgentRef string `json:"agent_ref"`
+	Version  string `json:"version"`
+}
+
+func (q *Queries) FindPublishedAgentsReferencingToolRef(ctx context.Context, arg FindPublishedAgentsReferencingToolRefParams) ([]FindPublishedAgentsReferencingToolRefRow, error) {
+	rows, err := q.db.Query(ctx, findPublishedAgentsReferencingToolRef, arg.OwnerUserID, arg.ToolRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FindPublishedAgentsReferencingToolRefRow{}
+	for rows.Next() {
+		var i FindPublishedAgentsReferencingToolRefRow
+		if err := rows.Scan(&i.AgentRef, &i.Version); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const findPublishedBundlesReferencingAgentRef = `-- name: FindPublishedBundlesReferencingAgentRef :many
+
+SELECT b.bundle_ref, b.version FROM bundles b
+JOIN marketplace_listings ml ON ml.resource_type = 'bundle' AND ml.resource_id = b.id
+WHERE b.owner_user_id = $1
+  AND ml.distribution != 3
+  AND (b.definition->'agents') @> jsonb_build_array(jsonb_build_object('ref', $2::text))
+`
+
+type FindPublishedBundlesReferencingAgentRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	AgentRef    string `json:"agent_ref"`
+}
+
+type FindPublishedBundlesReferencingAgentRefRow struct {
+	BundleRef string `json:"bundle_ref"`
+	Version   string `json:"version"`
+}
+
+// ── Reverse-dependency checks (unpublish-time, 70007) ───────────────────
+// Which of the owner's *currently published* Bundles reference this Agent
+// ref (any version — used to block unpublishing the Agent entirely; the
+// exact-version variant used at publish-time doesn't apply here since any
+// version of the agent being gone would break the dependent Bundle).
+func (q *Queries) FindPublishedBundlesReferencingAgentRef(ctx context.Context, arg FindPublishedBundlesReferencingAgentRefParams) ([]FindPublishedBundlesReferencingAgentRefRow, error) {
+	rows, err := q.db.Query(ctx, findPublishedBundlesReferencingAgentRef, arg.OwnerUserID, arg.AgentRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FindPublishedBundlesReferencingAgentRefRow{}
+	for rows.Next() {
+		var i FindPublishedBundlesReferencingAgentRefRow
+		if err := rows.Scan(&i.BundleRef, &i.Version); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAgentConstraintsSummaryByListingID = `-- name: GetAgentConstraintsSummaryByListingID :one
+
+SELECT
+    (COALESCE((a.definition->'constraints'->>'max_tool_calls')::int, 20))::int AS max_tool_calls,
+    (COALESCE((a.definition->'constraints'->>'timeout_seconds')::int, 300))::int AS timeout_seconds,
+    (COALESCE(a.definition->'constraints'->>'estimated_tokens_range', ''))::text AS estimated_tokens_range
+FROM marketplace_listings ml
+JOIN agents a ON a.id = ml.resource_id
+WHERE ml.id = $1
+`
+
+type GetAgentConstraintsSummaryByListingIDRow struct {
+	MaxToolCalls         int32  `json:"max_tool_calls"`
+	TimeoutSeconds       int32  `json:"timeout_seconds"`
+	EstimatedTokensRange string `json:"estimated_tokens_range"`
+}
+
+// Constraints summary is extracted field-by-field via JSONB path operators
+// so the full `definition` blob never has to leave Postgres — the same
+// "DAO 层强制隔离" principle as the display-only list queries above, just
+// applied to a handful of numeric/string fields instead of a whole column.
+// Every field of Agent.constraints is optional in the DSL (schema defaults
+// apply at runtime), so a raw ::int/::text cast on a possibly-absent key
+// would scan a Postgres NULL into a non-nullable Go int32/string and
+// panic. COALESCE to the DSL's own documented defaults (max_tool_calls 20,
+// timeout_seconds 300) keeps the value meaningful; estimated_tokens_range
+// has no default, so it's coalesced to ” and the API layer treats an
+// empty string as "not disclosed" rather than guessing a range.
+func (q *Queries) GetAgentConstraintsSummaryByListingID(ctx context.Context, id int64) (GetAgentConstraintsSummaryByListingIDRow, error) {
+	row := q.db.QueryRow(ctx, getAgentConstraintsSummaryByListingID, id)
+	var i GetAgentConstraintsSummaryByListingIDRow
+	err := row.Scan(&i.MaxToolCalls, &i.TimeoutSeconds, &i.EstimatedTokensRange)
+	return i, err
+}
+
+const getAgentListingDisplayByListingID = `-- name: GetAgentListingDisplayByListingID :one
+SELECT ml.id, ml.listing_ref, ml.resource_type, ml.version, ml.visibility,
+       ml.author_user_id, ml.subscriber_count, ml.run_count, ml.published_at,
+       a.display_meta
+FROM marketplace_listings ml
+JOIN agents a ON a.id = ml.resource_id
+WHERE ml.id = $1
+`
+
+type GetAgentListingDisplayByListingIDRow struct {
+	ID              int64              `json:"id"`
+	ListingRef      string             `json:"listing_ref"`
+	ResourceType    string             `json:"resource_type"`
+	Version         string             `json:"version"`
+	Visibility      string             `json:"visibility"`
+	AuthorUserID    int64              `json:"author_user_id"`
+	SubscriberCount int32              `json:"subscriber_count"`
+	RunCount        int64              `json:"run_count"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	DisplayMeta     []byte             `json:"display_meta"`
+}
+
+func (q *Queries) GetAgentListingDisplayByListingID(ctx context.Context, id int64) (GetAgentListingDisplayByListingIDRow, error) {
+	row := q.db.QueryRow(ctx, getAgentListingDisplayByListingID, id)
+	var i GetAgentListingDisplayByListingIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ListingRef,
+		&i.ResourceType,
+		&i.Version,
+		&i.Visibility,
+		&i.AuthorUserID,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+		&i.DisplayMeta,
+	)
+	return i, err
+}
+
+const getAgentListingForOwnerByRefVersion = `-- name: GetAgentListingForOwnerByRefVersion :one
+
+SELECT ml.id, ml.author_user_id, ml.resource_type, ml.resource_id, ml.listing_ref, ml.version, ml.visibility, ml.changelog, ml.distribution, ml.subscriber_count, ml.run_count, ml.published_at FROM marketplace_listings ml
+JOIN agents a ON a.id = ml.resource_id
+WHERE ml.resource_type = 'agent' AND a.owner_user_id = $1 AND a.agent_ref = $2 AND a.version = $3
+  AND ml.distribution != 3
+`
+
+type GetAgentListingForOwnerByRefVersionParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	AgentRef    string `json:"agent_ref"`
+	Version     string `json:"version"`
+}
+
+// ── Dependency-satisfaction checks (publish-time closure walk) ──────────
+func (q *Queries) GetAgentListingForOwnerByRefVersion(ctx context.Context, arg GetAgentListingForOwnerByRefVersionParams) (MarketplaceListing, error) {
+	row := q.db.QueryRow(ctx, getAgentListingForOwnerByRefVersion, arg.OwnerUserID, arg.AgentRef, arg.Version)
 	var i MarketplaceListing
 	err := row.Scan(
 		&i.ID,
@@ -132,6 +346,406 @@ func (q *Queries) GetListingByRefVersion(ctx context.Context, arg GetListingByRe
 	return i, err
 }
 
+const getBundleConstraintsSummaryByListingID = `-- name: GetBundleConstraintsSummaryByListingID :one
+SELECT
+    NULL::int AS max_tool_calls,
+    (COALESCE((b.definition->'limits'->>'max_wall_clock_seconds')::int, 3600))::int AS timeout_seconds,
+    NULL::text AS estimated_tokens_range
+FROM marketplace_listings ml
+JOIN bundles b ON b.id = ml.resource_id
+WHERE ml.id = $1
+`
+
+type GetBundleConstraintsSummaryByListingIDRow struct {
+	MaxToolCalls         pgtype.Int4 `json:"max_tool_calls"`
+	TimeoutSeconds       int32       `json:"timeout_seconds"`
+	EstimatedTokensRange pgtype.Text `json:"estimated_tokens_range"`
+}
+
+func (q *Queries) GetBundleConstraintsSummaryByListingID(ctx context.Context, id int64) (GetBundleConstraintsSummaryByListingIDRow, error) {
+	row := q.db.QueryRow(ctx, getBundleConstraintsSummaryByListingID, id)
+	var i GetBundleConstraintsSummaryByListingIDRow
+	err := row.Scan(&i.MaxToolCalls, &i.TimeoutSeconds, &i.EstimatedTokensRange)
+	return i, err
+}
+
+const getBundleListingDisplayByListingID = `-- name: GetBundleListingDisplayByListingID :one
+SELECT ml.id, ml.listing_ref, ml.resource_type, ml.version, ml.visibility,
+       ml.author_user_id, ml.subscriber_count, ml.run_count, ml.published_at,
+       b.display_meta
+FROM marketplace_listings ml
+JOIN bundles b ON b.id = ml.resource_id
+WHERE ml.id = $1
+`
+
+type GetBundleListingDisplayByListingIDRow struct {
+	ID              int64              `json:"id"`
+	ListingRef      string             `json:"listing_ref"`
+	ResourceType    string             `json:"resource_type"`
+	Version         string             `json:"version"`
+	Visibility      string             `json:"visibility"`
+	AuthorUserID    int64              `json:"author_user_id"`
+	SubscriberCount int32              `json:"subscriber_count"`
+	RunCount        int64              `json:"run_count"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	DisplayMeta     []byte             `json:"display_meta"`
+}
+
+func (q *Queries) GetBundleListingDisplayByListingID(ctx context.Context, id int64) (GetBundleListingDisplayByListingIDRow, error) {
+	row := q.db.QueryRow(ctx, getBundleListingDisplayByListingID, id)
+	var i GetBundleListingDisplayByListingIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ListingRef,
+		&i.ResourceType,
+		&i.Version,
+		&i.Visibility,
+		&i.AuthorUserID,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+		&i.DisplayMeta,
+	)
+	return i, err
+}
+
+const getBundleListingForOwnerByRefVersion = `-- name: GetBundleListingForOwnerByRefVersion :one
+SELECT ml.id, ml.author_user_id, ml.resource_type, ml.resource_id, ml.listing_ref, ml.version, ml.visibility, ml.changelog, ml.distribution, ml.subscriber_count, ml.run_count, ml.published_at FROM marketplace_listings ml
+JOIN bundles b ON b.id = ml.resource_id
+WHERE ml.resource_type = 'bundle' AND b.owner_user_id = $1 AND b.bundle_ref = $2 AND b.version = $3
+  AND ml.distribution != 3
+`
+
+type GetBundleListingForOwnerByRefVersionParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	BundleRef   string `json:"bundle_ref"`
+	Version     string `json:"version"`
+}
+
+func (q *Queries) GetBundleListingForOwnerByRefVersion(ctx context.Context, arg GetBundleListingForOwnerByRefVersionParams) (MarketplaceListing, error) {
+	row := q.db.QueryRow(ctx, getBundleListingForOwnerByRefVersion, arg.OwnerUserID, arg.BundleRef, arg.Version)
+	var i MarketplaceListing
+	err := row.Scan(
+		&i.ID,
+		&i.AuthorUserID,
+		&i.ResourceType,
+		&i.ResourceID,
+		&i.ListingRef,
+		&i.Version,
+		&i.Visibility,
+		&i.Changelog,
+		&i.Distribution,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
+const getListingByID = `-- name: GetListingByID :one
+SELECT id, author_user_id, resource_type, resource_id, listing_ref, version, visibility, changelog, distribution, subscriber_count, run_count, published_at FROM marketplace_listings WHERE id = $1
+`
+
+func (q *Queries) GetListingByID(ctx context.Context, id int64) (MarketplaceListing, error) {
+	row := q.db.QueryRow(ctx, getListingByID, id)
+	var i MarketplaceListing
+	err := row.Scan(
+		&i.ID,
+		&i.AuthorUserID,
+		&i.ResourceType,
+		&i.ResourceID,
+		&i.ListingRef,
+		&i.Version,
+		&i.Visibility,
+		&i.Changelog,
+		&i.Distribution,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
+const getListingByListingRefAndVersion = `-- name: GetListingByListingRefAndVersion :one
+SELECT id, author_user_id, resource_type, resource_id, listing_ref, version, visibility, changelog, distribution, subscriber_count, run_count, published_at FROM marketplace_listings
+WHERE listing_ref = $1 AND version = $2 AND distribution != 3
+`
+
+type GetListingByListingRefAndVersionParams struct {
+	ListingRef string `json:"listing_ref"`
+	Version    string `json:"version"`
+}
+
+func (q *Queries) GetListingByListingRefAndVersion(ctx context.Context, arg GetListingByListingRefAndVersionParams) (MarketplaceListing, error) {
+	row := q.db.QueryRow(ctx, getListingByListingRefAndVersion, arg.ListingRef, arg.Version)
+	var i MarketplaceListing
+	err := row.Scan(
+		&i.ID,
+		&i.AuthorUserID,
+		&i.ResourceType,
+		&i.ResourceID,
+		&i.ListingRef,
+		&i.Version,
+		&i.Visibility,
+		&i.Changelog,
+		&i.Distribution,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
+const getListingByListingRefLatestPublished = `-- name: GetListingByListingRefLatestPublished :one
+SELECT id, author_user_id, resource_type, resource_id, listing_ref, version, visibility, changelog, distribution, subscriber_count, run_count, published_at FROM marketplace_listings
+WHERE listing_ref = $1 AND distribution != 3
+ORDER BY published_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetListingByListingRefLatestPublished(ctx context.Context, listingRef string) (MarketplaceListing, error) {
+	row := q.db.QueryRow(ctx, getListingByListingRefLatestPublished, listingRef)
+	var i MarketplaceListing
+	err := row.Scan(
+		&i.ID,
+		&i.AuthorUserID,
+		&i.ResourceType,
+		&i.ResourceID,
+		&i.ListingRef,
+		&i.Version,
+		&i.Visibility,
+		&i.Changelog,
+		&i.Distribution,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
+const getMCPServerListingDisplayByListingID = `-- name: GetMCPServerListingDisplayByListingID :one
+SELECT ml.id, ml.listing_ref, ml.resource_type, ml.version, ml.visibility,
+       ml.author_user_id, ml.subscriber_count, ml.run_count, ml.published_at,
+       m.display_meta
+FROM marketplace_listings ml
+JOIN mcp_servers m ON m.id = ml.resource_id
+WHERE ml.id = $1
+`
+
+type GetMCPServerListingDisplayByListingIDRow struct {
+	ID              int64              `json:"id"`
+	ListingRef      string             `json:"listing_ref"`
+	ResourceType    string             `json:"resource_type"`
+	Version         string             `json:"version"`
+	Visibility      string             `json:"visibility"`
+	AuthorUserID    int64              `json:"author_user_id"`
+	SubscriberCount int32              `json:"subscriber_count"`
+	RunCount        int64              `json:"run_count"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	DisplayMeta     []byte             `json:"display_meta"`
+}
+
+func (q *Queries) GetMCPServerListingDisplayByListingID(ctx context.Context, id int64) (GetMCPServerListingDisplayByListingIDRow, error) {
+	row := q.db.QueryRow(ctx, getMCPServerListingDisplayByListingID, id)
+	var i GetMCPServerListingDisplayByListingIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ListingRef,
+		&i.ResourceType,
+		&i.Version,
+		&i.Visibility,
+		&i.AuthorUserID,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+		&i.DisplayMeta,
+	)
+	return i, err
+}
+
+const getMCPServerListingForOwnerByRef = `-- name: GetMCPServerListingForOwnerByRef :one
+SELECT ml.id, ml.author_user_id, ml.resource_type, ml.resource_id, ml.listing_ref, ml.version, ml.visibility, ml.changelog, ml.distribution, ml.subscriber_count, ml.run_count, ml.published_at FROM marketplace_listings ml
+JOIN mcp_servers m ON m.id = ml.resource_id
+WHERE ml.resource_type = 'mcp' AND m.owner_user_id = $1 AND m.ref = $2
+  AND ml.distribution != 3
+ORDER BY ml.published_at DESC
+LIMIT 1
+`
+
+type GetMCPServerListingForOwnerByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Ref         string `json:"ref"`
+}
+
+func (q *Queries) GetMCPServerListingForOwnerByRef(ctx context.Context, arg GetMCPServerListingForOwnerByRefParams) (MarketplaceListing, error) {
+	row := q.db.QueryRow(ctx, getMCPServerListingForOwnerByRef, arg.OwnerUserID, arg.Ref)
+	var i MarketplaceListing
+	err := row.Scan(
+		&i.ID,
+		&i.AuthorUserID,
+		&i.ResourceType,
+		&i.ResourceID,
+		&i.ListingRef,
+		&i.Version,
+		&i.Visibility,
+		&i.Changelog,
+		&i.Distribution,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
+const getSkillListingDisplayByListingID = `-- name: GetSkillListingDisplayByListingID :one
+SELECT ml.id, ml.listing_ref, ml.resource_type, ml.version, ml.visibility,
+       ml.author_user_id, ml.subscriber_count, ml.run_count, ml.published_at,
+       s.display_meta
+FROM marketplace_listings ml
+JOIN skills s ON s.id = ml.resource_id
+WHERE ml.id = $1
+`
+
+type GetSkillListingDisplayByListingIDRow struct {
+	ID              int64              `json:"id"`
+	ListingRef      string             `json:"listing_ref"`
+	ResourceType    string             `json:"resource_type"`
+	Version         string             `json:"version"`
+	Visibility      string             `json:"visibility"`
+	AuthorUserID    int64              `json:"author_user_id"`
+	SubscriberCount int32              `json:"subscriber_count"`
+	RunCount        int64              `json:"run_count"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	DisplayMeta     []byte             `json:"display_meta"`
+}
+
+func (q *Queries) GetSkillListingDisplayByListingID(ctx context.Context, id int64) (GetSkillListingDisplayByListingIDRow, error) {
+	row := q.db.QueryRow(ctx, getSkillListingDisplayByListingID, id)
+	var i GetSkillListingDisplayByListingIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ListingRef,
+		&i.ResourceType,
+		&i.Version,
+		&i.Visibility,
+		&i.AuthorUserID,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+		&i.DisplayMeta,
+	)
+	return i, err
+}
+
+const getSkillListingForOwnerByRef = `-- name: GetSkillListingForOwnerByRef :one
+SELECT ml.id, ml.author_user_id, ml.resource_type, ml.resource_id, ml.listing_ref, ml.version, ml.visibility, ml.changelog, ml.distribution, ml.subscriber_count, ml.run_count, ml.published_at FROM marketplace_listings ml
+JOIN skills s ON s.id = ml.resource_id
+WHERE ml.resource_type = 'skill' AND s.owner_user_id = $1 AND s.ref = $2
+  AND ml.distribution != 3
+ORDER BY ml.published_at DESC
+LIMIT 1
+`
+
+type GetSkillListingForOwnerByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Ref         string `json:"ref"`
+}
+
+// Skill/MCP refs in an Agent's capabilities are not version-pinned in the
+// DSL (unlike Bundle.agents[].version), so satisfaction only requires SOME
+// published version of the ref to exist — the most recently published one.
+func (q *Queries) GetSkillListingForOwnerByRef(ctx context.Context, arg GetSkillListingForOwnerByRefParams) (MarketplaceListing, error) {
+	row := q.db.QueryRow(ctx, getSkillListingForOwnerByRef, arg.OwnerUserID, arg.Ref)
+	var i MarketplaceListing
+	err := row.Scan(
+		&i.ID,
+		&i.AuthorUserID,
+		&i.ResourceType,
+		&i.ResourceID,
+		&i.ListingRef,
+		&i.Version,
+		&i.Visibility,
+		&i.Changelog,
+		&i.Distribution,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
+const getSubscriptionByIDForSubscriber = `-- name: GetSubscriptionByIDForSubscriber :one
+SELECT id, subscriber_id, listing_id, local_alias, created_at FROM subscriptions WHERE id = $1 AND subscriber_id = $2
+`
+
+type GetSubscriptionByIDForSubscriberParams struct {
+	ID           int64 `json:"id"`
+	SubscriberID int64 `json:"subscriber_id"`
+}
+
+func (q *Queries) GetSubscriptionByIDForSubscriber(ctx context.Context, arg GetSubscriptionByIDForSubscriberParams) (Subscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByIDForSubscriber, arg.ID, arg.SubscriberID)
+	var i Subscription
+	err := row.Scan(
+		&i.ID,
+		&i.SubscriberID,
+		&i.ListingID,
+		&i.LocalAlias,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getSubscriptionByListingAndSubscriber = `-- name: GetSubscriptionByListingAndSubscriber :one
+SELECT id, subscriber_id, listing_id, local_alias, created_at FROM subscriptions WHERE subscriber_id = $1 AND listing_id = $2
+`
+
+type GetSubscriptionByListingAndSubscriberParams struct {
+	SubscriberID int64 `json:"subscriber_id"`
+	ListingID    int64 `json:"listing_id"`
+}
+
+func (q *Queries) GetSubscriptionByListingAndSubscriber(ctx context.Context, arg GetSubscriptionByListingAndSubscriberParams) (Subscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByListingAndSubscriber, arg.SubscriberID, arg.ListingID)
+	var i Subscription
+	err := row.Scan(
+		&i.ID,
+		&i.SubscriberID,
+		&i.ListingID,
+		&i.LocalAlias,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getSubscriptionForSubscriberByListingRef = `-- name: GetSubscriptionForSubscriberByListingRef :one
+SELECT s.id, s.subscriber_id, s.listing_id, s.local_alias, s.created_at FROM subscriptions s
+JOIN marketplace_listings ml ON ml.id = s.listing_id
+WHERE s.subscriber_id = $1 AND ml.listing_ref = $2
+`
+
+type GetSubscriptionForSubscriberByListingRefParams struct {
+	SubscriberID int64  `json:"subscriber_id"`
+	ListingRef   string `json:"listing_ref"`
+}
+
+// Enforces "一个 ref 只保留一个生效订阅" (spec-08 已决事项): a subscriber can
+// have at most one active subscription per listing_ref, regardless of
+// which version it's bound to — switching versions is an explicit upgrade,
+// never a second subscribe.
+func (q *Queries) GetSubscriptionForSubscriberByListingRef(ctx context.Context, arg GetSubscriptionForSubscriberByListingRefParams) (Subscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionForSubscriberByListingRef, arg.SubscriberID, arg.ListingRef)
+	var i Subscription
+	err := row.Scan(
+		&i.ID,
+		&i.SubscriberID,
+		&i.ListingID,
+		&i.LocalAlias,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const incrementListingSubscriberCount = `-- name: IncrementListingSubscriberCount :exec
 UPDATE marketplace_listings SET subscriber_count = subscriber_count + 1 WHERE id = $1
 `
@@ -141,41 +755,89 @@ func (q *Queries) IncrementListingSubscriberCount(ctx context.Context, id int64)
 	return err
 }
 
-const listListingsByType = `-- name: ListListingsByType :many
-SELECT id, author_user_id, resource_type, resource_id, listing_ref, version, visibility, changelog, distribution, subscriber_count, run_count, published_at FROM marketplace_listings
-WHERE resource_type = $1 AND distribution = 1
+const listListingVersionHistory = `-- name: ListListingVersionHistory :many
+SELECT version, changelog, published_at FROM marketplace_listings
+WHERE listing_ref = $1 AND distribution != 3
 ORDER BY published_at DESC
-LIMIT $2 OFFSET $3
 `
 
-type ListListingsByTypeParams struct {
-	ResourceType string `json:"resource_type"`
-	Limit        int32  `json:"limit"`
-	Offset       int32  `json:"offset"`
+type ListListingVersionHistoryRow struct {
+	Version     string             `json:"version"`
+	Changelog   pgtype.Text        `json:"changelog"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
 }
 
-func (q *Queries) ListListingsByType(ctx context.Context, arg ListListingsByTypeParams) ([]MarketplaceListing, error) {
-	rows, err := q.db.Query(ctx, listListingsByType, arg.ResourceType, arg.Limit, arg.Offset)
+func (q *Queries) ListListingVersionHistory(ctx context.Context, listingRef string) ([]ListListingVersionHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listListingVersionHistory, listingRef)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []MarketplaceListing{}
+	items := []ListListingVersionHistoryRow{}
 	for rows.Next() {
-		var i MarketplaceListing
+		var i ListListingVersionHistoryRow
+		if err := rows.Scan(&i.Version, &i.Changelog, &i.PublishedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublishedAgentListingsPage = `-- name: ListPublishedAgentListingsPage :many
+
+SELECT ml.id, ml.listing_ref, ml.resource_type, ml.version, ml.visibility,
+       ml.author_user_id, ml.subscriber_count, ml.run_count, ml.published_at,
+       a.display_meta
+FROM marketplace_listings ml
+JOIN agents a ON a.id = ml.resource_id
+WHERE ml.resource_type = 'agent' AND ml.distribution = 1 AND ml.id > $1
+ORDER BY ml.id ASC
+LIMIT $2
+`
+
+type ListPublishedAgentListingsPageParams struct {
+	ID    int64 `json:"id"`
+	Limit int32 `json:"limit"`
+}
+
+type ListPublishedAgentListingsPageRow struct {
+	ID              int64              `json:"id"`
+	ListingRef      string             `json:"listing_ref"`
+	ResourceType    string             `json:"resource_type"`
+	Version         string             `json:"version"`
+	Visibility      string             `json:"visibility"`
+	AuthorUserID    int64              `json:"author_user_id"`
+	SubscriberCount int32              `json:"subscriber_count"`
+	RunCount        int64              `json:"run_count"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	DisplayMeta     []byte             `json:"display_meta"`
+}
+
+// ── Browse / detail (blackbox: display_meta only, never definition) ────
+func (q *Queries) ListPublishedAgentListingsPage(ctx context.Context, arg ListPublishedAgentListingsPageParams) ([]ListPublishedAgentListingsPageRow, error) {
+	rows, err := q.db.Query(ctx, listPublishedAgentListingsPage, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPublishedAgentListingsPageRow{}
+	for rows.Next() {
+		var i ListPublishedAgentListingsPageRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.AuthorUserID,
-			&i.ResourceType,
-			&i.ResourceID,
 			&i.ListingRef,
+			&i.ResourceType,
 			&i.Version,
 			&i.Visibility,
-			&i.Changelog,
-			&i.Distribution,
+			&i.AuthorUserID,
 			&i.SubscriberCount,
 			&i.RunCount,
 			&i.PublishedAt,
+			&i.DisplayMeta,
 		); err != nil {
 			return nil, err
 		}
@@ -187,14 +849,201 @@ func (q *Queries) ListListingsByType(ctx context.Context, arg ListListingsByType
 	return items, nil
 }
 
-const listSubscriptionsForUser = `-- name: ListSubscriptionsForUser :many
-SELECT id, subscriber_id, listing_id, local_alias, created_at FROM subscriptions
-WHERE subscriber_id = $1
-ORDER BY created_at DESC
+const listPublishedBundleListingsPage = `-- name: ListPublishedBundleListingsPage :many
+SELECT ml.id, ml.listing_ref, ml.resource_type, ml.version, ml.visibility,
+       ml.author_user_id, ml.subscriber_count, ml.run_count, ml.published_at,
+       b.display_meta
+FROM marketplace_listings ml
+JOIN bundles b ON b.id = ml.resource_id
+WHERE ml.resource_type = 'bundle' AND ml.distribution = 1 AND ml.id > $1
+ORDER BY ml.id ASC
+LIMIT $2
 `
 
-func (q *Queries) ListSubscriptionsForUser(ctx context.Context, subscriberID int64) ([]Subscription, error) {
-	rows, err := q.db.Query(ctx, listSubscriptionsForUser, subscriberID)
+type ListPublishedBundleListingsPageParams struct {
+	ID    int64 `json:"id"`
+	Limit int32 `json:"limit"`
+}
+
+type ListPublishedBundleListingsPageRow struct {
+	ID              int64              `json:"id"`
+	ListingRef      string             `json:"listing_ref"`
+	ResourceType    string             `json:"resource_type"`
+	Version         string             `json:"version"`
+	Visibility      string             `json:"visibility"`
+	AuthorUserID    int64              `json:"author_user_id"`
+	SubscriberCount int32              `json:"subscriber_count"`
+	RunCount        int64              `json:"run_count"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	DisplayMeta     []byte             `json:"display_meta"`
+}
+
+func (q *Queries) ListPublishedBundleListingsPage(ctx context.Context, arg ListPublishedBundleListingsPageParams) ([]ListPublishedBundleListingsPageRow, error) {
+	rows, err := q.db.Query(ctx, listPublishedBundleListingsPage, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPublishedBundleListingsPageRow{}
+	for rows.Next() {
+		var i ListPublishedBundleListingsPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ListingRef,
+			&i.ResourceType,
+			&i.Version,
+			&i.Visibility,
+			&i.AuthorUserID,
+			&i.SubscriberCount,
+			&i.RunCount,
+			&i.PublishedAt,
+			&i.DisplayMeta,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublishedMCPServerListingsPage = `-- name: ListPublishedMCPServerListingsPage :many
+SELECT ml.id, ml.listing_ref, ml.resource_type, ml.version, ml.visibility,
+       ml.author_user_id, ml.subscriber_count, ml.run_count, ml.published_at,
+       m.display_meta
+FROM marketplace_listings ml
+JOIN mcp_servers m ON m.id = ml.resource_id
+WHERE ml.resource_type = 'mcp' AND ml.distribution = 1 AND ml.id > $1
+ORDER BY ml.id ASC
+LIMIT $2
+`
+
+type ListPublishedMCPServerListingsPageParams struct {
+	ID    int64 `json:"id"`
+	Limit int32 `json:"limit"`
+}
+
+type ListPublishedMCPServerListingsPageRow struct {
+	ID              int64              `json:"id"`
+	ListingRef      string             `json:"listing_ref"`
+	ResourceType    string             `json:"resource_type"`
+	Version         string             `json:"version"`
+	Visibility      string             `json:"visibility"`
+	AuthorUserID    int64              `json:"author_user_id"`
+	SubscriberCount int32              `json:"subscriber_count"`
+	RunCount        int64              `json:"run_count"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	DisplayMeta     []byte             `json:"display_meta"`
+}
+
+func (q *Queries) ListPublishedMCPServerListingsPage(ctx context.Context, arg ListPublishedMCPServerListingsPageParams) ([]ListPublishedMCPServerListingsPageRow, error) {
+	rows, err := q.db.Query(ctx, listPublishedMCPServerListingsPage, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPublishedMCPServerListingsPageRow{}
+	for rows.Next() {
+		var i ListPublishedMCPServerListingsPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ListingRef,
+			&i.ResourceType,
+			&i.Version,
+			&i.Visibility,
+			&i.AuthorUserID,
+			&i.SubscriberCount,
+			&i.RunCount,
+			&i.PublishedAt,
+			&i.DisplayMeta,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPublishedSkillListingsPage = `-- name: ListPublishedSkillListingsPage :many
+SELECT ml.id, ml.listing_ref, ml.resource_type, ml.version, ml.visibility,
+       ml.author_user_id, ml.subscriber_count, ml.run_count, ml.published_at,
+       s.display_meta
+FROM marketplace_listings ml
+JOIN skills s ON s.id = ml.resource_id
+WHERE ml.resource_type = 'skill' AND ml.distribution = 1 AND ml.id > $1
+ORDER BY ml.id ASC
+LIMIT $2
+`
+
+type ListPublishedSkillListingsPageParams struct {
+	ID    int64 `json:"id"`
+	Limit int32 `json:"limit"`
+}
+
+type ListPublishedSkillListingsPageRow struct {
+	ID              int64              `json:"id"`
+	ListingRef      string             `json:"listing_ref"`
+	ResourceType    string             `json:"resource_type"`
+	Version         string             `json:"version"`
+	Visibility      string             `json:"visibility"`
+	AuthorUserID    int64              `json:"author_user_id"`
+	SubscriberCount int32              `json:"subscriber_count"`
+	RunCount        int64              `json:"run_count"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	DisplayMeta     []byte             `json:"display_meta"`
+}
+
+func (q *Queries) ListPublishedSkillListingsPage(ctx context.Context, arg ListPublishedSkillListingsPageParams) ([]ListPublishedSkillListingsPageRow, error) {
+	rows, err := q.db.Query(ctx, listPublishedSkillListingsPage, arg.ID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPublishedSkillListingsPageRow{}
+	for rows.Next() {
+		var i ListPublishedSkillListingsPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ListingRef,
+			&i.ResourceType,
+			&i.Version,
+			&i.Visibility,
+			&i.AuthorUserID,
+			&i.SubscriberCount,
+			&i.RunCount,
+			&i.PublishedAt,
+			&i.DisplayMeta,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubscriptionsForUserPage = `-- name: ListSubscriptionsForUserPage :many
+SELECT id, subscriber_id, listing_id, local_alias, created_at FROM subscriptions
+WHERE subscriber_id = $1 AND id > $2
+ORDER BY id ASC
+LIMIT $3
+`
+
+type ListSubscriptionsForUserPageParams struct {
+	SubscriberID int64 `json:"subscriber_id"`
+	ID           int64 `json:"id"`
+	Limit        int32 `json:"limit"`
+}
+
+func (q *Queries) ListSubscriptionsForUserPage(ctx context.Context, arg ListSubscriptionsForUserPageParams) ([]Subscription, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionsForUserPage, arg.SubscriberID, arg.ID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -231,4 +1080,28 @@ type SetListingDistributionParams struct {
 func (q *Queries) SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error {
 	_, err := q.db.Exec(ctx, setListingDistribution, arg.ID, arg.Distribution)
 	return err
+}
+
+const updateSubscriptionListing = `-- name: UpdateSubscriptionListing :one
+UPDATE subscriptions SET listing_id = $3 WHERE id = $1 AND subscriber_id = $2
+RETURNING id, subscriber_id, listing_id, local_alias, created_at
+`
+
+type UpdateSubscriptionListingParams struct {
+	ID           int64 `json:"id"`
+	SubscriberID int64 `json:"subscriber_id"`
+	ListingID    int64 `json:"listing_id"`
+}
+
+func (q *Queries) UpdateSubscriptionListing(ctx context.Context, arg UpdateSubscriptionListingParams) (Subscription, error) {
+	row := q.db.QueryRow(ctx, updateSubscriptionListing, arg.ID, arg.SubscriberID, arg.ListingID)
+	var i Subscription
+	err := row.Scan(
+		&i.ID,
+		&i.SubscriberID,
+		&i.ListingID,
+		&i.LocalAlias,
+		&i.CreatedAt,
+	)
+	return i, err
 }

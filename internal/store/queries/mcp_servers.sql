@@ -27,3 +27,9 @@ WHERE owner_user_id = $1
 
 -- name: GetMCPServerLatestStatusByRef :one
 SELECT status FROM mcp_servers WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1;
+
+-- name: GetMCPServerByRefVersionForOwner :one
+SELECT * FROM mcp_servers WHERE owner_user_id = $1 AND ref = $2 AND version = $3;
+
+-- name: SetMCPServerDisplayMeta :exec
+UPDATE mcp_servers SET display_meta = $2 WHERE id = $1;

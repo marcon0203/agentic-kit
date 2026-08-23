@@ -25,6 +25,7 @@ type RouterConfig struct {
 	Resources        *ResourceHandlers
 	Agents           *AgentHandlers
 	Bundles          *BundleHandlers
+	Marketplace      *MarketplaceHandlers
 }
 
 // NewRouter assembles the top-level chi router with the shared middleware
@@ -87,6 +88,16 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Get("/bundles", cfg.Bundles.List)
 				r.Post("/bundles", cfg.Bundles.Create)
 				r.Delete("/bundles/{ref}", cfg.Bundles.Delete)
+			}
+			if cfg.Marketplace != nil {
+				r.Get("/marketplace/listings", cfg.Marketplace.Browse)
+				r.Post("/marketplace/listings", cfg.Marketplace.Publish)
+				r.Get("/marketplace/listings/{ref}", cfg.Marketplace.Detail)
+				r.Post("/marketplace/listings/{id}/unpublish", cfg.Marketplace.Unpublish)
+				r.Post("/marketplace/listings/{id}/subscribe", cfg.Marketplace.Subscribe)
+				r.Get("/marketplace/subscriptions", cfg.Marketplace.ListSubscriptions)
+				r.Delete("/marketplace/subscriptions/{id}", cfg.Marketplace.Unsubscribe)
+				r.Post("/marketplace/subscriptions/{id}/upgrade", cfg.Marketplace.Upgrade)
 			}
 			// Further feature routers (Runs, ...) are mounted here by
 			// their respective spec tasks. Endpoints that need a tighter

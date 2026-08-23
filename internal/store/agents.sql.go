@@ -348,3 +348,17 @@ func (q *Queries) MarkAgentImmutable(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markAgentImmutable, id)
 	return err
 }
+
+const setAgentDisplayMeta = `-- name: SetAgentDisplayMeta :exec
+UPDATE agents SET display_meta = $2 WHERE id = $1
+`
+
+type SetAgentDisplayMetaParams struct {
+	ID          int64  `json:"id"`
+	DisplayMeta []byte `json:"display_meta"`
+}
+
+func (q *Queries) SetAgentDisplayMeta(ctx context.Context, arg SetAgentDisplayMetaParams) error {
+	_, err := q.db.Exec(ctx, setAgentDisplayMeta, arg.ID, arg.DisplayMeta)
+	return err
+}

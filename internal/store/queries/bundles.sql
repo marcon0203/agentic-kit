@@ -41,5 +41,8 @@ WHERE id = $1;
 -- name: MarkBundleImmutable :exec
 UPDATE bundles SET immutable = true WHERE id = $1;
 
+-- name: SetBundleDisplayMeta :exec
+UPDATE bundles SET display_meta = $2 WHERE id = $1;
+
 -- name: DeleteBundle :exec
 DELETE FROM bundles WHERE id = $1;

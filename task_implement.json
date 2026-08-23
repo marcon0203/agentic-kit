@@ -160,7 +160,7 @@
       "id": 8,
       "type": "marketplace",
       "name": "应用广场：发布与订阅",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-08-marketplace.md",
       "depends_on": [
         7

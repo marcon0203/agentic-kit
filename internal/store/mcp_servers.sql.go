@@ -113,6 +113,34 @@ func (q *Queries) GetMCPServerByIDForOwner(ctx context.Context, arg GetMCPServer
 	return i, err
 }
 
+const getMCPServerByRefVersionForOwner = `-- name: GetMCPServerByRefVersionForOwner :one
+SELECT id, owner_user_id, ref, version, config, display_meta, status, health, immutable, created_at FROM mcp_servers WHERE owner_user_id = $1 AND ref = $2 AND version = $3
+`
+
+type GetMCPServerByRefVersionForOwnerParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Ref         string `json:"ref"`
+	Version     string `json:"version"`
+}
+
+func (q *Queries) GetMCPServerByRefVersionForOwner(ctx context.Context, arg GetMCPServerByRefVersionForOwnerParams) (McpServer, error) {
+	row := q.db.QueryRow(ctx, getMCPServerByRefVersionForOwner, arg.OwnerUserID, arg.Ref, arg.Version)
+	var i McpServer
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.Ref,
+		&i.Version,
+		&i.Config,
+		&i.DisplayMeta,
+		&i.Status,
+		&i.Health,
+		&i.Immutable,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getMCPServerLatestStatusByRef = `-- name: GetMCPServerLatestStatusByRef :one
 SELECT status FROM mcp_servers WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1
 `
@@ -176,6 +204,20 @@ UPDATE mcp_servers SET immutable = true WHERE id = $1
 
 func (q *Queries) MarkMCPServerImmutable(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markMCPServerImmutable, id)
+	return err
+}
+
+const setMCPServerDisplayMeta = `-- name: SetMCPServerDisplayMeta :exec
+UPDATE mcp_servers SET display_meta = $2 WHERE id = $1
+`
+
+type SetMCPServerDisplayMetaParams struct {
+	ID          int64  `json:"id"`
+	DisplayMeta []byte `json:"display_meta"`
+}
+
+func (q *Queries) SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerDisplayMetaParams) error {
+	_, err := q.db.Exec(ctx, setMCPServerDisplayMeta, arg.ID, arg.DisplayMeta)
 	return err
 }
 

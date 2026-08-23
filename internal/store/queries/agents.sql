@@ -57,5 +57,8 @@ WHERE id = $1;
 -- name: MarkAgentImmutable :exec
 UPDATE agents SET immutable = true WHERE id = $1;
 
+-- name: SetAgentDisplayMeta :exec
+UPDATE agents SET display_meta = $2 WHERE id = $1;
+
 -- name: DeleteAgent :exec
 DELETE FROM agents WHERE id = $1;

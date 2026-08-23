@@ -109,6 +109,33 @@ func (q *Queries) GetSkillByIDForOwner(ctx context.Context, arg GetSkillByIDForO
 	return i, err
 }
 
+const getSkillByRefVersionForOwner = `-- name: GetSkillByRefVersionForOwner :one
+SELECT id, owner_user_id, ref, version, config, display_meta, status, immutable, created_at FROM skills WHERE owner_user_id = $1 AND ref = $2 AND version = $3
+`
+
+type GetSkillByRefVersionForOwnerParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Ref         string `json:"ref"`
+	Version     string `json:"version"`
+}
+
+func (q *Queries) GetSkillByRefVersionForOwner(ctx context.Context, arg GetSkillByRefVersionForOwnerParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, getSkillByRefVersionForOwner, arg.OwnerUserID, arg.Ref, arg.Version)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.Ref,
+		&i.Version,
+		&i.Config,
+		&i.DisplayMeta,
+		&i.Status,
+		&i.Immutable,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getSkillLatestStatusByRef = `-- name: GetSkillLatestStatusByRef :one
 SELECT status FROM skills WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1
 `
@@ -171,6 +198,20 @@ UPDATE skills SET immutable = true WHERE id = $1
 
 func (q *Queries) MarkSkillImmutable(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, markSkillImmutable, id)
+	return err
+}
+
+const setSkillDisplayMeta = `-- name: SetSkillDisplayMeta :exec
+UPDATE skills SET display_meta = $2 WHERE id = $1
+`
+
+type SetSkillDisplayMetaParams struct {
+	ID          int64  `json:"id"`
+	DisplayMeta []byte `json:"display_meta"`
+}
+
+func (q *Queries) SetSkillDisplayMeta(ctx context.Context, arg SetSkillDisplayMetaParams) error {
+	_, err := q.db.Exec(ctx, setSkillDisplayMeta, arg.ID, arg.DisplayMeta)
 	return err
 }
 
