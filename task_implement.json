@@ -260,7 +260,7 @@
       "id": 13,
       "type": "fe_foundation",
       "name": "前端基础设施",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-13-fe-foundation.md",
       "depends_on": [
         1
