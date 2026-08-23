@@ -99,6 +99,12 @@ func (f *fakeRunHandlersQuerier) ResolveHumanGate(_ context.Context, arg store.R
 	return g, nil
 }
 
+func (f *fakeRunHandlersQuerier) InsertBundleRunEvent(_ context.Context, arg store.InsertBundleRunEventParams) (store.BundleRunEvent, error) {
+	ev := store.BundleRunEvent{ID: int64(len(f.events) + 1), RunID: arg.RunID, Type: arg.Type, Node: arg.Node, Payload: arg.Payload, IsInternal: arg.IsInternal}
+	f.events = append(f.events, ev)
+	return ev, nil
+}
+
 func (f *fakeRunHandlersQuerier) CreateAuditLog(_ context.Context, arg store.CreateAuditLogParams) (store.AuditLog, error) {
 	row := store.AuditLog{ID: int64(len(f.audits) + 1), ActorUserID: arg.ActorUserID, Action: arg.Action, TargetType: arg.TargetType, TargetID: arg.TargetID, Detail: arg.Detail}
 	f.audits = append(f.audits, row)
@@ -148,6 +154,7 @@ func TestRunHandlers_Get_FiltersSharedStateForSubscriber(t *testing.T) {
 	var body struct {
 		Data struct {
 			SharedState map[string]any `json:"shared_state"`
+			IsOwner     bool           `json:"is_owner"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
@@ -158,6 +165,9 @@ func TestRunHandlers_Get_FiltersSharedStateForSubscriber(t *testing.T) {
 	}
 	if body.Data.SharedState["final_answer"] != "42" {
 		t.Fatalf("expected declared output to be visible, got %+v", body.Data.SharedState)
+	}
+	if body.Data.IsOwner {
+		t.Fatal("expected is_owner=false for a subscriber, so the frontend renders black-box chrome")
 	}
 }
 

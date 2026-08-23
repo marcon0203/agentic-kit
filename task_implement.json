@@ -279,7 +279,7 @@
       "id": 14,
       "type": "fe_chat",
       "name": "Chat 运行详情页（核心）",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-14-fe-chat.md",
       "depends_on": [
         13,

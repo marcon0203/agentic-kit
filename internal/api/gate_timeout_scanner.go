@@ -75,5 +75,13 @@ func resolveTimedOutGate(ctx context.Context, q store.Querier, gates *gateRegist
 		logger.Error("gate_timeout_audit_log_failed", "gate_id", gate.ID, "error", err)
 	}
 
+	resolvedPayload, _ := json.Marshal(map[string]any{"gate_id": gate.ID, "status": status, "on_timeout": gate.OnTimeout})
+	if _, err := q.InsertBundleRunEvent(ctx, store.InsertBundleRunEventParams{
+		RunID: gate.RunID, Type: "human_gate.resolved", Node: pgtype.Text{String: gate.Node, Valid: true},
+		Payload: resolvedPayload, IsInternal: false,
+	}); err != nil && logger != nil {
+		logger.Error("gate_timeout_event_failed", "gate_id", gate.ID, "error", err)
+	}
+
 	gates.resolve(gate.ID, gateResolution{approved: approved, reason: "human gate timed out (" + gate.OnTimeout + ")"})
 }

@@ -125,6 +125,14 @@ func (w *runGateWaiter) Wait(ctx context.Context, node string) error {
 		return fmt.Errorf("adk: persist human gate for node %q: %w", node, err)
 	}
 
+	// spec-14's ds-gate-card is driven by this event, inserted inline at
+	// the end of the Chat conversation stream the moment the gate blocks.
+	gatePayload, _ := json.Marshal(map[string]any{"gate_id": row.ID, "on_timeout": onTimeout})
+	_, _ = w.queries.InsertBundleRunEvent(ctx, store.InsertBundleRunEventParams{
+		RunID: w.runID, Type: "human_gate.waiting", Node: pgtype.Text{String: node, Valid: true},
+		Payload: gatePayload, IsInternal: false,
+	})
+
 	ch := w.registry.register(row.ID)
 	defer w.registry.unregister(row.ID)
 

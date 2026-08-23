@@ -49,6 +49,7 @@ type runUsageDTO struct {
 type runDetailDTO struct {
 	runSummaryDTO
 	SharedState map[string]any `json:"shared_state"`
+	IsOwner     bool           `json:"is_owner"`
 	Usage       runUsageDTO    `json:"usage"`
 }
 
@@ -217,11 +218,12 @@ func (h *RunHandlers) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isOwner := bundle.OwnerUserID == userID
 	var sharedState map[string]any
 	if err := json.Unmarshal(run.SharedState, &sharedState); err != nil {
 		sharedState = map[string]any{}
 	}
-	if bundle.OwnerUserID != userID {
+	if !isOwner {
 		sharedState = filterSharedStateForSubscriber(sharedState, bundle.DisplayMeta)
 	}
 
@@ -232,6 +234,7 @@ func (h *RunHandlers) Get(w http.ResponseWriter, r *http.Request) {
 	dto := runDetailDTO{
 		runSummaryDTO: toRunSummaryDTO(run.ID, bundle.BundleRef, bundle.Version, run.Status, run.Error, run.CreatedAt, run.FinishedAt),
 		SharedState:   sharedState,
+		IsOwner:       isOwner,
 		Usage:         runUsageDTO{TotalTokens: run.TotalTokens, CostUSD: numericToFloat64(run.CostUsd), DurationSeconds: duration},
 	}
 	writeJSON(w, r, http.StatusOK, dto)

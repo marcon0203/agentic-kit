@@ -32,6 +32,10 @@ func (f *fakeGateTimeoutQuerier) CreateAuditLog(_ context.Context, arg store.Cre
 	return row, nil
 }
 
+func (f *fakeGateTimeoutQuerier) InsertBundleRunEvent(_ context.Context, arg store.InsertBundleRunEventParams) (store.BundleRunEvent, error) {
+	return store.BundleRunEvent{RunID: arg.RunID, Type: arg.Type, Node: arg.Node, Payload: arg.Payload, IsInternal: arg.IsInternal}, nil
+}
+
 func TestGateTimeoutScanner_AutoApprove(t *testing.T) {
 	gate := store.HumanGate{ID: 1, RunID: "run-1", Node: "review", OnTimeout: "auto_approve"}
 	f := &fakeGateTimeoutQuerier{pending: []store.HumanGate{gate}, gates: map[int64]store.HumanGate{1: gate}}

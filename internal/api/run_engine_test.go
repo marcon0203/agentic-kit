@@ -22,6 +22,8 @@ type fakeRunEngineQuerier struct {
 
 	toolStatus  map[string]int16
 	skillStatus map[string]int16
+
+	events []store.BundleRunEvent
 }
 
 func newFakeRunEngineQuerier() *fakeRunEngineQuerier {
@@ -127,6 +129,16 @@ func (f *fakeRunEngineQuerier) GetSkillLatestStatusByRef(_ context.Context, arg 
 		return s, nil
 	}
 	return 0, pgx.ErrNoRows
+}
+
+func (f *fakeRunEngineQuerier) InsertBundleRunEvent(_ context.Context, arg store.InsertBundleRunEventParams) (store.BundleRunEvent, error) {
+	ev := store.BundleRunEvent{ID: int64(len(f.events) + 1), RunID: arg.RunID, Type: arg.Type, Node: arg.Node, Payload: arg.Payload, IsInternal: arg.IsInternal}
+	f.events = append(f.events, ev)
+	return ev, nil
+}
+
+func (f *fakeRunEngineQuerier) UpdateBundleRunStatus(_ context.Context, _ store.UpdateBundleRunStatusParams) error {
+	return nil
 }
 
 func mustJSON(t *testing.T, v any) []byte {
@@ -256,6 +268,24 @@ func TestRunEngine_CheckDependencies_OK(t *testing.T) {
 	err := e.CheckDependencies(context.Background(), 1, bundleDef, map[string]string{"openai": "sk-x"})
 	if err != nil {
 		t.Fatalf("unexpected error: %+v", err)
+	}
+}
+
+func TestRunEngine_FinishRun_EmitsBundleLifecycleEvent(t *testing.T) {
+	f := newFakeRunEngineQuerier()
+	e := NewRunEngine(f, nil, newGateRegistry(), NewResourceRefChecker(f))
+
+	e.finishRun(context.Background(), "run-1", "finished", "")
+	e.finishRun(context.Background(), "run-2", "failed", "运行执行失败")
+
+	if len(f.events) != 2 {
+		t.Fatalf("expected 2 lifecycle events, got %+v", f.events)
+	}
+	if f.events[0].RunID != "run-1" || f.events[0].Type != "bundle.finished" {
+		t.Fatalf("expected bundle.finished for run-1, got %+v", f.events[0])
+	}
+	if f.events[1].RunID != "run-2" || f.events[1].Type != "bundle.failed" {
+		t.Fatalf("expected bundle.failed for run-2, got %+v", f.events[1])
 	}
 }
 

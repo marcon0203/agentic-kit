@@ -699,10 +699,20 @@ export interface components {
             finished_at?: string | null;
         };
         RunDetail: components["schemas"]["RunSummary"] & {
-            /** @description 跨 Agent 共享的结构化上下文 */
+            /**
+             * @description 跨 Agent 共享的结构化上下文。当 `is_owner` 为 false（订阅者
+             *     查看黑盒资源）时，仅包含该资源 display_meta.io_description.outputs
+             *     声明的字段。
+             */
             shared_state: {
                 [key: string]: unknown;
             };
+            /**
+             * @description 当前请求者是否为该运行所用 Bundle 的作者本人。为 false 时前端
+             *     进入黑盒降级展示：执行图只显示占位节点，共享状态与事件流已由
+             *     后端过滤为声明的输出子集。
+             */
+            is_owner: boolean;
             /** @description 本次运行的资源消耗，用于 Chat 页右侧栏展示 */
             usage?: {
                 total_tokens?: number;

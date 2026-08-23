@@ -345,6 +345,12 @@ func (e *RunEngine) Execute(runID string, root adk.CompiledAgent, userID int64, 
 		msg = []byte("{}")
 	}
 
+	// bundle.started is a run-lifecycle signal the run engine owns
+	// directly — ADK has no event of its own for "the graph is about to
+	// execute" (see events.go's package comment), and spec-14's Chat page
+	// uses it to switch out of its initial "正在启动…" placeholder state.
+	e.persistLifecycleEvent(context.Background(), runID, "bundle.started", nil)
+
 	var totalTokens int64
 	var totalCostUSD float64
 	breached := ""
@@ -404,14 +410,30 @@ func (e *RunEngine) persistEvent(ctx context.Context, runID string, ev adk.Event
 	})
 }
 
+// persistLifecycleEvent is persistEvent for the run-level (not node-scoped)
+// signals the run engine itself produces — bundle.started/finished/failed.
+// Always external: a run's own start/end is never an internal-reasoning
+// detail, so the black-box filter (spec-08) never needs to hide it.
+func (e *RunEngine) persistLifecycleEvent(ctx context.Context, runID, eventType string, payload map[string]any) {
+	body, _ := json.Marshal(payload)
+	_, _ = e.Queries.InsertBundleRunEvent(ctx, store.InsertBundleRunEventParams{
+		RunID: runID, Type: eventType, Payload: body, IsInternal: false,
+	})
+}
+
 func (e *RunEngine) finishRun(ctx context.Context, runID, status, errMsg string) {
 	params := store.UpdateBundleRunStatusParams{
 		ID: runID, Status: status, FinishedAt: pgtype.Timestamptz{Valid: true, Time: time.Now()},
 	}
+	eventType := "bundle.finished"
+	payload := map[string]any(nil)
 	if errMsg != "" {
 		params.Error = pgtype.Text{String: errMsg, Valid: true}
+		eventType = "bundle.failed"
+		payload = map[string]any{"error": errMsg}
 	}
 	_ = e.Queries.UpdateBundleRunStatus(ctx, params)
+	e.persistLifecycleEvent(ctx, runID, eventType, payload)
 }
 
 func (e *RunEngine) registerCancel(runID string, cancel context.CancelFunc) {

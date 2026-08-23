@@ -91,6 +91,12 @@ func (h *RunHandlers) ResolveGate(w http.ResponseWriter, r *http.Request) {
 		TargetType: "human_gate", TargetID: strconv.FormatInt(gate.ID, 10), Detail: detail,
 	})
 
+	resolvedPayload, _ := json.Marshal(map[string]any{"gate_id": gate.ID, "status": status, "comment": req.Comment})
+	_, _ = h.Queries.InsertBundleRunEvent(r.Context(), store.InsertBundleRunEventParams{
+		RunID: runID, Type: "human_gate.resolved", Node: pgtype.Text{String: req.Node, Valid: true},
+		Payload: resolvedPayload, IsInternal: false,
+	})
+
 	reason := "rejected by user"
 	if req.Comment != "" {
 		reason = req.Comment
