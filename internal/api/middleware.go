@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/marcon0203/agentic-kit/internal/observability"
 )
 
 type ctxKey string
@@ -37,11 +39,20 @@ func UserIDFromContext(ctx context.Context) (int64, bool) {
 	return id, ok
 }
 
-// RequestIDMiddleware assigns a request ID (reusing chi's generator) and
-// attaches it to the request context so handlers and loggers can read it.
+// RequestIDMiddleware assigns a request ID and attaches it to the request
+// context so handlers and loggers can read it. When an OTel span is active
+// (spec-19: the server is wrapped in otelhttp upstream of this middleware),
+// the request ID *is* the span's trace ID — "request_id 与 trace_id
+// 统一" — so a support engineer can go from an error envelope's
+// request_id straight to its trace with no lookup table. Falls back to
+// chi's counter-based generator when there's no span (tracing disabled, or
+// a handler invoked directly in a unit test).
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := middleware.GetReqID(r.Context())
+		id := observability.TraceIDFromContext(r.Context())
+		if id == "" {
+			id = middleware.GetReqID(r.Context())
+		}
 		if id == "" {
 			id = strconv.FormatUint(middleware.NextRequestID(), 10)
 		}

@@ -1,0 +1,17 @@
+# Non-secret server config. Secrets (DATABASE_URL, JWT_SECRET,
+# CREDENTIAL_AES_KEY) live in 11-secret.yaml — never here.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentic-kit-server-config
+  namespace: agentic-kit
+data:
+  APP_ENV: "production"
+  HTTP_PORT: "8080"
+  # Comma-separated allowlist — the web Service's public origin(s).
+  CORS_ALLOWED_ORIGINS: "https://app.example.com"
+  # spec-19: OTel Go SDK export target. Leave unset (delete this key) to
+  # run with tracing enabled but no exporter — spans are created and
+  # dropped locally instead of failing requests waiting on a collector
+  # that isn't there yet.
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.observability.svc.cluster.local:4318"

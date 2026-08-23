@@ -1,0 +1,43 @@
+# Run once before rolling the server Deployment to a new image tag:
+#   kubectl apply -f 20-migrate-job.yaml
+#   kubectl wait --for=condition=complete job/agentic-kit-migrate -n agentic-kit --timeout=120s
+#   kubectl delete job/agentic-kit-migrate -n agentic-kit   # Jobs don't self-clean
+# Migrations are additive-first by convention (see migrations/*.up.sql) so
+# this is safe to run against the database the *previous* server version
+# is still serving traffic against, during a canary rollout.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: agentic-kit-migrate
+  namespace: agentic-kit
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: migrate/migrate:v4.18.1
+          args:
+            - -path=/migrations
+            - -database=$(DATABASE_URL)
+            - up
+          envFrom:
+            - secretRef:
+                name: agentic-kit-server-secrets
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+      # Ships the same migrations directory baked into the server image
+      # (Dockerfile.server COPYs migrations/ to /migrations) rather than a
+      # separate artifact, so the two can never drift.
+      initContainers:
+        - name: copy-migrations
+          image: agentic-kit/server:REPLACE_ME_IMAGE_TAG
+          command: ["sh", "-c", "cp -r /migrations/. /shared/"]
+          volumeMounts:
+            - name: migrations
+              mountPath: /shared
+      volumes:
+        - name: migrations
+          emptyDir: {}

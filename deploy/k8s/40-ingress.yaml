@@ -1,0 +1,68 @@
+# Two Ingress resources on the same host, split by path, because the
+# nginx-ingress annotations below are per-Ingress-object, not per-path —
+# and per spec-19 they must ONLY apply to the API (event-stream) traffic:
+#
+#   proxy-buffering: "off"   — mandatory for the NDJSON event stream
+#     (POST /runs, then GET /runs/{id}/stream) to actually stream. Without
+#     it nginx buffers the whole chunked response before forwarding, and
+#     "streaming" silently becomes "wait for the run to finish, then get
+#     everything at once."
+#   affinity: "cookie"       — session stickiness so a client's stream
+#     request and its later reconnects land on the same backend pod (the
+#     event stream is held in-process per spec-12, not shared across
+#     server replicas).
+#   proxy-read-timeout: "3600" — a run can legitimately run for a long
+#     time; the default ~60s read timeout would sever the stream mid-run.
+#
+# Applying these to the web (SPA) Ingress too would be harmless but
+# pointless — splitting keeps the intent explicit and each Ingress
+# reviewable on its own.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentic-kit-api
+  namespace: agentic-kit
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-name: "AGENTIC_KIT_STICKY"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["app.example.com"]
+      secretName: agentic-kit-tls
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: agentic-kit-server
+                port:
+                  name: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentic-kit-web
+  namespace: agentic-kit
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["app.example.com"]
+      secretName: agentic-kit-tls
+  rules:
+    - host: app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentic-kit-web
+                port:
+                  name: http

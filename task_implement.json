@@ -383,7 +383,7 @@
       "id": 19,
       "type": "observability",
       "name": "可观测性与部署",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-19-observability.md",
       "depends_on": [
         12,

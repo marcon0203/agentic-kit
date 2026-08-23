@@ -14,12 +14,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/marcon0203/agentic-kit/internal/api"
 	"github.com/marcon0203/agentic-kit/internal/auth"
 	"github.com/marcon0203/agentic-kit/internal/config"
 	"github.com/marcon0203/agentic-kit/internal/crypto"
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
+	"github.com/marcon0203/agentic-kit/internal/observability"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
 
@@ -41,6 +43,18 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	otelShutdown, err := observability.Setup(ctx, "agentic-kit-server", "1.0.0")
+	if err != nil {
+		return fmt.Errorf("setup observability: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := otelShutdown(shutdownCtx); err != nil {
+			logger.Error("otel_shutdown_failed", "error", err)
+		}
+	}()
 
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -68,6 +82,7 @@ func run() error {
 
 	routerCfg := api.RouterConfig{
 		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
+		DB:               pool,
 		IdempotencyStore: api.NewPostgresIdempotencyStore(queries),
 		Users:            api.NewPostgresAuthUserStore(queries),
 		Tokens:           auth.NewTokenIssuer(cfg.JWTSecret),
@@ -84,7 +99,11 @@ func run() error {
 
 	go api.RunGateTimeoutScanner(ctx, queries, gates, logger)
 
-	handler := api.NewRouter(logger, routerCfg)
+	// otelhttp wraps everything so a span (and its trace ID) exists before
+	// api.NewRouter's own middleware chain runs — RequestIDMiddleware reads
+	// that trace ID as the request_id (spec-19: "request_id 与 trace_id
+	// 统一"), and ADK's own spans for the same request join this trace.
+	handler := otelhttp.NewHandler(api.NewRouter(logger, routerCfg), "agentic-kit-server")
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
 		Handler:      handler,

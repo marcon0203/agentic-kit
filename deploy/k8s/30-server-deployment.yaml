@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentic-kit-server
+  namespace: agentic-kit
+  labels:
+    app: agentic-kit-server
+spec:
+  replicas: 3
+  # RollingUpdate with maxUnavailable: 0 — never drop below `replicas`
+  # capacity mid-rollout. See docs/deploy-canary.md for the full
+  # canary + rollback procedure this pairs with.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: agentic-kit-server
+  template:
+    metadata:
+      labels:
+        app: agentic-kit-server
+    spec:
+      containers:
+        - name: server
+          image: agentic-kit/server:REPLACE_ME_IMAGE_TAG
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: agentic-kit-server-config
+            - secretRef:
+                name: agentic-kit-server-secrets
+          # /health: process is up, no dependency check — liveness.
+          # /ready: dependency check (DB ping) — readiness. Keeping these
+          # distinct means a DB blip takes the pod out of the Service's
+          # endpoints without restarting it, per spec-19.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          # A run's event stream is a long-lived connection (up to the
+          # ingress's proxy-read-timeout, see 40-ingress.yaml) — give the
+          # process real time to drain in-flight streams before SIGKILL.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentic-kit-server
+  namespace: agentic-kit
+spec:
+  selector:
+    app: agentic-kit-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

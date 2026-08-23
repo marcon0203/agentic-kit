@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,13 +12,23 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/auth"
 )
 
+// Pinger is the readiness dependency check — satisfied by *pgxpool.Pool.
+// Kept as a narrow interface so this package doesn't need to import pgxpool
+// just for a health check.
+type Pinger interface {
+	Ping(ctx context.Context) error
+}
+
 // RouterConfig collects NewRouter's dependencies. AllowedOrigins may be nil
 // for local dev (reflects any Origin). IdempotencyStore may be nil to
 // disable the Idempotency-Key middleware entirely (e.g. in tests that don't
 // need it). Tokens and APIKeys back AuthMiddleware on every route except
 // /auth/register and /auth/login (security: [] in the API contract).
 type RouterConfig struct {
-	AllowedOrigins   []string
+	AllowedOrigins []string
+	// DB backs the /ready probe's dependency check. Nil is allowed (tests
+	// that don't need it) — /ready then reports ready without checking.
+	DB               Pinger
 	IdempotencyStore IdempotencyStore
 	Users            AuthUserStore
 	Tokens           *auth.TokenIssuer
@@ -63,6 +74,14 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 		writeJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
+		if cfg.DB != nil {
+			pingCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			defer cancel()
+			if err := cfg.DB.Ping(pingCtx); err != nil {
+				writeErr(w, r, http.StatusServiceUnavailable, ErrInternal, "database unreachable")
+				return
+			}
+		}
 		writeJSON(w, r, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
