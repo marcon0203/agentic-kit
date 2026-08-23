@@ -25,6 +25,9 @@ WHERE owner_user_id = $1
 -- name: GetSkillLatestStatusByRef :one
 SELECT status FROM skills WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1;
 
+-- name: GetSkillLatestByRef :one
+SELECT * FROM skills WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1;
+
 -- name: GetSkillByRefVersionForOwner :one
 SELECT * FROM skills WHERE owner_user_id = $1 AND ref = $2 AND version = $3;
 

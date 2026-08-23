@@ -28,6 +28,7 @@ type RouterConfig struct {
 	Marketplace      *MarketplaceHandlers
 	ModelProviders   *ModelProviderHandlers
 	Usage            *UsageHandlers
+	Runs             *RunHandlers
 }
 
 // NewRouter assembles the top-level chi router with the shared middleware
@@ -108,11 +109,17 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 			if cfg.Usage != nil {
 				r.Get("/usage/me", cfg.Usage.GetMyUsage)
 			}
-			// Further feature routers (Runs, ...) are mounted here by
-			// their respective spec tasks. Endpoints that need a tighter
-			// limit (e.g. run creation: 20/min) apply an additional
-			// NewRateLimiter(20, time.Minute, ...) at the route group
-			// level.
+			if cfg.Runs != nil {
+				r.Get("/runs", cfg.Runs.List)
+				r.Get("/runs/{id}", cfg.Runs.Get)
+				r.Get("/runs/{id}/stream", cfg.Runs.Stream)
+				r.Post("/runs/{id}/cancel", cfg.Runs.Cancel)
+				r.Post("/runs/{id}/gate", cfg.Runs.ResolveGate)
+				// A run can burn a lot of tokens per call, so creation
+				// gets its own tighter limiter on top of the general one.
+				runCreateLimiter := NewRateLimiter(20, time.Minute, generalRateLimitKey)
+				r.With(runCreateLimiter.Middleware).Post("/runs", cfg.Runs.Create)
+			}
 		})
 	})
 

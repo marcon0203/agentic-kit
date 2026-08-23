@@ -33,6 +33,22 @@ WHERE ml.resource_type = 'bundle' AND b.owner_user_id = $1 AND b.bundle_ref = $2
 -- name: DeleteBundlesByRef :exec
 DELETE FROM bundles WHERE owner_user_id = $1 AND bundle_ref = $2;
 
+-- name: GetBundleLatestByRef :one
+-- "Latest enabled version" per api/openapi.yaml's createRun: "bundle_version
+-- 省略则使用最新启用版本".
+SELECT * FROM bundles
+WHERE owner_user_id = $1 AND bundle_ref = $2 AND status = 1
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetBundleByID :one
+-- Internal use only (spec-11 run engine): fetches the full row, including
+-- `definition`, by raw id regardless of owner — a run compiles a Bundle
+-- whose owner may not be the requesting subscriber. Never exposed
+-- directly to an HTTP response; the blackbox boundary is enforced by the
+-- handler layer, not by this query.
+SELECT * FROM bundles WHERE id = $1;
+
 -- name: GetBundleDisplayForSubscriber :one
 SELECT id, owner_user_id, bundle_ref, version, display_meta, status, created_at
 FROM bundles

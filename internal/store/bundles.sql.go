@@ -89,6 +89,32 @@ func (q *Queries) DeleteBundlesByRef(ctx context.Context, arg DeleteBundlesByRef
 	return err
 }
 
+const getBundleByID = `-- name: GetBundleByID :one
+SELECT id, owner_user_id, bundle_ref, version, definition, display_meta, status, immutable, created_at FROM bundles WHERE id = $1
+`
+
+// Internal use only (spec-11 run engine): fetches the full row, including
+// `definition`, by raw id regardless of owner — a run compiles a Bundle
+// whose owner may not be the requesting subscriber. Never exposed
+// directly to an HTTP response; the blackbox boundary is enforced by the
+// handler layer, not by this query.
+func (q *Queries) GetBundleByID(ctx context.Context, id int64) (Bundle, error) {
+	row := q.db.QueryRow(ctx, getBundleByID, id)
+	var i Bundle
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.BundleRef,
+		&i.Version,
+		&i.Definition,
+		&i.DisplayMeta,
+		&i.Status,
+		&i.Immutable,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getBundleDisplayForSubscriber = `-- name: GetBundleDisplayForSubscriber :one
 SELECT id, owner_user_id, bundle_ref, version, display_meta, status, created_at
 FROM bundles
@@ -133,6 +159,37 @@ type GetBundleForOwnerParams struct {
 
 func (q *Queries) GetBundleForOwner(ctx context.Context, arg GetBundleForOwnerParams) (Bundle, error) {
 	row := q.db.QueryRow(ctx, getBundleForOwner, arg.OwnerUserID, arg.BundleRef, arg.Version)
+	var i Bundle
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.BundleRef,
+		&i.Version,
+		&i.Definition,
+		&i.DisplayMeta,
+		&i.Status,
+		&i.Immutable,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getBundleLatestByRef = `-- name: GetBundleLatestByRef :one
+SELECT id, owner_user_id, bundle_ref, version, definition, display_meta, status, immutable, created_at FROM bundles
+WHERE owner_user_id = $1 AND bundle_ref = $2 AND status = 1
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetBundleLatestByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	BundleRef   string `json:"bundle_ref"`
+}
+
+// "Latest enabled version" per api/openapi.yaml's createRun: "bundle_version
+// 省略则使用最新启用版本".
+func (q *Queries) GetBundleLatestByRef(ctx context.Context, arg GetBundleLatestByRefParams) (Bundle, error) {
+	row := q.db.QueryRow(ctx, getBundleLatestByRef, arg.OwnerUserID, arg.BundleRef)
 	var i Bundle
 	err := row.Scan(
 		&i.ID,

@@ -14,7 +14,7 @@ import (
 const createBundleRun = `-- name: CreateBundleRun :one
 INSERT INTO bundle_runs (id, bundle_id, triggered_by, via_listing_id, status)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, bundle_id, triggered_by, via_listing_id, status, error, shared_state, total_tokens, cost_usd, created_at, finished_at
+RETURNING id, bundle_id, triggered_by, via_listing_id, status, error, shared_state, total_tokens, cost_usd, created_at, finished_at, cancel_requested_at
 `
 
 type CreateBundleRunParams struct {
@@ -46,12 +46,13 @@ func (q *Queries) CreateBundleRun(ctx context.Context, arg CreateBundleRunParams
 		&i.CostUsd,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.CancelRequestedAt,
 	)
 	return i, err
 }
 
 const getBundleRun = `-- name: GetBundleRun :one
-SELECT id, bundle_id, triggered_by, via_listing_id, status, error, shared_state, total_tokens, cost_usd, created_at, finished_at FROM bundle_runs WHERE id = $1
+SELECT id, bundle_id, triggered_by, via_listing_id, status, error, shared_state, total_tokens, cost_usd, created_at, finished_at, cancel_requested_at FROM bundle_runs WHERE id = $1
 `
 
 func (q *Queries) GetBundleRun(ctx context.Context, id string) (BundleRun, error) {
@@ -69,6 +70,7 @@ func (q *Queries) GetBundleRun(ctx context.Context, id string) (BundleRun, error
 		&i.CostUsd,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.CancelRequestedAt,
 	)
 	return i, err
 }
@@ -319,7 +321,7 @@ func (q *Queries) ListBundleRunEventsAfterExternal(ctx context.Context, arg List
 }
 
 const listBundleRunsByBundleAndStatus = `-- name: ListBundleRunsByBundleAndStatus :many
-SELECT id, bundle_id, triggered_by, via_listing_id, status, error, shared_state, total_tokens, cost_usd, created_at, finished_at FROM bundle_runs
+SELECT id, bundle_id, triggered_by, via_listing_id, status, error, shared_state, total_tokens, cost_usd, created_at, finished_at, cancel_requested_at FROM bundle_runs
 WHERE bundle_id = $1 AND status = $2
 ORDER BY created_at DESC
 `
@@ -350,6 +352,7 @@ func (q *Queries) ListBundleRunsByBundleAndStatus(ctx context.Context, arg ListB
 			&i.CostUsd,
 			&i.CreatedAt,
 			&i.FinishedAt,
+			&i.CancelRequestedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -362,7 +365,7 @@ func (q *Queries) ListBundleRunsByBundleAndStatus(ctx context.Context, arg ListB
 }
 
 const listBundleRunsForUser = `-- name: ListBundleRunsForUser :many
-SELECT id, bundle_id, triggered_by, via_listing_id, status, error, shared_state, total_tokens, cost_usd, created_at, finished_at FROM bundle_runs
+SELECT id, bundle_id, triggered_by, via_listing_id, status, error, shared_state, total_tokens, cost_usd, created_at, finished_at, cancel_requested_at FROM bundle_runs
 WHERE triggered_by = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
@@ -395,6 +398,7 @@ func (q *Queries) ListBundleRunsForUser(ctx context.Context, arg ListBundleRunsF
 			&i.CostUsd,
 			&i.CreatedAt,
 			&i.FinishedAt,
+			&i.CancelRequestedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -404,6 +408,96 @@ func (q *Queries) ListBundleRunsForUser(ctx context.Context, arg ListBundleRunsF
 		return nil, err
 	}
 	return items, nil
+}
+
+const listBundleRunsForUserFiltered = `-- name: ListBundleRunsForUserFiltered :many
+SELECT br.id, br.bundle_id, br.triggered_by, br.via_listing_id, br.status, br.error, br.shared_state, br.total_tokens, br.cost_usd, br.created_at, br.finished_at, br.cancel_requested_at, b.bundle_ref AS bundle_ref, b.version AS bundle_version FROM bundle_runs br
+JOIN bundles b ON b.id = br.bundle_id
+WHERE br.triggered_by = $1
+  AND ($2::text = '' OR b.bundle_ref = $2)
+  AND ($3::text = '' OR br.status = $3)
+ORDER BY br.created_at DESC
+LIMIT $5 OFFSET $4
+`
+
+type ListBundleRunsForUserFilteredParams struct {
+	TriggeredBy int64  `json:"triggered_by"`
+	BundleRef   string `json:"bundle_ref"`
+	RunStatus   string `json:"run_status"`
+	PageOffset  int32  `json:"page_offset"`
+	PageLimit   int32  `json:"page_limit"`
+}
+
+type ListBundleRunsForUserFilteredRow struct {
+	ID                string             `json:"id"`
+	BundleID          int64              `json:"bundle_id"`
+	TriggeredBy       int64              `json:"triggered_by"`
+	ViaListingID      pgtype.Int8        `json:"via_listing_id"`
+	Status            string             `json:"status"`
+	Error             pgtype.Text        `json:"error"`
+	SharedState       []byte             `json:"shared_state"`
+	TotalTokens       int64              `json:"total_tokens"`
+	CostUsd           pgtype.Numeric     `json:"cost_usd"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	FinishedAt        pgtype.Timestamptz `json:"finished_at"`
+	CancelRequestedAt pgtype.Timestamptz `json:"cancel_requested_at"`
+	BundleRef         string             `json:"bundle_ref"`
+	BundleVersion     string             `json:"bundle_version"`
+}
+
+// bundle_ref/status filters are optional: pass ” to mean "no filter" on
+// that column (sqlc can't express NULL-able string params cleanly here,
+// and callers already have the value-or-empty from query params). Paginated
+// by offset, matching ListBundleRunsForUser's existing convention — run ids
+// are random, not monotonically sortable, so they can't back a keyset cursor.
+func (q *Queries) ListBundleRunsForUserFiltered(ctx context.Context, arg ListBundleRunsForUserFilteredParams) ([]ListBundleRunsForUserFilteredRow, error) {
+	rows, err := q.db.Query(ctx, listBundleRunsForUserFiltered,
+		arg.TriggeredBy,
+		arg.BundleRef,
+		arg.RunStatus,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBundleRunsForUserFilteredRow{}
+	for rows.Next() {
+		var i ListBundleRunsForUserFilteredRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BundleID,
+			&i.TriggeredBy,
+			&i.ViaListingID,
+			&i.Status,
+			&i.Error,
+			&i.SharedState,
+			&i.TotalTokens,
+			&i.CostUsd,
+			&i.CreatedAt,
+			&i.FinishedAt,
+			&i.CancelRequestedAt,
+			&i.BundleRef,
+			&i.BundleVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markBundleRunCancelRequested = `-- name: MarkBundleRunCancelRequested :exec
+UPDATE bundle_runs SET cancel_requested_at = now() WHERE id = $1 AND status = 'running'
+`
+
+func (q *Queries) MarkBundleRunCancelRequested(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, markBundleRunCancelRequested, id)
+	return err
 }
 
 const updateBundleRunStatus = `-- name: UpdateBundleRunStatus :exec

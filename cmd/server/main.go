@@ -63,6 +63,9 @@ func run() error {
 	}
 
 	queries := store.New(pool)
+	gates := api.NewGateRegistry()
+	runEngine := api.NewRunEngine(queries, aesKey, gates, api.NewResourceRefChecker(queries))
+
 	routerCfg := api.RouterConfig{
 		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
 		IdempotencyStore: api.NewPostgresIdempotencyStore(queries),
@@ -75,7 +78,10 @@ func run() error {
 		Marketplace:      api.NewMarketplaceHandlers(queries),
 		ModelProviders:   api.NewModelProviderHandlers(queries, aesKey),
 		Usage:            api.NewUsageHandlers(queries),
+		Runs:             api.NewRunHandlers(queries, runEngine),
 	}
+
+	go api.RunGateTimeoutScanner(ctx, queries, gates, logger)
 
 	handler := api.NewRouter(logger, routerCfg)
 	srv := &http.Server{

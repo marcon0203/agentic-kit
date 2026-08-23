@@ -11,6 +11,14 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/modelgateway"
 )
 
+// CompiledAgent is one compiled Agent DSL, ready to hand to
+// BundleCompileOptions.Agents. It's a type alias (not a new type) for
+// ADK's own agent.Agent, so callers outside this package (the run engine,
+// spec-11) can name the type without importing google.golang.org/adk
+// themselves — spec-10's "所有 ADK 调用收敛在 internal/orchestrator/adk
+// 包内" applies to *importing* the SDK, not to holding a value it returns.
+type CompiledAgent = agent.Agent
+
 // AgentCompileOptions carries everything CompileAgent needs beyond the raw
 // DSL document: the Gateway (spec-09) to run the compiled agent's model
 // through, decrypted provider credentials, and the authorizer that decides

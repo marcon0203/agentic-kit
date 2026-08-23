@@ -16,8 +16,10 @@ type Querier interface {
 	// subscriber path can never accidentally SELECT `definition` (see
 	// docs/架构设计文档_AI-Agent平台_V1.md 五、"黑盒发布的实现要点").
 	CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error)
+	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
 	CreateBundle(ctx context.Context, arg CreateBundleParams) (Bundle, error)
 	CreateBundleRun(ctx context.Context, arg CreateBundleRunParams) (BundleRun, error)
+	CreateHumanGate(ctx context.Context, arg CreateHumanGateParams) (HumanGate, error)
 	CreateKnowledgeBase(ctx context.Context, arg CreateKnowledgeBaseParams) (KnowledgeBasis, error)
 	// Dependency closure (spec-08) is always owner-scoped: a Bundle/Agent only
 	// ever references resources in the SAME owner's space by ref, so every
@@ -79,26 +81,43 @@ type Querier interface {
 	GetAgentListingDisplayByListingID(ctx context.Context, id int64) (GetAgentListingDisplayByListingIDRow, error)
 	// ── Dependency-satisfaction checks (publish-time closure walk) ──────────
 	GetAgentListingForOwnerByRefVersion(ctx context.Context, arg GetAgentListingForOwnerByRefVersionParams) (MarketplaceListing, error)
+	// Internal use only (spec-11 run engine): fetches the full row, including
+	// `definition`, by raw id regardless of owner — a run compiles a Bundle
+	// whose owner may not be the requesting subscriber. Never exposed
+	// directly to an HTTP response; the blackbox boundary is enforced by the
+	// handler layer, not by this query.
+	GetBundleByID(ctx context.Context, id int64) (Bundle, error)
 	GetBundleConstraintsSummaryByListingID(ctx context.Context, id int64) (GetBundleConstraintsSummaryByListingIDRow, error)
 	GetBundleDisplayForSubscriber(ctx context.Context, id int64) (GetBundleDisplayForSubscriberRow, error)
 	GetBundleForOwner(ctx context.Context, arg GetBundleForOwnerParams) (Bundle, error)
+	// "Latest enabled version" per api/openapi.yaml's createRun: "bundle_version
+	// 省略则使用最新启用版本".
+	GetBundleLatestByRef(ctx context.Context, arg GetBundleLatestByRefParams) (Bundle, error)
 	GetBundleListingDisplayByListingID(ctx context.Context, id int64) (GetBundleListingDisplayByListingIDRow, error)
 	GetBundleListingForOwnerByRefVersion(ctx context.Context, arg GetBundleListingForOwnerByRefVersionParams) (MarketplaceListing, error)
 	GetBundleRun(ctx context.Context, id string) (BundleRun, error)
+	GetHumanGateByID(ctx context.Context, id int64) (HumanGate, error)
 	GetIdempotencyKey(ctx context.Context, key string) (IdempotencyKey, error)
 	GetKnowledgeBaseByIDForOwner(ctx context.Context, arg GetKnowledgeBaseByIDForOwnerParams) (KnowledgeBasis, error)
+	GetKnowledgeBaseLatestByRef(ctx context.Context, arg GetKnowledgeBaseLatestByRefParams) (KnowledgeBasis, error)
 	GetKnowledgeBaseLatestStatusByRef(ctx context.Context, arg GetKnowledgeBaseLatestStatusByRefParams) (int16, error)
 	GetListingByID(ctx context.Context, id int64) (MarketplaceListing, error)
 	GetListingByListingRefAndVersion(ctx context.Context, arg GetListingByListingRefAndVersionParams) (MarketplaceListing, error)
 	GetListingByListingRefLatestPublished(ctx context.Context, listingRef string) (MarketplaceListing, error)
 	GetMCPServerByIDForOwner(ctx context.Context, arg GetMCPServerByIDForOwnerParams) (McpServer, error)
 	GetMCPServerByRefVersionForOwner(ctx context.Context, arg GetMCPServerByRefVersionForOwnerParams) (McpServer, error)
+	GetMCPServerLatestByRef(ctx context.Context, arg GetMCPServerLatestByRefParams) (McpServer, error)
 	GetMCPServerLatestStatusByRef(ctx context.Context, arg GetMCPServerLatestStatusByRefParams) (int16, error)
 	GetMCPServerListingDisplayByListingID(ctx context.Context, id int64) (GetMCPServerListingDisplayByListingIDRow, error)
 	GetMCPServerListingForOwnerByRef(ctx context.Context, arg GetMCPServerListingForOwnerByRefParams) (MarketplaceListing, error)
 	GetModelProviderCredentials(ctx context.Context, arg GetModelProviderCredentialsParams) ([]byte, error)
+	// A node can gate more than once across a Bundle's lifetime (e.g. inside a
+	// self-loop retry), so this always resolves to the most recent occurrence
+	// for that run+node — the one actually blocking right now.
+	GetPendingHumanGateForRunNode(ctx context.Context, arg GetPendingHumanGateForRunNodeParams) (HumanGate, error)
 	GetSkillByIDForOwner(ctx context.Context, arg GetSkillByIDForOwnerParams) (Skill, error)
 	GetSkillByRefVersionForOwner(ctx context.Context, arg GetSkillByRefVersionForOwnerParams) (Skill, error)
+	GetSkillLatestByRef(ctx context.Context, arg GetSkillLatestByRefParams) (Skill, error)
 	GetSkillLatestStatusByRef(ctx context.Context, arg GetSkillLatestStatusByRefParams) (int16, error)
 	GetSkillListingDisplayByListingID(ctx context.Context, id int64) (GetSkillListingDisplayByListingIDRow, error)
 	// Skill/MCP refs in an Agent's capabilities are not version-pinned in the
@@ -113,6 +132,10 @@ type Querier interface {
 	// never a second subscribe.
 	GetSubscriptionForSubscriberByListingRef(ctx context.Context, arg GetSubscriptionForSubscriberByListingRefParams) (Subscription, error)
 	GetToolByIDForOwner(ctx context.Context, arg GetToolByIDForOwnerParams) (Tool, error)
+	// Used by the run engine (spec-10/11) to build a real tool.Tool from the
+	// resource's config — capabilities.tools[] refs aren't version-pinned, so
+	// this is always "whatever's currently live", same as the status lookup.
+	GetToolLatestByRef(ctx context.Context, arg GetToolLatestByRefParams) (Tool, error)
 	GetToolLatestStatusByRef(ctx context.Context, arg GetToolLatestStatusByRefParams) (int16, error)
 	GetUsageBreakdownByBundleForUser(ctx context.Context, arg GetUsageBreakdownByBundleForUserParams) ([]GetUsageBreakdownByBundleForUserRow, error)
 	GetUsageBreakdownByDayForUser(ctx context.Context, arg GetUsageBreakdownByDayForUserParams) ([]GetUsageBreakdownByDayForUserRow, error)
@@ -132,18 +155,29 @@ type Querier interface {
 	// One row per agent_ref (its most recently created version), per
 	// api/openapi.yaml's "每个 ref 返回最新启用版本" list contract.
 	ListAgentsForOwnerLatestPage(ctx context.Context, arg ListAgentsForOwnerLatestPageParams) ([]Agent, error)
+	ListAuditLogsForTarget(ctx context.Context, arg ListAuditLogsForTargetParams) ([]AuditLog, error)
 	ListBundleRunEventsAfter(ctx context.Context, arg ListBundleRunEventsAfterParams) ([]BundleRunEvent, error)
 	ListBundleRunEventsAfterExternal(ctx context.Context, arg ListBundleRunEventsAfterExternalParams) ([]BundleRunEvent, error)
 	ListBundleRunsByBundleAndStatus(ctx context.Context, arg ListBundleRunsByBundleAndStatusParams) ([]BundleRun, error)
 	ListBundleRunsForUser(ctx context.Context, arg ListBundleRunsForUserParams) ([]BundleRun, error)
+	// bundle_ref/status filters are optional: pass '' to mean "no filter" on
+	// that column (sqlc can't express NULL-able string params cleanly here,
+	// and callers already have the value-or-empty from query params). Paginated
+	// by offset, matching ListBundleRunsForUser's existing convention — run ids
+	// are random, not monotonically sortable, so they can't back a keyset cursor.
+	ListBundleRunsForUserFiltered(ctx context.Context, arg ListBundleRunsForUserFilteredParams) ([]ListBundleRunsForUserFilteredRow, error)
 	ListBundleVersionsForOwner(ctx context.Context, arg ListBundleVersionsForOwnerParams) ([]Bundle, error)
 	ListBundlesForOwner(ctx context.Context, ownerUserID int64) ([]Bundle, error)
 	// One row per bundle_ref (its most recently created version).
 	ListBundlesForOwnerLatestPage(ctx context.Context, arg ListBundlesForOwnerLatestPageParams) ([]Bundle, error)
+	ListHumanGatesForRun(ctx context.Context, runID string) ([]HumanGate, error)
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
 	ListListingVersionHistory(ctx context.Context, listingRef string) ([]ListListingVersionHistoryRow, error)
 	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)
 	ListModelProvidersForOwner(ctx context.Context, ownerUserID int64) ([]ListModelProvidersForOwnerRow, error)
+	// Backs the timeout-scanning job (spec-11): a pending gate with a
+	// timeout_seconds set, whose deadline has passed.
+	ListPendingHumanGatesPastTimeout(ctx context.Context) ([]HumanGate, error)
 	// ── Browse / detail (blackbox: display_meta only, never definition) ────
 	ListPublishedAgentListingsPage(ctx context.Context, arg ListPublishedAgentListingsPageParams) ([]ListPublishedAgentListingsPageRow, error)
 	ListPublishedBundleListingsPage(ctx context.Context, arg ListPublishedBundleListingsPageParams) ([]ListPublishedBundleListingsPageRow, error)
@@ -154,11 +188,13 @@ type Querier interface {
 	ListToolsForOwnerPage(ctx context.Context, arg ListToolsForOwnerPageParams) ([]Tool, error)
 	MarkAgentImmutable(ctx context.Context, id int64) error
 	MarkBundleImmutable(ctx context.Context, id int64) error
+	MarkBundleRunCancelRequested(ctx context.Context, id string) error
 	MarkKnowledgeBaseImmutable(ctx context.Context, id int64) error
 	MarkMCPServerImmutable(ctx context.Context, id int64) error
 	MarkSkillImmutable(ctx context.Context, id int64) error
 	MarkToolImmutable(ctx context.Context, id int64) error
 	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
+	ResolveHumanGate(ctx context.Context, arg ResolveHumanGateParams) (HumanGate, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	SetAgentDisplayMeta(ctx context.Context, arg SetAgentDisplayMetaParams) error
 	SetBundleDisplayMeta(ctx context.Context, arg SetBundleDisplayMetaParams) error

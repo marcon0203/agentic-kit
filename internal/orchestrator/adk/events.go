@@ -27,6 +27,14 @@ type PlatformEvent struct {
 	Node       string
 	Payload    map[string]any
 	IsInternal bool
+	// InputTokens/OutputTokens/CostUSD are non-zero only on events derived
+	// from a raw session.Event that actually carried usage metadata (an
+	// LLM turn) — the run engine accumulates these onto
+	// bundle_runs.total_tokens/cost_usd (spec-09/11) without needing its
+	// own second lookup into modelgateway's pricing table.
+	InputTokens  int64
+	OutputTokens int64
+	CostUSD      float64
 }
 
 // TranslateEvent converts one ADK session.Event, produced while executing
@@ -44,6 +52,20 @@ func TranslateEvent(node string, ev *session.Event) []PlatformEvent {
 		return nil
 	}
 
+	var inputTokens, outputTokens int64
+	var costUSD float64
+	if ev.UsageMetadata != nil {
+		inputTokens = int64(ev.UsageMetadata.PromptTokenCount)
+		outputTokens = int64(ev.UsageMetadata.CandidatesTokenCount)
+	}
+	if cost, ok := ev.CustomMetadata["cost_usd"].(float64); ok {
+		costUSD = cost
+	}
+	withUsage := func(pe PlatformEvent) PlatformEvent {
+		pe.InputTokens, pe.OutputTokens, pe.CostUSD = inputTokens, outputTokens, costUSD
+		return pe
+	}
+
 	var out []PlatformEvent
 	if ev.Content != nil {
 		for _, part := range ev.Content.Parts {
@@ -52,37 +74,37 @@ func TranslateEvent(node string, ev *session.Event) []PlatformEvent {
 			}
 			switch {
 			case part.FunctionCall != nil:
-				out = append(out, PlatformEvent{
+				out = append(out, withUsage(PlatformEvent{
 					Type: EventNodeToolCallStarted, Node: node,
 					Payload:    map[string]any{"name": part.FunctionCall.Name, "args": part.FunctionCall.Args},
 					IsInternal: false,
-				})
+				}))
 			case part.FunctionResponse != nil:
-				out = append(out, PlatformEvent{
+				out = append(out, withUsage(PlatformEvent{
 					Type: EventNodeToolCallFinished, Node: node,
 					Payload:    map[string]any{"name": part.FunctionResponse.Name, "result": part.FunctionResponse.Response},
 					IsInternal: false,
-				})
+				}))
 			case part.Thought:
 				// The model's own internal reasoning trace — never
 				// forwarded to a black-box subscriber.
-				out = append(out, PlatformEvent{Type: EventNodeThinking, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: true})
+				out = append(out, withUsage(PlatformEvent{Type: EventNodeThinking, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: true}))
 			case part.Text != "":
 				if ev.IsFinalResponse() {
-					out = append(out, PlatformEvent{Type: EventNodeFinished, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: false})
+					out = append(out, withUsage(PlatformEvent{Type: EventNodeFinished, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: false}))
 				} else {
 					// Streamed/intermediate model text is still the
 					// model "thinking out loud" from the product's point
 					// of view — the typewriter effect in spec-14, but
 					// not yet the node's committed output.
-					out = append(out, PlatformEvent{Type: EventNodeThinking, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: true})
+					out = append(out, withUsage(PlatformEvent{Type: EventNodeThinking, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: true}))
 				}
 			}
 		}
 	}
 
 	if len(out) == 0 && ev.IsFinalResponse() {
-		out = append(out, PlatformEvent{Type: EventNodeFinished, Node: node, Payload: nil, IsInternal: false})
+		out = append(out, withUsage(PlatformEvent{Type: EventNodeFinished, Node: node, Payload: nil, IsInternal: false}))
 	}
 	return out
 }

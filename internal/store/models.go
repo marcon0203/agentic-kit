@@ -30,6 +30,16 @@ type ApiKey struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type AuditLog struct {
+	ID          int64              `json:"id"`
+	ActorUserID pgtype.Int8        `json:"actor_user_id"`
+	Action      string             `json:"action"`
+	TargetType  string             `json:"target_type"`
+	TargetID    string             `json:"target_id"`
+	Detail      []byte             `json:"detail"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Bundle struct {
 	ID          int64              `json:"id"`
 	OwnerUserID int64              `json:"owner_user_id"`
@@ -43,17 +53,18 @@ type Bundle struct {
 }
 
 type BundleRun struct {
-	ID           string             `json:"id"`
-	BundleID     int64              `json:"bundle_id"`
-	TriggeredBy  int64              `json:"triggered_by"`
-	ViaListingID pgtype.Int8        `json:"via_listing_id"`
-	Status       string             `json:"status"`
-	Error        pgtype.Text        `json:"error"`
-	SharedState  []byte             `json:"shared_state"`
-	TotalTokens  int64              `json:"total_tokens"`
-	CostUsd      pgtype.Numeric     `json:"cost_usd"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+	ID                string             `json:"id"`
+	BundleID          int64              `json:"bundle_id"`
+	TriggeredBy       int64              `json:"triggered_by"`
+	ViaListingID      pgtype.Int8        `json:"via_listing_id"`
+	Status            string             `json:"status"`
+	Error             pgtype.Text        `json:"error"`
+	SharedState       []byte             `json:"shared_state"`
+	TotalTokens       int64              `json:"total_tokens"`
+	CostUsd           pgtype.Numeric     `json:"cost_usd"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	FinishedAt        pgtype.Timestamptz `json:"finished_at"`
+	CancelRequestedAt pgtype.Timestamptz `json:"cancel_requested_at"`
 }
 
 type BundleRunEvent struct {
@@ -64,6 +75,20 @@ type BundleRunEvent struct {
 	Payload    []byte             `json:"payload"`
 	IsInternal bool               `json:"is_internal"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type HumanGate struct {
+	ID             int64              `json:"id"`
+	RunID          string             `json:"run_id"`
+	Node           string             `json:"node"`
+	Status         string             `json:"status"`
+	TimeoutSeconds pgtype.Int4        `json:"timeout_seconds"`
+	OnTimeout      string             `json:"on_timeout"`
+	ApproverRoles  []byte             `json:"approver_roles"`
+	ResolvedBy     pgtype.Int8        `json:"resolved_by"`
+	Comment        pgtype.Text        `json:"comment"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
 }
 
 type IdempotencyKey struct {

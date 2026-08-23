@@ -111,6 +111,32 @@ func (q *Queries) GetKnowledgeBaseByIDForOwner(ctx context.Context, arg GetKnowl
 	return i, err
 }
 
+const getKnowledgeBaseLatestByRef = `-- name: GetKnowledgeBaseLatestByRef :one
+SELECT id, owner_user_id, ref, version, config, display_meta, status, immutable, created_at FROM knowledge_bases WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1
+`
+
+type GetKnowledgeBaseLatestByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Ref         string `json:"ref"`
+}
+
+func (q *Queries) GetKnowledgeBaseLatestByRef(ctx context.Context, arg GetKnowledgeBaseLatestByRefParams) (KnowledgeBasis, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeBaseLatestByRef, arg.OwnerUserID, arg.Ref)
+	var i KnowledgeBasis
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.Ref,
+		&i.Version,
+		&i.Config,
+		&i.DisplayMeta,
+		&i.Status,
+		&i.Immutable,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getKnowledgeBaseLatestStatusByRef = `-- name: GetKnowledgeBaseLatestStatusByRef :one
 SELECT status FROM knowledge_bases WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1
 `

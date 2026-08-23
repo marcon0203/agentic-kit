@@ -75,8 +75,14 @@ func (m *gatewayLLM) GenerateContent(ctx context.Context, req *model.LLMRequest,
 				PromptTokenCount:     int32(result.InputTokens),
 				CandidatesTokenCount: int32(result.OutputTokens),
 			},
-			FinishReason: genai.FinishReasonStop,
-			TurnComplete: true,
+			// CostUSD travels via CustomMetadata rather than a genai field
+			// (genai has none) — TranslateEvent reads it back out so the
+			// run engine's usage accounting (spec-09/11: accumulate onto
+			// bundle_runs.total_tokens/cost_usd) doesn't need its own
+			// second call into modelgateway's pricing table.
+			CustomMetadata: map[string]any{"cost_usd": result.CostUSD},
+			FinishReason:   genai.FinishReasonStop,
+			TurnComplete:   true,
 		}, nil)
 	}
 }

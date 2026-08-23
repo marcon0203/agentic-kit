@@ -24,3 +24,9 @@ WHERE owner_user_id = $1
 
 -- name: GetToolLatestStatusByRef :one
 SELECT status FROM tools WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1;
+
+-- name: GetToolLatestByRef :one
+-- Used by the run engine (spec-10/11) to build a real tool.Tool from the
+-- resource's config — capabilities.tools[] refs aren't version-pinned, so
+-- this is always "whatever's currently live", same as the status lookup.
+SELECT * FROM tools WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1;

@@ -221,7 +221,7 @@
       "id": 11,
       "type": "run_engine",
       "name": "运行生命周期与 human gate",
-      "status": "pending",
+      "status": "done",
       "doc_dir": "spec/spec-11-run-engine.md",
       "depends_on": [
         10,

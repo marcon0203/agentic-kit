@@ -26,3 +26,6 @@ WHERE owner_user_id = $1
 
 -- name: GetKnowledgeBaseLatestStatusByRef :one
 SELECT status FROM knowledge_bases WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1;
+
+-- name: GetKnowledgeBaseLatestByRef :one
+SELECT * FROM knowledge_bases WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1;

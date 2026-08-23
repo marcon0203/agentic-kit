@@ -12,6 +12,23 @@ WHERE triggered_by = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: ListBundleRunsForUserFiltered :many
+-- bundle_ref/status filters are optional: pass '' to mean "no filter" on
+-- that column (sqlc can't express NULL-able string params cleanly here,
+-- and callers already have the value-or-empty from query params). Paginated
+-- by offset, matching ListBundleRunsForUser's existing convention — run ids
+-- are random, not monotonically sortable, so they can't back a keyset cursor.
+SELECT br.*, b.bundle_ref AS bundle_ref, b.version AS bundle_version FROM bundle_runs br
+JOIN bundles b ON b.id = br.bundle_id
+WHERE br.triggered_by = sqlc.arg('triggered_by')
+  AND (sqlc.arg('bundle_ref')::text = '' OR b.bundle_ref = sqlc.arg('bundle_ref'))
+  AND (sqlc.arg('run_status')::text = '' OR br.status = sqlc.arg('run_status'))
+ORDER BY br.created_at DESC
+LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
+
+-- name: MarkBundleRunCancelRequested :exec
+UPDATE bundle_runs SET cancel_requested_at = now() WHERE id = $1 AND status = 'running';
+
 -- name: ListBundleRunsByBundleAndStatus :many
 SELECT * FROM bundle_runs
 WHERE bundle_id = $1 AND status = $2

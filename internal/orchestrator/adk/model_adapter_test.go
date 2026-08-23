@@ -49,6 +49,9 @@ func TestGatewayLLM_GenerateContent(t *testing.T) {
 	if got.UsageMetadata.PromptTokenCount != 12 || got.UsageMetadata.CandidatesTokenCount != 6 {
 		t.Fatalf("unexpected usage metadata: %+v", got.UsageMetadata)
 	}
+	if _, ok := got.CustomMetadata["cost_usd"]; !ok {
+		t.Fatalf("expected CustomMetadata to carry cost_usd, got %+v", got.CustomMetadata)
+	}
 }
 
 func TestGatewayLLM_GenerateContent_PropagatesError(t *testing.T) {

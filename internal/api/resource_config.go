@@ -49,6 +49,30 @@ func EncryptConfigCredentials(key []byte, config map[string]any) (map[string]any
 	return out, nil
 }
 
+// DecryptConfigCredentials reverses EncryptConfigCredentials — used only
+// internally by the run engine to build a real tool.Tool (spec-10) from a
+// resource's stored config; the decrypted result must never be returned
+// from an HTTP handler.
+func DecryptConfigCredentials(key []byte, config map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(config))
+	for k, v := range config {
+		if !isCredentialKey(k) {
+			out[k] = v
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("resource config: credential field %q must be a string", k)
+		}
+		plaintext, err := crypto.Decrypt(key, s)
+		if err != nil {
+			return nil, fmt.Errorf("resource config: decrypt %q: %w", k, err)
+		}
+		out[k] = string(plaintext)
+	}
+	return out, nil
+}
+
 // RedactConfigForResponse returns a copy of config with every
 // credential-shaped field removed entirely — spec-05's "凭证字段在任何 GET
 // 响应中都不出现" means omitted, not masked or shown as ciphertext.

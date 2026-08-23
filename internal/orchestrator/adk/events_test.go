@@ -76,3 +76,18 @@ func TestTranslateEvent_Nil_ReturnsNothing(t *testing.T) {
 		t.Fatalf("expected nil for a nil event, got %+v", got)
 	}
 }
+
+func TestTranslateEvent_CarriesUsageAndCost(t *testing.T) {
+	ev := &session.Event{}
+	ev.Content = genai.NewContentFromText("final answer", genai.RoleModel)
+	ev.UsageMetadata = &genai.GenerateContentResponseUsageMetadata{PromptTokenCount: 10, CandidatesTokenCount: 4}
+	ev.CustomMetadata = map[string]any{"cost_usd": 0.0123}
+
+	events := TranslateEvent("architect", ev)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %+v", events)
+	}
+	if events[0].InputTokens != 10 || events[0].OutputTokens != 4 || events[0].CostUSD != 0.0123 {
+		t.Fatalf("unexpected usage on translated event: %+v", events[0])
+	}
+}

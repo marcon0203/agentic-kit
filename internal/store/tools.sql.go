@@ -109,6 +109,35 @@ func (q *Queries) GetToolByIDForOwner(ctx context.Context, arg GetToolByIDForOwn
 	return i, err
 }
 
+const getToolLatestByRef = `-- name: GetToolLatestByRef :one
+SELECT id, owner_user_id, ref, version, config, display_meta, status, immutable, created_at FROM tools WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1
+`
+
+type GetToolLatestByRefParams struct {
+	OwnerUserID int64  `json:"owner_user_id"`
+	Ref         string `json:"ref"`
+}
+
+// Used by the run engine (spec-10/11) to build a real tool.Tool from the
+// resource's config — capabilities.tools[] refs aren't version-pinned, so
+// this is always "whatever's currently live", same as the status lookup.
+func (q *Queries) GetToolLatestByRef(ctx context.Context, arg GetToolLatestByRefParams) (Tool, error) {
+	row := q.db.QueryRow(ctx, getToolLatestByRef, arg.OwnerUserID, arg.Ref)
+	var i Tool
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.Ref,
+		&i.Version,
+		&i.Config,
+		&i.DisplayMeta,
+		&i.Status,
+		&i.Immutable,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getToolLatestStatusByRef = `-- name: GetToolLatestStatusByRef :one
 SELECT status FROM tools WHERE owner_user_id = $1 AND ref = $2 ORDER BY created_at DESC LIMIT 1
 `
