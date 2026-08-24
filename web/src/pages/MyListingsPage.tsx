@@ -47,8 +47,7 @@ export function MyListingsPage() {
 
   return (
     <div className="flex flex-col gap-space-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-display-md text-ink-900">我的发布</h2>
+      <div className="flex items-center justify-end">
         {!showForm && <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setShowForm(true)}>发布新资源</Button>}
       </div>
 

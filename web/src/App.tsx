@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
 
 import { Toaster } from '@/components/ui/sonner'
 import { AppShell } from '@/components/layout/AppShell'
@@ -11,10 +11,20 @@ import { RunPage } from '@/pages/RunPage'
 import { AppsPage } from '@/pages/AppsPage'
 import { ResourceCenterPage } from '@/pages/ResourceCenterPage'
 import { ModelProviderPage } from '@/pages/ModelProviderPage'
-import { MarketplacePage } from '@/pages/MarketplacePage'
 import { ListingDetailPage } from '@/pages/ListingDetailPage'
 import { BundleEditorPage } from '@/pages/BundleEditorPage'
 import { OperationsPage } from '@/pages/OperationsPage'
+
+/**
+ * 应用广场（发布市场）已经并入应用中心（/apps），旧的 /marketplace 链接
+ * 保留跳转而不是直接失效——tab 参数的取值在两边是一样的字符串，原样带过去
+ * 就对得上新页面的二级菜单。
+ */
+function MarketplaceRedirect() {
+  const [searchParams] = useSearchParams()
+  const tab = searchParams.get('tab')
+  return <Navigate to={tab ? `/apps?tab=${tab}` : '/apps'} replace />
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,14 +43,7 @@ export default function App() {
         <Routes>
           <Route element={<AppShell />}>
             <Route path="/" element={<HomePage />} />
-            <Route
-              path="/marketplace"
-              element={
-                <ProtectedRoute>
-                  <MarketplacePage />
-                </ProtectedRoute>
-              }
-            />
+            <Route path="/marketplace" element={<MarketplaceRedirect />} />
             <Route
               path="/marketplace/listing/:ref"
               element={

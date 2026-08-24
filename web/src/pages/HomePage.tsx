@@ -8,7 +8,6 @@ import {
   Cpu,
   Database,
   GitBranch,
-  LayoutGrid,
   Puzzle,
   ShieldCheck,
   Store,
@@ -43,22 +42,24 @@ const GATE_INDEX = 2
 /* ── Proof stats ────────────────────────────────────────────────────── */
 
 const PROOF = [
-  { value: '4', label: '能力中心' },
+  { value: '3', label: '能力中心' },
   { value: '4', label: '步跑通' },
   { value: '1', label: 'Human Gate 审批' },
 ]
 
-/* ── The four centres ────────────────────────────────────────────────
+/* ── The three centres ───────────────────────────────────────────────
    Each centre gets an icon, a colour, and one line saying what you keep
-   there, because that is what a person is actually choosing between. */
+   there, because that is what a person is actually choosing between.
+   应用广场既是发布市场也是自己的 Agent/Bundle 管理台——两者互为镜像，
+   拆成两个中心反而让人来回切，所以合成一个。 */
 
 const CENTRES = [
   {
     to: '/apps',
-    name: '应用中心',
-    holds: 'Agent 定义与 Bundle 编排',
-    line: '用 DSL 描述角色与能力，拖拽连线组成协作图，从这里发起运行。',
-    icon: LayoutGrid,
+    name: '应用广场',
+    holds: 'Agent · Bundle · 发布市场',
+    line: '自己建的 Agent 与 Bundle 在这里编排、发起运行；别人发布的能力也在这里订阅即用，互不打扰。',
+    icon: Store,
     tone: 'blueprint' as const,
   },
   {
@@ -76,14 +77,6 @@ const CENTRES = [
     line: '接入 Anthropic / OpenAI / Google。凭证先验证再保存，存不进去的 key 不会等到运行时才报错。',
     icon: Cpu,
     tone: 'moss' as const,
-  },
-  {
-    to: '/marketplace',
-    name: '应用广场',
-    holds: '别人发布的能力',
-    line: '订阅即用，版本锁定在订阅那一刻。作者的提示词与编排图不会随之泄露。',
-    icon: Store,
-    tone: 'signal' as const,
   },
 ]
 
@@ -124,8 +117,8 @@ const FAQS = [
     a: 'Human Gate 是运行流中的一个强制暂停点。Agent 不会自己越过需要人类判断的节点；平台会停下来，等有人批准或驳回后才继续。',
   },
   {
-    q: '四个中心分别做什么？',
-    a: '应用中心负责 Agent 与 Bundle；资源中心管理 Tool、Skill、MCP 与知识库；模型广场管理 LLM Provider 与凭证；应用广场让你订阅别人发布的能力。',
+    q: '三个中心分别做什么？',
+    a: '应用广场负责 Agent 与 Bundle 的编排管理，也是发布市场——自己建的和别人发布的都在这里，互不打扰；资源中心管理 Tool、Skill、MCP 与知识库；模型广场管理 LLM Provider 与凭证。',
   },
   {
     q: '运行出错了怎么定位？',
@@ -304,8 +297,8 @@ function HeroSection() {
           <div className="flex flex-wrap items-center gap-space-3">
             {user ? (
               <Button asChild size="lg" className="bg-gradient-cta text-white hover:opacity-90">
-                <Link to="/apps">
-                  进入应用中心
+                <Link to="/apps?tab=manage">
+                  进入应用管理
                   <ArrowRight className="size-4" aria-hidden />
                 </Link>
               </Button>
@@ -316,7 +309,7 @@ function HeroSection() {
               </Button>
             )}
             <Button asChild variant="outline" size="lg">
-              <Link to="/marketplace">浏览应用广场</Link>
+              <Link to="/apps">浏览应用广场</Link>
             </Button>
           </div>
 
@@ -408,8 +401,8 @@ const TONE_STYLES = {
 
 function CentresSection() {
   return (
-    <Section title="平台由四个中心组成">
-      <ul className="grid grid-cols-1 gap-space-4 md:grid-cols-2 xl:grid-cols-4">
+    <Section title="平台由三个中心组成">
+      <ul className="grid grid-cols-1 gap-space-4 md:grid-cols-3">
         {CENTRES.map((centre) => {
           const Icon = centre.icon
           return (

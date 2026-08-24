@@ -99,7 +99,7 @@ export function BundleListPage() {
                   size="sm"
                   disabled={runBlocked}
                   title={runBlocked ? '先去模型广场接入一个 Provider，才能发起运行' : undefined}
-                  onClick={() => navigate('/apps', { state: { quickStartBundleRef: b.bundle_ref } })}
+                  onClick={() => navigate('/apps?tab=manage', { state: { quickStartBundleRef: b.bundle_ref } })}
                 >
                   运行
                 </Button>
