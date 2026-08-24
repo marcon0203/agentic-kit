@@ -288,7 +288,7 @@ function HeroSection() {
           <div className="flex flex-wrap items-center gap-space-3">
             {user ? (
               <Button asChild size="lg" className="bg-gradient-cta text-white hover:opacity-90">
-                <Link to="/apps?tab=bundles">
+                <Link to="/apps/bundles">
                   进入 Bundle 编排
                   <ArrowRight className="size-4" aria-hidden />
                 </Link>

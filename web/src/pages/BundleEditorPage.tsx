@@ -214,7 +214,7 @@ function EditorInner() {
       )
       toast.success('已保存')
       setDirty(false)
-      navigate('/apps')
+      navigate('/apps/bundles')
     } catch (err) {
       if (err instanceof ApiError && err.details) {
         const parsed = err.details.map((d) => ({ target: d.field, reason: d.reason }))

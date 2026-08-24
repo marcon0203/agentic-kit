@@ -17,7 +17,7 @@ type Resource = components['schemas']['Resource']
 /* Each kind gets its own empty-state copy. "还没有资源" is the same sentence
    four times over and helps nobody; what a person needs to know is what this
    particular kind is for and what registering one would let them do. Also
-   doubles as the label lookup AppsPage's sidebar uses, so a kind's name is
+   doubles as the label lookup AppsLayout's sidebar uses, so a kind's name is
    spelled once. */
 export const RESOURCE_KINDS: {
   value: ResourceType

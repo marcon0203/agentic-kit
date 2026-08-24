@@ -109,7 +109,7 @@ export function RunMonitorTab() {
           description="从 Bundle 编排发起一次运行，它的每一步、耗时和失败原因都会出现在这张表里。"
           action={
             <Button asChild size="sm" className="bg-gradient-cta text-white hover:opacity-90">
-              <Link to="/apps?tab=bundles">去 Bundle 编排发起一次运行</Link>
+              <Link to="/apps/bundles">去 Bundle 编排发起一次运行</Link>
             </Button>
           }
         />

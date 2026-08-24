@@ -133,7 +133,7 @@ export function MarketplaceBrowsePage() {
           description="把你做好的 Bundle 或 Agent 发布出来，别人订阅后可以直接运行，但看不到你怎么编排的。"
           action={
             <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" asChild>
-              <Link to="/apps?tab=publish">发布我的第一个资源</Link>
+              <Link to="/apps/publish">发布我的第一个资源</Link>
             </Button>
           }
         />

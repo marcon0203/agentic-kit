@@ -8,26 +8,32 @@ import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { HomePage } from '@/pages/HomePage'
 import { PagePlaceholder } from '@/pages/PagePlaceholder'
 import { RunPage } from '@/pages/RunPage'
-import { AppsPage } from '@/pages/AppsPage'
+import { AppsLayout } from '@/pages/AppsLayout'
+import { MarketplaceBrowsePage } from '@/pages/MarketplaceBrowsePage'
+import { BundleListPage } from '@/pages/BundleListPage'
+import { AgentDefinitionPage } from '@/pages/AgentDefinitionPage'
+import { ResourceKindPage } from '@/pages/ResourceCenterPage'
+import { MyListingsPage } from '@/pages/MyListingsPage'
+import { MySubscriptionsPage } from '@/pages/MySubscriptionsPage'
 import { ModelProviderPage } from '@/pages/ModelProviderPage'
 import { ListingDetailPage } from '@/pages/ListingDetailPage'
 import { BundleEditorPage } from '@/pages/BundleEditorPage'
 import { OperationsPage } from '@/pages/OperationsPage'
 
 /**
- * 应用广场（发布市场）已经并入应用中心（/apps），旧的 /marketplace 链接
- * 保留跳转而不是直接失效——tab 参数的取值在两边是一样的字符串，原样带过去
- * 就对得上新页面的二级菜单。
+ * 应用广场（发布市场）已经并入应用中心（/apps/<section>），旧的
+ * /marketplace?tab=x 链接保留跳转而不是直接失效——tab 的取值就是新路由的
+ * 段名，原样拼进路径即可。
  */
 function MarketplaceRedirect() {
   const [searchParams] = useSearchParams()
   const tab = searchParams.get('tab')
-  return <Navigate to={tab ? `/apps?tab=${tab}` : '/apps'} replace />
+  return <Navigate to={tab ? `/apps/${tab}` : '/apps/browse'} replace />
 }
 
-// 资源中心同样并入 /apps（二级菜单的独立 tab），旧链接原样跳转到 Tool。
+// 资源中心同样并入 /apps（二级菜单下每个资源类型各自一条路由），旧链接原样跳转到 Tool。
 function ResourcesRedirect() {
-  return <Navigate to="/apps?tab=tool" replace />
+  return <Navigate to="/apps/tool" replace />
 }
 
 const queryClient = new QueryClient({
@@ -60,10 +66,22 @@ export default function App() {
               path="/apps"
               element={
                 <ProtectedRoute>
-                  <AppsPage />
+                  <AppsLayout />
                 </ProtectedRoute>
               }
-            />
+            >
+              <Route index element={<Navigate to="browse" replace />} />
+              <Route path="browse" element={<MarketplaceBrowsePage />} />
+              <Route path="bundles" element={<BundleListPage />} />
+              <Route path="agents" element={<AgentDefinitionPage />} />
+              <Route path="tool" element={<ResourceKindPage type="tool" />} />
+              <Route path="skill" element={<ResourceKindPage type="skill" />} />
+              <Route path="mcp" element={<ResourceKindPage type="mcp" />} />
+              <Route path="knowledge_base" element={<ResourceKindPage type="knowledge_base" />} />
+              <Route path="memory" element={<ResourceKindPage type="memory" />} />
+              <Route path="publish" element={<MyListingsPage />} />
+              <Route path="subscriptions" element={<MySubscriptionsPage />} />
+            </Route>
             <Route
               path="/bundles/new"
               element={

@@ -1,20 +1,20 @@
-import { useSearchParams } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Store, Boxes, Bot, Wrench, Puzzle, Plug, BookOpen, Brain, Upload, Heart } from 'lucide-react'
 
 import { PageHeader } from '@/components/common/Page'
 import { SectionSidebar, type SectionSidebarGroup } from '@/components/layout/SectionSidebar'
-import { MarketplaceBrowsePage } from '@/pages/MarketplaceBrowsePage'
-import { BundleListPage } from '@/pages/BundleListPage'
-import { AgentDefinitionPage } from '@/pages/AgentDefinitionPage'
-import { MyListingsPage } from '@/pages/MyListingsPage'
-import { MySubscriptionsPage } from '@/pages/MySubscriptionsPage'
-import { ResourceKindPage } from '@/pages/ResourceCenterPage'
-import { useAuthStore } from '@/lib/auth/store'
-import type { components } from '@/lib/api/schema'
 
-type ResourceType = components['schemas']['ResourceType']
-
-type Section = 'browse' | 'bundles' | 'agents' | 'tool' | 'skill' | 'mcp' | 'knowledge_base' | 'memory' | 'publish' | 'subscriptions'
+type Section =
+  | 'browse'
+  | 'bundles'
+  | 'agents'
+  | 'tool'
+  | 'skill'
+  | 'mcp'
+  | 'knowledge_base'
+  | 'memory'
+  | 'publish'
+  | 'subscriptions'
 
 const SECTION_GROUPS: SectionSidebarGroup[] = [
   { items: [{ value: 'browse', label: '应用广场', icon: Store }] },
@@ -87,40 +87,26 @@ const SECTION_COPY: Record<Section, { title: string; description: string }> = {
   },
 }
 
-const RESOURCE_SECTIONS = new Set<Section>(['tool', 'skill', 'mcp', 'knowledge_base', 'memory'])
-
 /**
- * 应用广场（发布市场）、Bundle/Agent 编排与资源登记（Tool/Skill/MCP/知识库/
- * 记忆库）合并成一个中心：顶部横向导航是一级菜单，这里的左侧栏是二级菜单，
- * 每一项都是独立页面而不是同一个页面里的 Tab——Bundle 和 Agent 配置项差别
- * 很大，MCP 有连通性探测、知识库有向量模型配置，揉在一起切换只会让人以为
- * 它们是同一件事的不同视图。
+ * 应用中心的外壳：顶部横向导航是一级菜单，这里的左侧栏是二级菜单，每一项都
+ * 是 /apps/<section> 下的独立路由，而不是同一个页面里靠 tab 切换——路由各管
+ * 各的，这个壳只负责侧栏 + 页头，具体内容交给各自的路由页面渲染。
  */
-export function AppsPage() {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated())
-  const [searchParams, setSearchParams] = useSearchParams()
-  const section = ((searchParams.get('tab') as Section) || 'browse') as Section
-
-  function setSection(next: Section) {
-    setSearchParams(next === 'browse' ? {} : { tab: next })
-  }
-
-  const copy = SECTION_COPY[section]
+export function AppsLayout() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const section = (location.pathname.split('/apps/')[1]?.split('/')[0] || 'browse') as Section
+  const copy = SECTION_COPY[section] ?? SECTION_COPY.browse
 
   return (
     <div className="flex flex-col gap-space-6">
       <PageHeader eyebrow="APPLICATIONS" title={copy.title} description={copy.description} />
 
       <div className="flex flex-col gap-space-6 sm:flex-row">
-        <SectionSidebar groups={SECTION_GROUPS} active={section} onChange={(v) => setSection(v as Section)} />
+        <SectionSidebar groups={SECTION_GROUPS} active={section} onChange={(v) => navigate(`/apps/${v}`)} />
 
         <div className="min-w-0 flex-1">
-          {section === 'browse' && <MarketplaceBrowsePage />}
-          {section === 'bundles' && <BundleListPage />}
-          {section === 'agents' && <AgentDefinitionPage />}
-          {RESOURCE_SECTIONS.has(section) && <ResourceKindPage type={section as ResourceType} />}
-          {section === 'publish' && isAuthenticated && <MyListingsPage />}
-          {section === 'subscriptions' && isAuthenticated && <MySubscriptionsPage />}
+          <Outlet />
         </div>
       </div>
     </div>
