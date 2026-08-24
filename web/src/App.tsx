@@ -25,9 +25,9 @@ function MarketplaceRedirect() {
   return <Navigate to={tab ? `/apps?tab=${tab}` : '/apps'} replace />
 }
 
-// 资源中心同样并入 /apps（二级菜单的 tab=resources），旧链接原样跳转。
+// 资源中心同样并入 /apps（二级菜单的独立 tab），旧链接原样跳转到 Tool。
 function ResourcesRedirect() {
-  return <Navigate to="/apps?tab=resources" replace />
+  return <Navigate to="/apps?tab=tool" replace />
 }
 
 const queryClient = new QueryClient({

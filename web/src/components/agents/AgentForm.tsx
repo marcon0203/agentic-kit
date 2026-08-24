@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Check } from 'lucide-react'
 
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -68,6 +69,28 @@ const EMPTY_FORM: FormState = {
   acceptsInputFrom: '',
   producesOutputTo: '',
   requiresReview: false,
+}
+
+const STEPS = [
+  { key: 'basic', title: '基本信息' },
+  { key: 'model', title: '模型配置' },
+  { key: 'persona', title: '角色设定' },
+  { key: 'capabilities', title: '能力白名单' },
+  { key: 'constraints', title: '执行约束' },
+  { key: 'handoff', title: '协作契约' },
+] as const
+type StepKey = (typeof STEPS)[number]['key']
+
+// Which validated field keys belong to each step — "下一步" only blocks on
+// errors in the step the user is actually leaving, not on every field in
+// the form (those still get caught at final submit).
+const STEP_FIELDS: Record<StepKey, string[]> = {
+  basic: ['agent', 'role', 'version'],
+  model: ['model.name'],
+  persona: ['persona'],
+  capabilities: [],
+  constraints: [],
+  handoff: [],
 }
 
 const BUILTIN_TOOLS: { value: string; label: string; hint: string }[] = [
@@ -157,10 +180,64 @@ function formStateToDefinition(f: FormState): AgentDefinition {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-space-4 border-t border-border pt-space-7 first:border-t-0 first:pt-0">
+    <section className="flex flex-col gap-space-4">
       <h2 className="text-display-md text-ink-900">{title}</h2>
       {children}
     </section>
+  )
+}
+
+/**
+ * The step rail. A wizard rather than one long scrolling form: each step
+ * is small enough to actually read, and "下一步" catches a mistake in
+ * 基本信息 before the user has typed three more sections past it.
+ */
+function StepRail({
+  current,
+  furthestValid,
+  onJump,
+}: {
+  current: number
+  furthestValid: number
+  onJump: (index: number) => void
+}) {
+  return (
+    <ol className="flex items-center gap-space-2">
+      {STEPS.map((step, i) => {
+        const state = i < current ? 'done' : i === current ? 'active' : 'upcoming'
+        const reachable = i <= furthestValid
+        return (
+          <li key={step.key} className="flex items-center gap-space-2">
+            <button
+              type="button"
+              disabled={!reachable}
+              onClick={() => reachable && onJump(i)}
+              className={cn(
+                'flex items-center gap-space-2 rounded-full py-1 pl-1 pr-space-3 text-body-sm transition-colors',
+                state === 'active' && 'bg-blueprint-tint font-medium text-blueprint',
+                state === 'done' && 'text-ink-700 hover:bg-surface-muted',
+                state === 'upcoming' && 'text-ink-500',
+                !reachable && 'cursor-not-allowed opacity-60',
+              )}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  'flex size-6 shrink-0 items-center justify-center rounded-full text-caption',
+                  state === 'active' && 'bg-blueprint text-white',
+                  state === 'done' && 'bg-moss text-white',
+                  state === 'upcoming' && 'bg-surface-muted text-ink-500',
+                )}
+              >
+                {state === 'done' ? <Check className="size-3.5" /> : i + 1}
+              </span>
+              {step.title}
+            </button>
+            {i < STEPS.length - 1 && <span aria-hidden className="h-px w-space-5 bg-border" />}
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
@@ -208,11 +285,15 @@ export function AgentForm({
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [touched, setTouched] = useState<Record<string, boolean>>({})
+  const [step, setStep] = useState(0)
+  const [furthestValid, setFurthestValid] = useState(0)
   const formRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (initial) {
       setForm(initial)
+      setStep(0)
+      setFurthestValid(0)
       // "从现有 Agent 复制" — focus the ref field so the user notices the
       // -copy suffix and is prompted to change it.
       requestAnimationFrame(() => document.getElementById('agent-ref')?.focus())
@@ -239,6 +320,41 @@ export function AgentForm({
     })
   }
 
+  function stepIndexForField(key: string): number {
+    const idx = STEPS.findIndex((s) => STEP_FIELDS[s.key].includes(key))
+    return idx === -1 ? 0 : idx
+  }
+
+  function focusField(key: string) {
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`agent-${key.split('.')[0].split('[')[0]}`) ?? formRef.current
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }
+
+  // "下一步" only blocks on errors that belong to the step being left —
+  // a mistake three steps ahead shouldn't stop you from moving past step 1.
+  function goNext() {
+    const stepKeys = STEP_FIELDS[STEPS[step].key]
+    const fieldErrors = runValidation(form).filter((e) => stepKeys.includes(e.field))
+    if (fieldErrors.length > 0) {
+      setErrors((prev) => {
+        const next = { ...prev }
+        for (const e of fieldErrors) next[e.field] = e.reason
+        return next
+      })
+      setTouched((t) => ({ ...t, ...Object.fromEntries(stepKeys.map((k) => [k, true])) }))
+      return
+    }
+    const target = Math.min(step + 1, STEPS.length - 1)
+    setStep(target)
+    setFurthestValid((f) => Math.max(f, target))
+  }
+
+  function goPrev() {
+    setStep((s) => Math.max(0, s - 1))
+  }
+
   async function submit() {
     // Submit-time revalidation — never trust the earlier per-field passes.
     const fieldErrors = runValidation(form)
@@ -247,8 +363,10 @@ export function AgentForm({
       for (const e of fieldErrors) map[e.field] = e.reason
       setErrors(map)
       const firstKey = fieldErrors[0].field
-      const el = document.getElementById(`agent-${firstKey.split('.')[0].split('[')[0]}`) ?? formRef.current
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const target = stepIndexForField(firstKey)
+      setStep(target)
+      setFurthestValid((f) => Math.max(f, target))
+      focusField(firstKey)
       return
     }
 
@@ -285,6 +403,11 @@ export function AgentForm({
 
   return (
     <div ref={formRef} className="mx-auto flex w-full max-w-[720px] flex-col gap-space-8">
+      <div className="overflow-x-auto pb-space-1">
+        <StepRail current={step} furthestValid={furthestValid} onJump={setStep} />
+      </div>
+
+      {step === 0 && (
       <Section title="基本信息">
         <Field label="agent（唯一标识）" htmlFor="agent-agent" error={errors.agent} valid={touched.agent}>
           <Input
@@ -317,7 +440,9 @@ export function AgentForm({
           />
         </Field>
       </Section>
+      )}
 
+      {step === 1 && (
       <Section title="模型配置">
         <Field label="provider" htmlFor="agent-model">
           <Select value={form.provider} onValueChange={(v) => set('provider', v as ProviderName)}>
@@ -363,7 +488,9 @@ export function AgentForm({
           />
         </Field>
       </Section>
+      )}
 
+      {step === 2 && (
       <Section title="角色设定">
         <Field
           label="persona"
@@ -382,7 +509,9 @@ export function AgentForm({
           />
         </Field>
       </Section>
+      )}
 
+      {step === 3 && (
       <Section title="能力白名单">
         <Field label="tools" htmlFor="agent-tools">
           <ResourceMultiSelect types={['tool', 'mcp', 'knowledge_base']} selected={form.tools} onChange={(v) => set('tools', v)} />
@@ -429,7 +558,9 @@ export function AgentForm({
           <Input id="agent-hook-on-error" value={form.hookOnError} onChange={(e) => set('hookOnError', e.target.value)} className="h-12 rounded-sm" />
         </Field>
       </Section>
+      )}
 
+      {step === 4 && (
       <Section title="执行约束">
         <Field label="max_tokens_per_turn" htmlFor="agent-max-tokens">
           <Input id="agent-max-tokens" value={form.maxTokensPerTurn} onChange={(e) => set('maxTokensPerTurn', e.target.value)} className="h-12 rounded-sm" placeholder="8000" />
@@ -450,7 +581,9 @@ export function AgentForm({
           <Input id="agent-output-schema" value={form.outputSchema} onChange={(e) => set('outputSchema', e.target.value)} className="h-12 rounded-sm" placeholder="architecture_doc.schema.json" />
         </Field>
       </Section>
+      )}
 
+      {step === 5 && (
       <Section title="协作契约">
         <Field label="accepts_input_from（逗号分隔）" htmlFor="agent-accepts">
           <Input id="agent-accepts" value={form.acceptsInputFrom} onChange={(e) => set('acceptsInputFrom', e.target.value)} className="h-12 rounded-sm" placeholder="product_manager" />
@@ -465,6 +598,7 @@ export function AgentForm({
           </label>
         </div>
       </Section>
+      )}
 
       {submitError && (
         <p role="alert" className="text-body-sm text-rust">
@@ -472,9 +606,22 @@ export function AgentForm({
         </p>
       )}
 
-      <Button size="lg" disabled={pending} onClick={submit} className="self-start">
-        {pending ? '保存中…' : '保存'}
-      </Button>
+      <div className="flex items-center gap-space-3">
+        {step > 0 && (
+          <Button variant="outline" size="lg" onClick={goPrev} disabled={pending}>
+            上一步
+          </Button>
+        )}
+        {step < STEPS.length - 1 ? (
+          <Button size="lg" onClick={goNext}>
+            下一步
+          </Button>
+        ) : (
+          <Button size="lg" disabled={pending} onClick={submit}>
+            {pending ? '保存中…' : '保存'}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

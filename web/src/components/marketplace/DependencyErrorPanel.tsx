@@ -29,7 +29,7 @@ export function DependencyErrorPanel({ errors, onRevalidate }: { errors: FieldEr
               <p className="text-body-sm text-ink-700">{e.reason}</p>
             </div>
             <Button asChild variant="outline" size="sm" className="shrink-0">
-              <Link to="/apps?tab=manage" target="_blank" rel="noopener noreferrer">
+              <Link to="/apps?tab=bundles" target="_blank" rel="noopener noreferrer">
                 去发布
               </Link>
             </Button>

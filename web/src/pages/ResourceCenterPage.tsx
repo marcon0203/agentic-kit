@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Ref, TabRail, TabRailItem } from '@/components/common/Page'
+import { Ref } from '@/components/common/Page'
 import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { RegisterResourceDialog } from '@/components/resources/RegisterResourceDialog'
@@ -16,8 +16,10 @@ type Resource = components['schemas']['Resource']
 
 /* Each kind gets its own empty-state copy. "还没有资源" is the same sentence
    four times over and helps nobody; what a person needs to know is what this
-   particular kind is for and what registering one would let them do. */
-const KINDS: {
+   particular kind is for and what registering one would let them do. Also
+   doubles as the label lookup AppsPage's sidebar uses, so a kind's name is
+   spelled once. */
+export const RESOURCE_KINDS: {
   value: ResourceType
   label: string
   blank: { title: string; description: string; cta: string }
@@ -72,8 +74,13 @@ const KINDS: {
   },
 ]
 
-export function ResourceCenterPage() {
-  const [type, setType] = useState<ResourceType>('tool')
+/**
+ * 一种资源类型的注册与列表页——Tool/Skill/MCP Server/知识库/记忆库各自是
+ * 应用广场二级菜单里独立的一项，而不是同一个页面里的 Tab：每种资源的配置
+ * 项差别不小（MCP 有连通性探测、知识库有向量模型配置），揉在一个 Tab 页
+ * 里切换只会让人以为它们是同一件事的四种视图。
+ */
+export function ResourceKindPage({ type }: { type: ResourceType }) {
   const [search, setSearch] = useState('')
   const [registerOpen, setRegisterOpen] = useState(false)
   const [toggleError, setToggleError] = useState<string | null>(null)
@@ -103,7 +110,7 @@ export function ResourceCenterPage() {
     }
   }
 
-  const kind = KINDS.find((k) => k.value === type)!
+  const kind = RESOURCE_KINDS.find((k) => k.value === type)!
   const items = query.data?.items ?? []
   const filtered = search
     ? items.filter((r) => r.ref.includes(search) || (r.display_name ?? '').includes(search))
@@ -116,14 +123,6 @@ export function ResourceCenterPage() {
           {kind.blank.cta}
         </Button>
       </div>
-
-      <TabRail>
-        {KINDS.map((k) => (
-          <TabRailItem key={k.value} active={k.value === type} onClick={() => setType(k.value)}>
-            {k.label}
-          </TabRailItem>
-        ))}
-      </TabRail>
 
       {items.length > 0 && (
         <Input
