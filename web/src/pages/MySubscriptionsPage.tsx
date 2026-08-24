@@ -50,7 +50,7 @@ export function MySubscriptionsPage() {
           title="还没有订阅任何资源"
           description="去广场看看有没有能直接拿来用的 Bundle 或 Agent。"
           action={
-            <Button size="sm" asChild>
+            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" asChild>
               <Link to="/marketplace">去广场看看</Link>
             </Button>
           }

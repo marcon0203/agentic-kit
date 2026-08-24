@@ -1,7 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight } from 'lucide-react'
+import {
+  ArrowRight,
+  Bot,
+  ChevronDown,
+  Cpu,
+  Database,
+  GitBranch,
+  LayoutGrid,
+  Puzzle,
+  ShieldCheck,
+  Store,
+  Zap,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Figure, FigureCell, FigureRow, Ref, Section } from '@/components/common/Page'
@@ -13,15 +25,10 @@ import type { components } from '@/lib/api/schema'
 type UsageSummary = components['schemas']['UsageSummary']
 type RunSummary = components['schemas']['RunSummary']
 
-/* ── The hero ─────────────────────────────────────────────────────────
-   The most characteristic thing about this platform is not that it has
-   dashboards — it is that a run walks across a graph and then stops, on
-   purpose, to wait for a person. So the hero is that, running: stations
-   light up in order, the track draws itself between them, and at the gate
-   everything halts and starts breathing until you answer.
-
-   This is the one orchestrated moment in the app. Nothing else animates on
-   its own, which is what lets this read as meaning rather than decoration. */
+/* ── Hero pipeline stations ───────────────────────────────────────────
+   These are the same five stations the current hero rail used, redrawn
+   as a pipeline illustration so the visitor sees both the path and the
+   deliberate stop at the gate. */
 
 const HERO_STATIONS = [
   { id: 'pm', label: 'product_manager', note: '整理需求' },
@@ -33,137 +40,506 @@ const HERO_STATIONS = [
 
 const GATE_INDEX = 2
 
-function HeroRail() {
-  // `reached` is how far the run has advanced. It stops at the gate and
-  // stays there — the whole point is that the platform will not walk past a
-  // decision on its own.
-  const [reached, setReached] = useState(0)
+/* ── Proof stats ────────────────────────────────────────────────────── */
 
-  useEffect(() => {
-    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    if (reduced) {
-      setReached(GATE_INDEX)
-      return
-    }
-    const timers = HERO_STATIONS.slice(0, GATE_INDEX + 1).map((_, i) =>
-      window.setTimeout(() => setReached(i), 260 + i * 620),
-    )
-    return () => timers.forEach(window.clearTimeout)
-  }, [])
-
-  return (
-    <div className="bg-blueprint-grid relative overflow-hidden rounded-lg border border-border bg-surface px-space-6 py-space-9 sm:px-space-9">
-      {/* Stations size to their label; the track between them takes the
-          slack, so the spacing stays even however long a node name is. */}
-      <ol className="flex items-start" aria-label="一次 Bundle 运行的推进过程">
-        {HERO_STATIONS.map((station, i) => {
-          const arrived = i <= reached
-          const halted = i === GATE_INDEX && reached >= GATE_INDEX
-
-          return (
-            <li key={station.id} className="contents">
-              {/* The whole track is always drawn — you need to see where the
-                  run is headed, not just where it has been. Only the
-                  travelled part is inked in, and it draws itself on arrival. */}
-              {i > 0 ? (
-                <span
-                  aria-hidden
-                  className="mt-[7px] h-px min-w-space-4 flex-1 bg-border-strong"
-                >
-                  <span
-                    className={cn(
-                      'block h-px origin-left bg-blueprint transition-transform duration-500 ease-out',
-                      arrived ? 'scale-x-100' : 'scale-x-0',
-                    )}
-                  />
-                </span>
-              ) : null}
-
-              <span className="flex shrink-0 flex-col items-center gap-space-2 text-center">
-                <span
-                  aria-hidden
-                  className={cn(
-                    'size-3.5 rounded-full border-2 transition-colors duration-300',
-                    halted
-                      ? 'animate-gate-await border-signal bg-signal'
-                      : arrived
-                        ? 'border-blueprint bg-blueprint'
-                        : 'border-border-strong bg-surface',
-                  )}
-                />
-                <span className="flex flex-col items-center gap-0.5">
-                  <span
-                    className={cn(
-                      'text-ref transition-colors duration-300',
-                      halted ? 'text-signal' : arrived ? 'text-ink-900' : 'text-ink-500',
-                    )}
-                  >
-                    {station.label}
-                  </span>
-                  <span
-                    className={cn(
-                      'text-caption transition-colors duration-300',
-                      halted ? 'text-signal' : 'text-ink-500',
-                    )}
-                  >
-                    {station.note}
-                  </span>
-                </span>
-              </span>
-            </li>
-          )
-        })}
-      </ol>
-
-      <p className="text-caption mt-space-8 border-t border-border pt-space-4 text-ink-500">
-        运行停在 <span className="text-ref text-signal">human gate</span>
-        ，直到有人批准或驳回才会继续。橙色在这个平台上只有一个含义：需要你介入。
-      </p>
-    </div>
-  )
-}
+const PROOF = [
+  { value: '4', label: '能力中心' },
+  { value: '4', label: '步跑通' },
+  { value: '1', label: 'Human Gate 审批' },
+]
 
 /* ── The four centres ────────────────────────────────────────────────
-   Not four identical icon-in-a-square cards. Each centre gets one line
-   saying what you keep there, because that is what a person is actually
-   choosing between. */
+   Each centre gets an icon, a colour, and one line saying what you keep
+   there, because that is what a person is actually choosing between. */
+
 const CENTRES = [
   {
     to: '/apps',
     name: '应用中心',
     holds: 'Agent 定义与 Bundle 编排',
     line: '用 DSL 描述角色与能力，拖拽连线组成协作图，从这里发起运行。',
+    icon: LayoutGrid,
+    tone: 'blueprint' as const,
   },
   {
     to: '/resources',
     name: '资源中心',
     holds: 'Tool · Skill · MCP · 知识库',
     line: 'Agent 能引用的一切都先在这里登记；凭证加密落库，任何响应里都不会出现。',
+    icon: Puzzle,
+    tone: 'violet' as const,
   },
   {
     to: '/models',
     name: '模型中心',
     holds: 'Provider 凭证',
     line: '接入 Anthropic / OpenAI / Google。凭证先验证再保存，存不进去的 key 不会等到运行时才报错。',
+    icon: Cpu,
+    tone: 'moss' as const,
   },
   {
     to: '/marketplace',
     name: '应用广场',
     holds: '别人发布的能力',
     line: '订阅即用，版本锁定在订阅那一刻。作者的提示词与编排图不会随之泄露。',
+    icon: Store,
+    tone: 'signal' as const,
   },
 ]
 
+/* ── The four steps ─────────────────────────────────────────────────── */
+
 const STEPS = [
-  { label: '接入资源', line: '注册 Tool / Skill / MCP / 知识库，接入模型 Provider。' },
-  { label: '定义 Agent', line: '写清角色、人设、能力白名单与执行约束，按版本管理。' },
-  { label: '编排 Bundle', line: '拖拽连线组图，支持条件分支、并行与 human gate。' },
-  { label: '运行与审批', line: 'Chat 式时间线实时回放，关键节点停下等人。' },
+  {
+    label: '接入资源',
+    line: '注册 Tool / Skill / MCP / 知识库，接入模型 Provider。',
+    icon: Database,
+  },
+  {
+    label: '定义 Agent',
+    line: '写清角色、人设、能力白名单与执行约束，按版本管理。',
+    icon: Bot,
+  },
+  {
+    label: '编排 Bundle',
+    line: '拖拽连线组图，支持条件分支、并行与 human gate。',
+    icon: GitBranch,
+  },
+  {
+    label: '运行与审批',
+    line: 'Chat 式时间线实时回放，关键节点停下等人。',
+    icon: ShieldCheck,
+  },
 ]
+
+/* ── FAQ ────────────────────────────────────────────────────────────── */
+
+const FAQS = [
+  {
+    q: 'Agentic Kit 是什么？',
+    a: '一个 Agent 编排与运行平台。你可以把多个 Agent 按协作图组织起来，规定谁先跑、谁并行、哪一步必须有人点头，然后让运行按图推进、并在关键节点停下来等人审批。',
+  },
+  {
+    q: 'Human Gate 是什么？',
+    a: 'Human Gate 是运行流中的一个强制暂停点。Agent 不会自己越过需要人类判断的节点；平台会停下来，等有人批准或驳回后才继续。',
+  },
+  {
+    q: '四个中心分别做什么？',
+    a: '应用中心负责 Agent 与 Bundle；资源中心管理 Tool、Skill、MCP 与知识库；模型中心管理 LLM Provider 与凭证；应用广场让你订阅别人发布的能力。',
+  },
+  {
+    q: '运行出错了怎么定位？',
+    a: '每一次运行都有时间线回放，可以按节点查看输入、输出与状态。失败节点会标红，并保留完整上下文供你重试或打回。',
+  },
+  {
+    q: '凭证和数据安全吗？',
+    a: '模型凭证 AES-256-GCM 加密落库，任何接口都不回显；发布到广场的资源默认黑盒，订阅者拿到的是能力本身，不是你的提示词和编排图。',
+  },
+  {
+    q: '第一次使用应该从哪里开始？',
+    a: '建议按「接入资源 → 定义 Agent → 编排 Bundle → 运行与审批」四步走。即使只有单个 Agent，也可以先跑起来熟悉 Human Gate 的审批流程。',
+  },
+]
+
+/* ── Hero illustration ───────────────────────────────────────────────
+   A self-contained SVG that shows the pipeline and the gate. The moving
+   dot and the pulsing gate respect prefers-reduced-motion. */
+
+function HeroIllustration() {
+  const [reduced, setReduced] = useState(false)
+
+  useEffect(() => {
+    setReduced(window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+  }, [])
+
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-border bg-surface p-space-5 shadow-status-sm">
+      <svg viewBox="0 0 480 320" className="w-full" aria-hidden="true">
+        <defs>
+          <linearGradient id="bp-violet" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#2563eb" />
+            <stop offset="100%" stopColor="#7c3aed" />
+          </linearGradient>
+        </defs>
+
+        {/* Card ground */}
+        <rect x="0" y="0" width="480" height="320" rx="14" fill="#f8fafc" />
+
+        {/* Header */}
+        <text x="24" y="38" fontSize="12" fontWeight="700" fill="#0f172a">
+          DELIVERY PIPELINE
+        </text>
+
+        {/* Pipeline nodes */}
+        <g transform="translate(48, 80)">
+          {HERO_STATIONS.map((station, i) => {
+            const cx = i * 96
+            const isGate = i === GATE_INDEX
+            const reached = i <= GATE_INDEX
+            return (
+              <g key={station.id}>
+                {i > 0 && (
+                  <line
+                    x1={(i - 1) * 96}
+                    y1="0"
+                    x2={cx}
+                    y2="0"
+                    stroke={reached ? 'url(#bp-violet)' : '#e2e8f0'}
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                  />
+                )}
+                <circle
+                  cx={cx}
+                  cy="0"
+                  r={isGate ? 10 : 8}
+                  fill={reached ? (isGate ? '#f59e0b' : '#2563eb') : '#e2e8f0'}
+                  stroke="#fff"
+                  strokeWidth="3"
+                >
+                  {!reduced && isGate && (
+                    <animate
+                      attributeName="r"
+                      values="10;13;10"
+                      dur="2.4s"
+                      repeatCount="indefinite"
+                    />
+                  )}
+                </circle>
+                <text
+                  x={cx}
+                  y="32"
+                  textAnchor="middle"
+                  fontSize="11"
+                  fontWeight="600"
+                  fill={reached ? '#0f172a' : '#94a3b8'}
+                >
+                  {station.note}
+                </text>
+              </g>
+            )
+          })}
+
+          {/* Travelling dot */}
+          {!reduced && (
+            <circle r="5" fill="#2563eb">
+              <animateMotion
+                dur="3s"
+                repeatCount="indefinite"
+                path="M 0 0 L 96 0 L 192 0"
+              />
+            </circle>
+          )}
+        </g>
+
+        {/* Terminal panel */}
+        <rect x="24" y="160" width="432" height="136" rx="14" fill="#0b1220" />
+        <g fontFamily="var(--font-mono)" fontSize="11">
+          <text x="44" y="196" fill="#6ee7b7">
+            $ agentic-kit run --bundle demo
+          </text>
+          <text x="44" y="222" fill="#93c5fd">
+            ✓ 需求解析完成
+          </text>
+          <text x="44" y="248" fill="#93c5fd">
+            ✓ 技术方案已生成
+          </text>
+          <text x="44" y="274" fill="#f59e0b">
+            ▶ 停在 human gate，等待审批…
+            {!reduced && (
+              <animate attributeName="opacity" values="1;.3;1" dur="1.4s" repeatCount="indefinite" />
+            )}
+          </text>
+        </g>
+      </svg>
+    </div>
+  )
+}
+
+/* ── Hero section ───────────────────────────────────────────────────── */
+
+function HeroSection() {
+  const user = useAuthStore((s) => s.user)
+  const openModal = useAuthStore((s) => s.openModal)
+
+  return (
+    <section className="relative overflow-hidden rounded-2xl bg-surface px-space-6 py-space-10 md:px-space-10 md:py-space-12">
+      {/* Soft radial glow in the corner, like the reference hero. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-24 -top-24 size-[500px] rounded-full bg-blueprint/5 blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-32 -left-32 size-[420px] rounded-full bg-violet/5 blur-3xl"
+      />
+
+      <div className="relative grid gap-space-10 md:grid-cols-2 md:items-center">
+        <div className="flex flex-col gap-space-5">
+          <span className="inline-flex w-max items-center gap-space-2 rounded-full bg-blueprint-tint px-space-3 py-1.5 text-eyebrow text-blueprint">
+            <Zap className="size-3.5" aria-hidden />
+            AGENTIC KIT · ORCHESTRATE · RUN · APPROVE
+          </span>
+
+          <h1 className="text-display-xl text-ink-900">
+            {user ? (
+              <>
+                欢迎回来，
+                <br />
+                <span className="text-gradient">{user.display_name}</span>
+              </>
+            ) : (
+              <>
+                让多个 Agent
+                <br />
+                <span className="text-gradient">按图协作</span>
+              </>
+            )}
+          </h1>
+
+          <p className="text-body-lg max-w-[54ch] text-ink-700">
+            把一次协作写成可复现的编排：谁先做、谁并行、哪一步必须有人点头。运行时逐步回放，出问题能定位到具体节点。
+          </p>
+
+          <div className="flex flex-wrap items-center gap-space-3">
+            {user ? (
+              <Button asChild size="lg" className="bg-gradient-cta text-white hover:opacity-90">
+                <Link to="/apps">
+                  进入应用中心
+                  <ArrowRight className="size-4" aria-hidden />
+                </Link>
+              </Button>
+            ) : (
+              <Button size="lg" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => openModal('manual')}>
+                创建账号
+                <ArrowRight className="size-4" aria-hidden />
+              </Button>
+            )}
+            <Button asChild variant="outline" size="lg">
+              <Link to="/marketplace">浏览应用广场</Link>
+            </Button>
+          </div>
+
+          <div className="mt-space-2 flex flex-wrap gap-space-7">
+            {PROOF.map((item) => (
+              <div key={item.label} className="flex flex-col gap-space-1">
+                <span className="text-figure text-ink-900">{item.value}</span>
+                <span className="text-caption text-ink-500">{item.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <HeroIllustration />
+      </div>
+    </section>
+  )
+}
+
+/* ── Monthly usage ──────────────────────────────────────────────────── */
+
+function UsageSection({ data }: { data: UsageSummary }) {
+  return (
+    <Section
+      title="本月用量"
+      aside={
+        <Link
+          to="/ops"
+          className="text-body-sm font-medium text-blueprint hover:underline"
+        >
+          查看运营中心
+        </Link>
+      }
+    >
+      <FigureRow className="rounded-xl shadow-status-sm">
+        <FigureCell>
+          <Figure value={(data.total_tokens ?? 0).toLocaleString()} label="Token 消耗" />
+        </FigureCell>
+        <FigureCell>
+          <Figure value={`$${(data.total_cost_usd ?? 0).toFixed(2)}`} label="成本" />
+        </FigureCell>
+        <FigureCell>
+          <Figure value={(data.run_count ?? 0).toString()} label="运行次数" />
+        </FigureCell>
+      </FigureRow>
+    </Section>
+  )
+}
+
+/* ── Recent runs ────────────────────────────────────────────────────── */
+
+function RecentRunsSection({ runs }: { runs: RunSummary[] }) {
+  return (
+    <Section
+      title="最近运行"
+      aside={
+        <Link to="/ops" className="text-body-sm font-medium text-blueprint hover:underline">
+          查看全部
+        </Link>
+      }
+    >
+      <ul className="overflow-hidden rounded-xl border border-border bg-surface shadow-status-sm">
+        {runs.map((run) => (
+          <li key={run.run_id} className="border-b border-border last:border-0">
+            <Link
+              to={`/runs/${run.run_id}`}
+              className="flex items-center gap-space-4 px-space-5 py-space-3 transition-colors hover:bg-surface-muted"
+            >
+              <RunStatusDot status={run.status} />
+              <span className="text-body-md min-w-0 flex-1 truncate text-ink-900">{run.bundle_ref}</span>
+              <Ref tone="muted">{run.run_id}</Ref>
+              <RunStatusLabel status={run.status} />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  )
+}
+
+/* ── Centres grid ───────────────────────────────────────────────────── */
+
+const TONE_STYLES = {
+  blueprint: 'bg-blueprint-tint text-blueprint',
+  violet: 'bg-violet-tint text-violet',
+  moss: 'bg-moss-tint text-moss',
+  signal: 'bg-signal-tint text-signal',
+}
+
+function CentresSection() {
+  return (
+    <Section title="平台由四个中心组成">
+      <ul className="grid grid-cols-1 gap-space-4 md:grid-cols-2 xl:grid-cols-4">
+        {CENTRES.map((centre) => {
+          const Icon = centre.icon
+          return (
+            <li key={centre.to}>
+              <Link
+                to={centre.to}
+                className="group flex h-full flex-col gap-space-4 rounded-xl border border-border bg-surface p-space-5 transition-all hover:border-blueprint-edge hover:shadow-status-sm"
+              >
+                <span className="flex items-center justify-between">
+                  <span
+                    className={cn(
+                      'flex size-11 items-center justify-center rounded-xl',
+                      TONE_STYLES[centre.tone],
+                    )}
+                  >
+                    <Icon className="size-5" aria-hidden />
+                  </span>
+                  <ArrowRight
+                    aria-hidden
+                    className="size-4 shrink-0 text-ink-500 transition-transform group-hover:translate-x-1 group-hover:text-blueprint"
+                  />
+                </span>
+                <span className="flex flex-col gap-space-1">
+                  <span className="text-display-sm text-ink-900">{centre.name}</span>
+                  <span className="text-ref text-ink-500">{centre.holds}</span>
+                </span>
+                <span className="text-body-sm mt-auto text-ink-700">{centre.line}</span>
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </Section>
+  )
+}
+
+/* ── Steps section ──────────────────────────────────────────────────── */
+
+function StepsSection() {
+  return (
+    <Section title="第一次跑通，走这四步">
+      <ol className="relative grid grid-cols-1 gap-space-6 md:grid-cols-2 xl:grid-cols-4">
+        {/* Horizontal connecting rail behind the cards. */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-[22px] hidden h-px bg-border xl:block"
+        />
+
+        {STEPS.map((step, i) => {
+          const Icon = step.icon
+          return (
+            <li key={step.label} className="relative flex flex-col gap-space-3">
+              <span aria-hidden className="flex items-center gap-space-2">
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-blueprint-tint text-blueprint">
+                  <Icon className="size-5" aria-hidden />
+                </span>
+                <span className="h-px flex-1 bg-border xl:hidden" />
+              </span>
+              <span className="flex items-baseline gap-space-2">
+                <span className="text-ref text-ink-500">0{i + 1}</span>
+                <span className="text-display-sm text-ink-900">{step.label}</span>
+              </span>
+              <span className="text-body-sm text-ink-700">{step.line}</span>
+            </li>
+          )
+        })}
+      </ol>
+    </Section>
+  )
+}
+
+/* ── FAQ section ────────────────────────────────────────────────────── */
+
+function FAQSection() {
+  return (
+    <Section title="常见问题">
+      <div className="flex flex-col gap-space-3">
+        {FAQS.map((faq) => (
+          <details
+            key={faq.q}
+            className="group rounded-xl border border-border bg-surface transition-colors open:border-blueprint-edge open:bg-blueprint-tint/30"
+          >
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-space-4 px-space-5 py-space-4 text-body-md font-medium text-ink-900">
+              {faq.q}
+              <ChevronDown
+                aria-hidden
+                className="size-4 shrink-0 text-ink-500 transition-transform group-open:rotate-180"
+              />
+            </summary>
+            <div className="px-space-5 pb-space-4 text-body-sm text-ink-700">{faq.a}</div>
+          </details>
+        ))}
+      </div>
+    </Section>
+  )
+}
+
+/* ── Bottom CTA banner ──────────────────────────────────────────────── */
+
+function CTABanner() {
+  const openModal = useAuthStore((s) => s.openModal)
+
+  return (
+    <section className="-mx-space-6 bg-surface-page px-space-6 py-space-10">
+      <div className="mx-auto max-w-container-app">
+        <div className="flex flex-col items-start justify-between gap-space-6 rounded-2xl bg-gradient-cta px-space-8 py-space-9 text-white md:flex-row md:items-center">
+          <div className="flex flex-col gap-space-2">
+            <h2 className="text-display-lg text-white">让 Agent 按图协作，从这一步开始</h2>
+            <p className="text-body-md text-white/85 max-w-[52ch]">
+              创建账号，接入第一个模型 Provider，然后定义你的第一个 Agent。几分钟内就能发起一次带 Human Gate 的运行。
+            </p>
+          </div>
+          <Button
+            size="lg"
+            className="shrink-0 bg-white text-blueprint hover:bg-white/90"
+            onClick={() => openModal('manual')}
+          >
+            创建账号
+            <ArrowRight className="size-4" aria-hidden />
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* ── Page ───────────────────────────────────────────────────────────── */
 
 export function HomePage() {
   const user = useAuthStore((s) => s.user)
-  const openModal = useAuthStore((s) => s.openModal)
 
   const usageQuery = useQuery({
     queryKey: ['usage-me', 'month'],
@@ -184,181 +560,23 @@ export function HomePage() {
   })
 
   const recentRuns = runsQuery.data?.items ?? []
+  const usage = usageQuery.data
 
   return (
-    <div className="flex flex-col gap-space-11 pb-space-9">
-      {/* ── Hero ───────────────────────────────────────────────── */}
-      <section className="flex flex-col gap-space-8">
-        <div className="flex max-w-[48ch] flex-col gap-space-4">
-          <span className="text-eyebrow text-ink-500">ORCHESTRATE · RUN · APPROVE</span>
-          <h1 className="text-display-xl text-ink-900">
-            {user ? (
-              <>
-                欢迎回来，
-                <br />
-                {user.display_name}
-              </>
-            ) : (
-              <>
-                让多个 Agent
-                <br />
-                按图协作
-              </>
-            )}
-          </h1>
-          <p className="text-body-lg text-ink-700">
-            把一次协作写成可复现的编排：谁先做、谁并行、哪一步必须有人点头。运行时逐步回放，出问题能定位到具体节点。
-          </p>
+    <div className="flex flex-col gap-space-10 pb-space-6">
+      <HeroSection />
 
-          <div className="mt-space-3 flex flex-wrap items-center gap-space-3">
-            {user ? (
-              <Button asChild size="lg">
-                <Link to="/apps">
-                  进入应用中心
-                  <ArrowRight className="size-4" aria-hidden />
-                </Link>
-              </Button>
-            ) : (
-              <Button size="lg" onClick={() => openModal('manual')}>
-                创建账号
-                <ArrowRight className="size-4" aria-hidden />
-              </Button>
-            )}
-            <Button asChild variant="outline" size="lg">
-              <Link to="/marketplace">浏览应用广场</Link>
-            </Button>
-          </div>
-        </div>
+      {user && (usage?.run_count ?? 0) > 0 && <UsageSection data={usage!} />}
 
-        <HeroRail />
-      </section>
+      {user && recentRuns.length > 0 && <RecentRunsSection runs={recentRuns} />}
 
-      {/* ── 本月用量 ─────────────────────────────────────────────
-          Only once something has actually run. Telling a new account it has
-          spent $0.00 across 0 runs is the empty dashboard this redesign set
-          out to remove — the four centres below are what they need instead. */}
-      {user && (usageQuery.data?.run_count ?? 0) > 0 && (
-        <Section
-          title="本月用量"
-          aside={
-            <Link
-              to="/ops"
-              className="text-body-sm font-medium text-blueprint hover:underline"
-            >
-              查看运营中心
-            </Link>
-          }
-        >
-          <FigureRow>
-            <FigureCell>
-              <Figure
-                value={(usageQuery.data?.total_tokens ?? 0).toLocaleString()}
-                label="Token 消耗"
-              />
-            </FigureCell>
-            <FigureCell>
-              <Figure
-                value={`$${(usageQuery.data?.total_cost_usd ?? 0).toFixed(2)}`}
-                label="成本"
-              />
-            </FigureCell>
-            <FigureCell>
-              <Figure value={(usageQuery.data?.run_count ?? 0).toString()} label="运行次数" />
-            </FigureCell>
-          </FigureRow>
-        </Section>
-      )}
+      <CentresSection />
 
-      {/* ── 最近运行 ───────────────────────────────────────────── */}
-      {user && recentRuns.length > 0 && (
-        <Section
-          title="最近运行"
-          aside={
-            <Link to="/ops" className="text-body-sm font-medium text-blueprint hover:underline">
-              查看全部
-            </Link>
-          }
-        >
-          <ul className="overflow-hidden rounded-lg border border-border bg-surface">
-            {recentRuns.map((run) => (
-              <li key={run.run_id} className="border-b border-border last:border-0">
-                <Link
-                  to={`/runs/${run.run_id}`}
-                  className="flex items-center gap-space-4 px-space-5 py-space-3 transition-colors hover:bg-surface-muted"
-                >
-                  <RunStatusDot status={run.status} />
-                  <span className="text-body-md min-w-0 flex-1 truncate text-ink-900">
-                    {run.bundle_ref}
-                  </span>
-                  <Ref tone="muted">{run.run_id}</Ref>
-                  <RunStatusLabel status={run.status} />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
+      <StepsSection />
 
-      {/* ── 四个中心 ───────────────────────────────────────────── */}
-      <Section title="平台由四个中心组成">
-        <ul className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border md:grid-cols-2">
-          {CENTRES.map((centre) => (
-            <li key={centre.to} className="bg-surface">
-              <Link
-                to={centre.to}
-                className="group flex h-full flex-col gap-space-2 p-space-6 transition-colors hover:bg-surface-muted"
-              >
-                <span className="flex items-center justify-between gap-space-3">
-                  <span className="text-display-md text-ink-900">{centre.name}</span>
-                  <ArrowRight
-                    aria-hidden
-                    className="size-4 shrink-0 text-ink-500 transition-transform group-hover:translate-x-1 group-hover:text-blueprint"
-                  />
-                </span>
-                <span className="text-ref text-ink-500">{centre.holds}</span>
-                <span className="text-body-sm mt-space-1 text-ink-700">{centre.line}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </Section>
+      <FAQSection />
 
-      {/* ── 四步 ───────────────────────────────────────────────────
-          These are numbered because they genuinely are a sequence — you
-          cannot orchestrate a Bundle before defining an Agent. Drawn on the
-          same rail as the hero so the ordering is shown, not just asserted
-          by the digits. */}
-      <Section title="第一次跑通，走这四步">
-        <ol className="grid grid-cols-1 gap-space-6 sm:grid-cols-2 xl:grid-cols-4">
-          {STEPS.map((step, i) => (
-            <li key={step.label} className="flex flex-col gap-space-3">
-              <span aria-hidden className="flex items-center gap-space-2">
-                <span className="size-2 shrink-0 rounded-full bg-blueprint" />
-                <span className="h-px flex-1 bg-border" />
-              </span>
-              <span className="flex items-baseline gap-space-2">
-                <span className="text-ref text-ink-500">0{i + 1}</span>
-                <span className="text-display-sm text-ink-900">{step.label}</span>
-              </span>
-              <span className="text-body-sm text-ink-700">{step.line}</span>
-            </li>
-          ))}
-        </ol>
-      </Section>
-
-      {/* ── 未登录收尾 ─────────────────────────────────────────── */}
-      {!user && (
-        <Section title="你的资源留在你自己的空间">
-          <div className="flex flex-wrap items-end justify-between gap-space-6 rounded-lg border border-border bg-surface p-space-7">
-            <p className="text-body-md max-w-[56ch] text-ink-700">
-              模型凭证 AES-256-GCM 加密落库，任何接口都不回显；发布到广场的资源默认黑盒，订阅者拿到的是能力本身，不是你的提示词和编排图。
-            </p>
-            <Button size="lg" onClick={() => openModal('manual')}>
-              创建账号
-            </Button>
-          </div>
-        </Section>
-      )}
+      {!user && <CTABanner />}
     </div>
   )
 }
@@ -378,5 +596,7 @@ function RunStatusDot({ status }: { status: RunSummary['status'] }) {
 
 function RunStatusLabel({ status }: { status: RunSummary['status'] }) {
   const meta = RUN_STATUS[status]
-  return <span className={cn('text-caption w-12 shrink-0 text-right', meta.text)}>{meta.label}</span>
+  return (
+    <span className={cn('text-caption w-12 shrink-0 text-right', meta.text)}>{meta.label}</span>
+  )
 }

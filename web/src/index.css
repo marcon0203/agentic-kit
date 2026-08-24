@@ -15,33 +15,35 @@
  * a token below. No hardcoded values in components.
  */
 :root {
-  /* ── Color: the six ──────────────────────────────────────────────── */
-  --color-paper: #fbfaf9; /* page ground — warm white, not cream */
-  --color-blueprint: #1f4e79; /* primary: structure, links, running   */
-  --color-signal: #c2570f; /* the ONLY attention colour: needs a human */
-  --color-moss: #2e6b4f; /* finished, healthy, approved               */
-  --color-rust: #a93636; /* failed, rejected, destructive             */
-  --color-graphite: #16181d; /* ink                                     */
+  /* ── Color: the six + marketing violet ───────────────────────────── */
+  --color-paper: #f8fafc; /* page ground — cool white, matches reference */
+  --color-blueprint: #2563eb; /* primary: structure, links, running   */
+  --color-violet: #7c3aed; /* marketing accent: gradients, hero, cta   */
+  --color-signal: #f59e0b; /* the ONLY attention colour: needs a human */
+  --color-moss: #10b981; /* finished, healthy, approved               */
+  --color-rust: #f43f5e; /* failed, rejected, destructive             */
+  --color-graphite: #0f172a; /* ink                                     */
 
   /* Tints derived from the six — never new hues, only these at strength. */
-  --color-blueprint-tint: #eef3f8;
-  --color-blueprint-edge: #c7d8e8;
-  --color-signal-tint: #fdf2e9;
-  --color-moss-tint: #edf5f1;
-  --color-rust-tint: #fbeded;
+  --color-blueprint-tint: #dbeafe;
+  --color-blueprint-edge: #bfdbfe;
+  --color-violet-tint: #ede9fe;
+  --color-signal-tint: #fef3c7;
+  --color-moss-tint: #d1fae5;
+  --color-rust-tint: #ffe4e6;
 
   /* ── Color: ink ranks ────────────────────────────────────────────── */
   --color-ink-900: var(--color-graphite);
-  --color-ink-700: #4a505c;
-  --color-ink-500: #767d8b;
+  --color-ink-700: #475569;
+  --color-ink-500: #94a3b8;
 
   /* ── Color: surfaces + rules ─────────────────────────────────────── */
   --color-surface: #ffffff;
   --color-surface-page: var(--color-paper);
-  --color-surface-muted: #f3f1ee;
-  --color-surface-ink: #14161b; /* dark surfaces: auth modal, code       */
-  --color-border: #e6e2dc;
-  --color-border-strong: #cdc7bd;
+  --color-surface-muted: #f1f5f9;
+  --color-surface-ink: #0b1220; /* dark surfaces: hero, cta, code       */
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
 
   /* ── Platform semantic status (design-system.md §1.2) ────────────── */
   --color-status-pending: var(--color-ink-500);
@@ -153,6 +155,8 @@
   --color-blueprint: var(--color-blueprint);
   --color-blueprint-tint: var(--color-blueprint-tint);
   --color-blueprint-edge: var(--color-blueprint-edge);
+  --color-violet: var(--color-violet);
+  --color-violet-tint: var(--color-violet-tint);
   --color-signal: var(--color-signal);
   --color-signal-tint: var(--color-signal-tint);
   --color-moss: var(--color-moss);
@@ -329,9 +333,21 @@
      only behind the hero rail and the Bundle canvas, never as page chrome. */
   .bg-blueprint-grid {
     background-image:
-      linear-gradient(to right, rgb(31 78 121 / 0.06) 1px, transparent 1px),
-      linear-gradient(to bottom, rgb(31 78 121 / 0.06) 1px, transparent 1px);
+      linear-gradient(to right, rgb(37 99 235 / 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(37 99 235 / 0.06) 1px, transparent 1px);
     background-size: 22px 22px;
+  }
+
+  /* Marketing gradients — reserved for hero headlines and CTA banners. */
+  .text-gradient {
+    background: linear-gradient(92deg, var(--color-blueprint), var(--color-violet));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .bg-gradient-cta {
+    background: linear-gradient(120deg, var(--color-blueprint), var(--color-violet));
   }
 }
 
@@ -368,10 +384,10 @@
 @keyframes gate-await {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgb(194 87 15 / 0.4);
+    box-shadow: 0 0 0 0 rgb(245 158 11 / 0.4);
   }
   50% {
-    box-shadow: 0 0 0 7px rgb(194 87 15 / 0);
+    box-shadow: 0 0 0 7px rgb(245 158 11 / 0);
   }
 }
 

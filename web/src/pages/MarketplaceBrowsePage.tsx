@@ -78,7 +78,7 @@ export function MarketplaceBrowsePage() {
           title="广场上还没有人发布东西"
           description="把你做好的 Bundle 或 Agent 发布出来，别人订阅后可以直接运行，但看不到你怎么编排的。"
           action={
-            <Button size="sm" asChild>
+            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" asChild>
               <Link to="/marketplace?tab=publish">发布我的第一个资源</Link>
             </Button>
           }

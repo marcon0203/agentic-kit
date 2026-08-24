@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import { BarChart3, Cpu, Home, LayoutGrid, Puzzle, Settings, Store } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/lib/auth/store'
@@ -10,18 +11,18 @@ import { useAuthStore } from '@/lib/auth/store'
  * invites a click on the page you are already looking at.
  */
 const NAV_ITEMS = [
-  { to: '/', label: '首页', end: true },
-  { to: '/apps', label: '应用中心' },
-  { to: '/resources', label: '资源中心' },
-  { to: '/models', label: '模型中心' },
-  { to: '/ops', label: '运营中心' },
-  { to: '/marketplace', label: '应用广场' },
-  { to: '/settings', label: '系统设置' },
+  { to: '/', label: '首页', icon: Home, end: true },
+  { to: '/apps', label: '应用中心', icon: LayoutGrid },
+  { to: '/resources', label: '资源中心', icon: Puzzle },
+  { to: '/models', label: '模型中心', icon: Cpu },
+  { to: '/ops', label: '运营中心', icon: BarChart3 },
+  { to: '/marketplace', label: '应用广场', icon: Store },
+  { to: '/settings', label: '系统设置', icon: Settings },
 ]
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   cn(
-    'text-body-sm relative flex h-full shrink-0 items-center px-0.5 transition-colors duration-150',
+    'text-body-sm relative flex h-full shrink-0 items-center gap-space-2 px-0.5 transition-colors duration-150',
     'after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:transition-colors',
     isActive
       ? 'font-medium text-ink-900 after:bg-blueprint'
@@ -43,7 +44,7 @@ export function AppShell() {
       </a>
 
       <header className="sticky top-0 z-40 border-b border-border bg-surface-page/92 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-container-app items-stretch gap-space-8 px-space-6">
+        <div className="mx-auto flex h-14 max-w-container-app items-stretch gap-space-6 px-space-6">
           <NavLink to="/" className="flex shrink-0 items-center gap-space-2">
             <span aria-hidden className="size-2 rounded-full bg-signal" />
             <span className="text-display-sm hidden tracking-tight text-ink-900 sm:inline">
@@ -55,11 +56,15 @@ export function AppShell() {
             aria-label="主导航"
             className="flex min-w-0 flex-1 items-stretch gap-space-5 overflow-x-auto"
           >
-            {NAV_ITEMS.map((item) => (
-              <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
-                {item.label}
-              </NavLink>
-            ))}
+            {NAV_ITEMS.map((item) => {
+              const Icon = item.icon
+              return (
+                <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
+                  <Icon className="size-4" aria-hidden />
+                  {item.label}
+                </NavLink>
+              )
+            })}
           </nav>
 
           <div className="flex shrink-0 items-center gap-space-3">

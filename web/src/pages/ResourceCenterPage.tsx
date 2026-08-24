@@ -105,7 +105,7 @@ export function ResourceCenterPage() {
         eyebrow="RESOURCES"
         title="资源中心"
         description="Agent 能引用的一切都先在这里登记。凭证加密落库，注册之后任何接口都不会再把它读出来。"
-        actions={<Button onClick={() => setRegisterOpen(true)}>{kind.blank.cta}</Button>}
+        actions={<Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setRegisterOpen(true)}>{kind.blank.cta}</Button>}
       />
 
       <TabRail>
@@ -140,7 +140,7 @@ export function ResourceCenterPage() {
           title={kind.blank.title}
           description={kind.blank.description}
           action={
-            <Button size="sm" onClick={() => setRegisterOpen(true)}>
+            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setRegisterOpen(true)}>
               {kind.blank.cta}
             </Button>
           }

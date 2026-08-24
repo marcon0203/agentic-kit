@@ -78,6 +78,7 @@ export function ModelProviderPage() {
                 <Button
                   variant={existing ? 'outline' : 'default'}
                   size="sm"
+                  className={cn(!existing && 'bg-gradient-cta text-white hover:opacity-90')}
                   onClick={() => setConnecting(p.value)}
                 >
                   {existing ? '更换密钥' : '接入'}

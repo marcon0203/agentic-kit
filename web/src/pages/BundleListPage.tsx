@@ -43,7 +43,7 @@ export function BundleListPage() {
       <Section
         title="我的 Bundle"
         aside={
-          <Button size="sm" onClick={() => navigate('/bundles/new')}>
+          <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/bundles/new')}>
             新建 Bundle
           </Button>
         }
@@ -63,7 +63,7 @@ export function BundleListPage() {
             title="编排你的第一次协作"
             description="Bundle 决定谁先做、谁并行、哪一步要停下来等人。它是运行的最小单位——有了 Bundle 才能发起运行。"
             action={
-              <Button size="sm" onClick={() => navigate('/bundles/new')}>
+              <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/bundles/new')}>
                 新建 Bundle
               </Button>
             }
