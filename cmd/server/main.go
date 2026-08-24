@@ -206,6 +206,7 @@ func run() error {
 		Bundles:          api.NewBundleHandlers(bundleService),
 		Marketplace:      api.NewMarketplaceHandlers(marketplaceService),
 		ModelProviders:   api.NewModelProviderHandlers(modelCenter),
+		ModelCatalog:     api.NewModelCatalogHandlers(),
 		Usage:            api.NewUsageHandlers(modelCenter),
 		Runs:             api.NewRunHandlers(runService),
 		Operations: api.NewOperationHandlers(operation.NewService(

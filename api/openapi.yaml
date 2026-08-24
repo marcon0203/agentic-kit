@@ -1314,6 +1314,27 @@ paths:
               schema: { $ref: '#/components/schemas/Envelope' }
 
   # ────────────────────────── 模型广场 ──────────────────────────
+  /model-catalog:
+    get:
+      tags: [ModelProviders]
+      summary: 按模态浏览的模型目录（展示数据，不是绑定契约）
+      description: Agent 的 model.name 仍然是自由文本；这个目录只是给用户挑选时看的参考
+      operationId: listModelCatalog
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ModelCatalogEntry' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /model-providers:
     get:
       tags: [ModelProviders]
@@ -1900,6 +1921,22 @@ components:
         base_url: { type: string }
         status: { $ref: '#/components/schemas/Status' }
         created_at: { type: string, format: date-time }
+
+    ModelCatalogEntry:
+      type: object
+      required: [provider, model, display_name, description, modality, category, featured]
+      properties:
+        provider: { $ref: '#/components/schemas/ProviderName' }
+        model: { type: string, examples: ['claude-sonnet-5'] }
+        display_name: { type: string }
+        description: { type: string }
+        modality:
+          type: string
+          enum: [text, vision, embedding]
+        category:
+          type: string
+          enum: [reasoning, text, vision, embedding]
+        featured: { type: boolean }
 
     KnowledgeBaseDocument:
       type: object

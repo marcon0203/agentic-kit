@@ -39,6 +39,7 @@ type RouterConfig struct {
 	Bundles          *BundleHandlers
 	Marketplace      *MarketplaceHandlers
 	ModelProviders   *ModelProviderHandlers
+	ModelCatalog     *ModelCatalogHandlers
 	Usage            *UsageHandlers
 	Runs             *RunHandlers
 	Operations       *OperationHandlers
@@ -138,6 +139,9 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 			if cfg.ModelProviders != nil {
 				r.Get("/model-providers", cfg.ModelProviders.List)
 				r.Post("/model-providers", cfg.ModelProviders.Create)
+			}
+			if cfg.ModelCatalog != nil {
+				r.Get("/model-catalog", cfg.ModelCatalog.List)
 			}
 			if cfg.Usage != nil {
 				r.Get("/usage/me", cfg.Usage.GetMyUsage)

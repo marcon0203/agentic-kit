@@ -655,6 +655,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/model-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 按模态浏览的模型目录（展示数据，不是绑定契约）
+         * @description Agent 的 model.name 仍然是自由文本；这个目录只是给用户挑选时看的参考
+         */
+        get: operations["listModelCatalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model-providers": {
         parameters: {
             query?: never;
@@ -1038,6 +1058,18 @@ export interface components {
             status: components["schemas"]["Status"];
             /** Format: date-time */
             created_at: string;
+        };
+        ModelCatalogEntry: {
+            provider: components["schemas"]["ProviderName"];
+            /** @example claude-sonnet-5 */
+            model: string;
+            display_name: string;
+            description: string;
+            /** @enum {string} */
+            modality: "text" | "vision" | "embedding";
+            /** @enum {string} */
+            category: "reasoning" | "text" | "vision" | "embedding";
+            featured: boolean;
         };
         KnowledgeBaseDocument: {
             source_ref: string;
@@ -2401,6 +2433,29 @@ export interface operations {
                     "application/json": components["schemas"]["Envelope"];
                 };
             };
+        };
+    };
+    listModelCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ModelCatalogEntry"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     listModelProviders: {
