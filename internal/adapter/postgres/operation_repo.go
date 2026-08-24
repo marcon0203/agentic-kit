@@ -190,3 +190,11 @@ func (d *AdminDirectory) IsAdmin(ctx context.Context, userID int64) (bool, error
 	}
 	return user.IsAdmin, nil
 }
+
+// HasPermission checks the RBAC tables directly (user_roles →
+// role_permissions → permissions) — it's the same AdminDirectory a
+// service asks "is_admin?", now also asked "holds permission X via a
+// Role?", so both gates live behind one lookup rather than two ports.
+func (d *AdminDirectory) HasPermission(ctx context.Context, userID int64, key string) (bool, error) {
+	return d.q.UserHasPermission(ctx, store.UserHasPermissionParams{UserID: userID, PermissionKey: key})
+}

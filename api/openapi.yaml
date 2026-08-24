@@ -1620,6 +1620,255 @@ paths:
               schema: { $ref: '#/components/schemas/Envelope' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ─────────────── 系统配置 → 用户管理 / 角色权限（RBAC）───────────────
+  /me/permissions:
+    get:
+      tags: [RBAC]
+      summary: 当前登录用户拥有的权限（前端按钮级别显隐的依据）
+      operationId: getMyPermissions
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [is_admin, permissions]
+                        properties:
+                          is_admin: { type: boolean }
+                          permissions:
+                            type: array
+                            items: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /permissions:
+    get:
+      tags: [RBAC]
+      summary: 权限目录（固定，只读），管理员
+      operationId: listPermissions
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Permission' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /roles:
+    get:
+      tags: [RBAC]
+      summary: 角色列表，管理员
+      operationId: listRoles
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Role' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [RBAC]
+      summary: 新增角色并指定权限，管理员
+      operationId: createRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, name]
+              properties:
+                key: { type: string, examples: ['operator'] }
+                name: { type: string, examples: ['运营'] }
+                description: { type: string }
+                permission_keys:
+                  type: array
+                  items: { type: string }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Role' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: 角色 key 已存在（90002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /roles/{id}:
+    delete:
+      tags: [RBAC]
+      summary: 删除角色，管理员
+      operationId: deleteRole
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: 角色不存在（90001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /roles/{id}/permissions:
+    patch:
+      tags: [RBAC]
+      summary: 替换角色的权限集合，管理员
+      operationId: updateRolePermissions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permission_keys]
+              properties:
+                permission_keys:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Role' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: 角色不存在（90001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /users:
+    get:
+      tags: [RBAC]
+      summary: 用户列表，管理员
+      operationId: listUsers
+      parameters:
+        - name: search
+          in: query
+          schema: { type: string }
+          description: 按邮箱或显示名模糊匹配
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/UserAccount' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/{id}/status:
+    patch:
+      tags: [RBAC]
+      summary: 启用/停用用户，管理员
+      operationId: updateUserStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/Status' }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422':
+          description: 不能停用自己的账号（10001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /users/{id}/roles:
+    patch:
+      tags: [RBAC]
+      summary: 替换用户的角色分配，管理员
+      operationId: updateUserRoles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_ids]
+              properties:
+                role_ids:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -2196,6 +2445,46 @@ components:
         modality: { $ref: '#/components/schemas/CatalogModality' }
         featured: { type: boolean }
         status: { $ref: '#/components/schemas/Status' }
+        created_at: { type: string, format: date-time }
+
+    # ── 用户管理 / 角色权限（RBAC）──
+    Permission:
+      type: object
+      description: 一个按钮/操作对应的固定权限，由迁移脚本预置，不能通过接口创建
+      required: [key, name, module]
+      properties:
+        key: { type: string, examples: ['model_catalog.provider.create'] }
+        name: { type: string, examples: ['新增模型 Provider'] }
+        module: { type: string, examples: ['model_catalog'] }
+
+    Role:
+      type: object
+      required: [id, key, name, description, permission_keys, created_at]
+      properties:
+        id: { type: string }
+        key: { type: string, examples: ['operator'] }
+        name: { type: string, examples: ['运营'] }
+        description: { type: string }
+        permission_keys:
+          type: array
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+
+    UserAccount:
+      type: object
+      description: 系统配置 → 用户管理列表里的一行；不包含密码哈希
+      required: [id, email, display_name, status, is_admin, role_keys, created_at]
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        status: { $ref: '#/components/schemas/Status' }
+        is_admin:
+          type: boolean
+          description: 超级管理员，绕过所有权限检查
+        role_keys:
+          type: array
+          items: { type: string }
         created_at: { type: string, format: date-time }
 
     KnowledgeBaseDocument:

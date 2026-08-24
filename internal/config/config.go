@@ -16,6 +16,13 @@ type Config struct {
 	JWTSecret          string `mapstructure:"JWT_SECRET"`
 	CredentialAESKey   string `mapstructure:"CREDENTIAL_AES_KEY"`
 	CORSAllowedOrigins string `mapstructure:"CORS_ALLOWED_ORIGINS"`
+	// SuperadminEmail/Password optionally pin the bootstrap superadmin
+	// account (see iam.Service.BootstrapSuperAdmin) to a known identity —
+	// useful for local dev / CI where the account needs to be predictable.
+	// Both may be left empty: the bootstrap still runs, with a generated
+	// email and a random password logged once at startup.
+	SuperadminEmail    string `mapstructure:"SUPERADMIN_EMAIL"`
+	SuperadminPassword string `mapstructure:"SUPERADMIN_PASSWORD"`
 }
 
 // required lists the env vars that must be non-empty for the server to start.
@@ -56,6 +63,8 @@ func Load() (*Config, error) {
 		JWTSecret:          v.GetString("JWT_SECRET"),
 		CredentialAESKey:   v.GetString("CREDENTIAL_AES_KEY"),
 		CORSAllowedOrigins: v.GetString("CORS_ALLOWED_ORIGINS"),
+		SuperadminEmail:    v.GetString("SUPERADMIN_EMAIL"),
+		SuperadminPassword: v.GetString("SUPERADMIN_PASSWORD"),
 	}
 	return cfg, nil
 }

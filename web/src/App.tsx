@@ -10,6 +10,8 @@ import { RunPage } from '@/pages/RunPage'
 import { AppsLayout } from '@/pages/AppsLayout'
 import { SettingsLayout } from '@/pages/SettingsLayout'
 import { ModelCatalogAdminPage } from '@/pages/ModelCatalogAdminPage'
+import { UsersPage } from '@/pages/UsersPage'
+import { RolesPage } from '@/pages/RolesPage'
 import { MarketplaceBrowsePage } from '@/pages/MarketplaceBrowsePage'
 import { BundleListPage } from '@/pages/BundleListPage'
 import { AgentDefinitionPage } from '@/pages/AgentDefinitionPage'
@@ -134,6 +136,8 @@ export default function App() {
             >
               <Route index element={<Navigate to="providers" replace />} />
               <Route path="providers" element={<ModelCatalogAdminPage />} />
+              <Route path="users" element={<UsersPage />} />
+              <Route path="roles" element={<RolesPage />} />
             </Route>
           </Route>
         </Routes>

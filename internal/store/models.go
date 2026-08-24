@@ -209,6 +209,14 @@ type ModelProvider struct {
 	BaseUrl     pgtype.Text        `json:"base_url"`
 }
 
+type Permission struct {
+	ID            int64              `json:"id"`
+	PermissionKey string             `json:"permission_key"`
+	Name          string             `json:"name"`
+	Module        string             `json:"module"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type Report struct {
 	ID             int64              `json:"id"`
 	ListingID      int64              `json:"listing_id"`
@@ -219,6 +227,19 @@ type Report struct {
 	ResolvedBy     pgtype.Int8        `json:"resolved_by"`
 	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type Role struct {
+	ID          int64              `json:"id"`
+	RoleKey     string             `json:"role_key"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type RolePermission struct {
+	RoleID       int64 `json:"role_id"`
+	PermissionID int64 `json:"permission_id"`
 }
 
 type Skill struct {
@@ -261,4 +282,9 @@ type User struct {
 	Status       int16              `json:"status"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	IsAdmin      bool               `json:"is_admin"`
+}
+
+type UserRole struct {
+	UserID int64 `json:"user_id"`
+	RoleID int64 `json:"role_id"`
 }

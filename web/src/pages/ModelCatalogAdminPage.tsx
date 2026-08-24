@@ -20,7 +20,7 @@ import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/lib/auth/store'
+import { Can, useHasPermission } from '@/lib/rbac/usePermissions'
 import type { components } from '@/lib/api/schema'
 
 type CatalogProvider = components['schemas']['CatalogProvider']
@@ -53,7 +53,7 @@ function readFileAsDataURL(file: File): Promise<string> {
  * 个人凭证是两件事：那边验证的是能不能真的调用，这里维护的是广场展示什么。
  */
 export function ModelCatalogAdminPage() {
-  const user = useAuthStore((s) => s.user)
+  const canView = useHasPermission('model_catalog.provider.view')
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -62,7 +62,7 @@ export function ModelCatalogAdminPage() {
   const providersQuery = useQuery({
     queryKey: ['catalog-providers'],
     queryFn: async () => unwrap<CatalogProvider[]>(await apiClient.GET('/model-catalog/providers', {})),
-    enabled: !!user?.is_admin,
+    enabled: canView,
   })
 
   async function toggleProviderStatus(p: CatalogProvider) {
@@ -90,11 +90,11 @@ export function ModelCatalogAdminPage() {
     }
   }
 
-  if (!user?.is_admin) {
+  if (!canView) {
     return (
       <EmptyRail
-        title="需要管理员权限"
-        description="模型提供商是系统级配置，只有管理员账号能新增 Provider 和模型。"
+        title="没有查看权限"
+        description="模型提供商是系统级配置，需要 model_catalog.provider.view 权限——找管理员在角色权限页面分配对应角色。"
       />
     )
   }
@@ -106,9 +106,11 @@ export function ModelCatalogAdminPage() {
       <Section
         title="Provider 列表"
         aside={
-          <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
-            新增 Provider
-          </Button>
+          <Can permission="model_catalog.provider.create">
+            <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
+              新增 Provider
+            </Button>
+          </Can>
         }
       >
         {actionError && (
@@ -127,9 +129,11 @@ export function ModelCatalogAdminPage() {
             title="还没有登记任何 Provider"
             description="先新增一个 Provider（如 DeepSeek），再在它下面添加具体模型（如 deepseek-v3）。"
             action={
-              <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
-                新增 Provider
-              </Button>
+              <Can permission="model_catalog.provider.create">
+                <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
+                  新增 Provider
+                </Button>
+              </Can>
             }
           />
         )}
@@ -170,12 +174,16 @@ export function ModelCatalogAdminPage() {
                     >
                       {p.status === 1 ? '已启用' : '已停用'}
                     </span>
-                    <Button variant="outline" size="sm" onClick={() => toggleProviderStatus(p)}>
-                      {p.status === 1 ? '停用' : '启用'}
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => deleteProvider(p)}>
-                      删除
-                    </Button>
+                    <Can permission="model_catalog.provider.toggle">
+                      <Button variant="outline" size="sm" onClick={() => toggleProviderStatus(p)}>
+                        {p.status === 1 ? '停用' : '启用'}
+                      </Button>
+                    </Can>
+                    <Can permission="model_catalog.provider.delete">
+                      <Button variant="ghost" size="sm" onClick={() => deleteProvider(p)}>
+                        删除
+                      </Button>
+                    </Can>
                   </div>
                   {expanded === p.id && (
                     <div className="border-t border-border px-space-5 py-space-4">
@@ -250,9 +258,11 @@ function ProviderModels({ providerId, onError }: { providerId: string; onError: 
     <div className="flex flex-col gap-space-3">
       <div className="flex items-center justify-between">
         <h3 className="text-label-md text-ink-700">这个 Provider 下的模型</h3>
-        <Button variant="outline" size="sm" onClick={() => setCreateOpen(true)}>
-          新增模型
-        </Button>
+        <Can permission="model_catalog.model.create">
+          <Button variant="outline" size="sm" onClick={() => setCreateOpen(true)}>
+            新增模型
+          </Button>
+        </Can>
       </div>
 
       {modelsQuery.isLoading && <ListSkeleton rows={2} />}
@@ -279,12 +289,16 @@ function ProviderModels({ providerId, onError }: { providerId: string; onError: 
               <span className={cn('text-caption w-12 shrink-0 text-right', m.status === 1 ? 'text-moss' : 'text-ink-500')}>
                 {m.status === 1 ? '已启用' : '已停用'}
               </span>
-              <Button variant="outline" size="sm" onClick={() => toggleModelStatus(m)}>
-                {m.status === 1 ? '停用' : '启用'}
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => deleteModel(m)}>
-                删除
-              </Button>
+              <Can permission="model_catalog.model.toggle">
+                <Button variant="outline" size="sm" onClick={() => toggleModelStatus(m)}>
+                  {m.status === 1 ? '停用' : '启用'}
+                </Button>
+              </Can>
+              <Can permission="model_catalog.model.delete">
+                <Button variant="ghost" size="sm" onClick={() => deleteModel(m)}>
+                  删除
+                </Button>
+              </Can>
             </li>
           ))}
         </ul>

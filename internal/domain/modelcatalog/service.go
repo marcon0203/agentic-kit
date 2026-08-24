@@ -31,7 +31,22 @@ type Repository interface {
 
 type AdminDirectory interface {
 	IsAdmin(ctx context.Context, userID int64) (bool, error)
+	HasPermission(ctx context.Context, userID int64, key string) (bool, error)
 }
+
+// Permission keys this package gates on — seeded in migrations/0017_rbac.up.sql
+// and editable per-Role from 系统配置 → 角色权限. is_admin still bypasses
+// all of them (see requireAccess), so a superadmin never depends on roles
+// being configured correctly.
+const (
+	PermProviderView   = "model_catalog.provider.view"
+	PermProviderCreate = "model_catalog.provider.create"
+	PermProviderToggle = "model_catalog.provider.toggle"
+	PermProviderDelete = "model_catalog.provider.delete"
+	PermModelCreate    = "model_catalog.model.create"
+	PermModelToggle    = "model_catalog.model.toggle"
+	PermModelDelete    = "model_catalog.model.delete"
+)
 
 type Service struct {
 	repo   Repository
@@ -54,7 +69,7 @@ func (s *Service) List(ctx context.Context) ([]CatalogEntry, error) {
 
 // CreateProvider registers a new catalog provider. Admin only.
 func (s *Service) CreateProvider(ctx context.Context, userID int64, key, displayName, icon, baseURL string) (Provider, error) {
-	if err := s.requireAdmin(ctx, userID); err != nil {
+	if err := s.requireAccess(ctx, userID, PermProviderCreate); err != nil {
 		return Provider{}, err
 	}
 
@@ -84,7 +99,7 @@ func (s *Service) CreateProvider(ctx context.Context, userID int64, key, display
 // ListProviders returns every catalog provider, enabled or not. Admin only
 // — 模型广场 itself only ever sees providers through List's join.
 func (s *Service) ListProviders(ctx context.Context, userID int64) ([]Provider, error) {
-	if err := s.requireAdmin(ctx, userID); err != nil {
+	if err := s.requireAccess(ctx, userID, PermProviderView); err != nil {
 		return nil, err
 	}
 	providers, err := s.repo.ListProviders(ctx)
@@ -97,7 +112,7 @@ func (s *Service) ListProviders(ctx context.Context, userID int64) ([]Provider, 
 // SetProviderStatus enables/disables a provider — disabling it also hides
 // every model under it from 模型广场's join without touching those rows.
 func (s *Service) SetProviderStatus(ctx context.Context, userID, providerID int64, enabled bool) error {
-	if err := s.requireAdmin(ctx, userID); err != nil {
+	if err := s.requireAccess(ctx, userID, PermProviderToggle); err != nil {
 		return err
 	}
 	if _, err := s.repo.GetProvider(ctx, providerID); err != nil {
@@ -120,7 +135,7 @@ func (s *Service) SetProviderStatus(ctx context.Context, userID, providerID int6
 // registered under it — deleting a provider is deleting its whole catalog
 // branch, not something that can leave orphaned models behind.
 func (s *Service) DeleteProvider(ctx context.Context, userID, providerID int64) error {
-	if err := s.requireAdmin(ctx, userID); err != nil {
+	if err := s.requireAccess(ctx, userID, PermProviderDelete); err != nil {
 		return err
 	}
 	if _, err := s.repo.GetProvider(ctx, providerID); err != nil {
@@ -137,7 +152,7 @@ func (s *Service) DeleteProvider(ctx context.Context, userID, providerID int64) 
 
 // CreateModel registers a model under a provider. Admin only.
 func (s *Service) CreateModel(ctx context.Context, userID, providerID int64, model, displayName, description string, modality Modality, featured bool) (Model, error) {
-	if err := s.requireAdmin(ctx, userID); err != nil {
+	if err := s.requireAccess(ctx, userID, PermModelCreate); err != nil {
 		return Model{}, err
 	}
 	if _, err := s.repo.GetProvider(ctx, providerID); err != nil {
@@ -176,7 +191,7 @@ func (s *Service) CreateModel(ctx context.Context, userID, providerID int64, mod
 // ListModelsForProvider returns every model under a provider, enabled or
 // not. Admin only.
 func (s *Service) ListModelsForProvider(ctx context.Context, userID, providerID int64) ([]Model, error) {
-	if err := s.requireAdmin(ctx, userID); err != nil {
+	if err := s.requireAccess(ctx, userID, PermProviderView); err != nil {
 		return nil, err
 	}
 	models, err := s.repo.ListModelsForProvider(ctx, providerID)
@@ -187,7 +202,7 @@ func (s *Service) ListModelsForProvider(ctx context.Context, userID, providerID 
 }
 
 func (s *Service) SetModelStatus(ctx context.Context, userID, modelID int64, enabled bool) error {
-	if err := s.requireAdmin(ctx, userID); err != nil {
+	if err := s.requireAccess(ctx, userID, PermModelToggle); err != nil {
 		return err
 	}
 	status := int16(0)
@@ -201,7 +216,7 @@ func (s *Service) SetModelStatus(ctx context.Context, userID, modelID int64, ena
 }
 
 func (s *Service) DeleteModel(ctx context.Context, userID, modelID int64) error {
-	if err := s.requireAdmin(ctx, userID); err != nil {
+	if err := s.requireAccess(ctx, userID, PermModelDelete); err != nil {
 		return err
 	}
 	if err := s.repo.DeleteModel(ctx, modelID); err != nil {
@@ -210,14 +225,22 @@ func (s *Service) DeleteModel(ctx context.Context, userID, modelID int64) error 
 	return nil
 }
 
-func (s *Service) requireAdmin(ctx context.Context, userID int64) error {
+// requireAccess grants a caller who is either a superadmin (is_admin) or
+// whose assigned Role(s) include the given permission key — the button-
+// level RBAC check, with is_admin as the bypass that keeps existing admin
+// accounts working while roles are configured.
+func (s *Service) requireAccess(ctx context.Context, userID int64, permission string) error {
 	isAdmin, err := s.admins.IsAdmin(ctx, userID)
 	if err != nil {
 		// Fail closed: a lookup failure must never read as "is admin".
-		return domain.Forbidden(domain.CodeForbidden, "admin access required")
+		return domain.Forbidden(domain.CodeForbidden, "permission required: "+permission)
 	}
-	if !isAdmin {
-		return domain.Forbidden(domain.CodeForbidden, "admin access required")
+	if isAdmin {
+		return nil
+	}
+	has, err := s.admins.HasPermission(ctx, userID, permission)
+	if err != nil || !has {
+		return domain.Forbidden(domain.CodeForbidden, "permission required: "+permission)
 	}
 	return nil
 }

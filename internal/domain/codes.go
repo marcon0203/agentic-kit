@@ -67,4 +67,8 @@ const (
 	// 80xxx — 运营中心
 	CodeReportNotFound        = 80001
 	CodeReportAlreadyResolved = 80002
+
+	// 90xxx — 用户管理与角色权限（RBAC）
+	CodeRoleNotFound     = 90001
+	CodeRoleKeyDuplicate = 90002
 )

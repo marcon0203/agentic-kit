@@ -37,6 +37,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcatalog"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 	"github.com/marcon0203/agentic-kit/internal/domain/operation"
+	"github.com/marcon0203/agentic-kit/internal/domain/rbac"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	domainrun "github.com/marcon0203/agentic-kit/internal/domain/run"
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
@@ -189,6 +190,12 @@ func run() error {
 	adminDirectory := postgres.NewAdminDirectory(queries)
 	modelCatalog := modelcatalog.NewService(postgres.NewModelCatalogRepository(queries), adminDirectory)
 
+	// 系统配置 → 用户管理 / 角色权限: roles/permissions engine. adminDirectory
+	// doubles as its AdminDirectory too — role/permission administration
+	// stays is_admin-only (see rbac.Service's doc comment) so a Role
+	// holder can never grant themselves more.
+	rbacService := rbac.NewService(postgres.NewRBACRepository(queries), adminDirectory)
+
 	passwordHasher, err := password.NewHasher()
 	if err != nil {
 		return fmt.Errorf("initialise password hasher: %w", err)
@@ -198,6 +205,26 @@ func run() error {
 		passwordHasher,
 		auth.NewTokenIssuer(cfg.JWTSecret),
 	)
+
+	// Every admin-only surface (系统配置's 用户管理/角色权限/模型提供商,
+	// 运营中心) is unreachable without at least one is_admin account, and
+	// no API can create the first one — so the server creates it itself on
+	// a fresh install. A no-op once any admin exists.
+	superadminEmail := cfg.SuperadminEmail
+	if superadminEmail == "" {
+		superadminEmail = "admin@agentic-kit.local"
+	}
+	created, superadminPassword, err := iamService.BootstrapSuperAdmin(ctx, superadminEmail, "超级管理员", cfg.SuperadminPassword)
+	if err != nil {
+		return fmt.Errorf("bootstrap superadmin: %w", err)
+	}
+	if created {
+		logger.Warn("superadmin_bootstrapped",
+			"email", superadminEmail,
+			"password", superadminPassword,
+			"note", "save this now — it is never logged or shown again",
+		)
+	}
 
 	routerCfg := api.RouterConfig{
 		AllowedOrigins:    splitAndTrim(cfg.CORSAllowedOrigins),
@@ -216,6 +243,7 @@ func run() error {
 		ModelCatalogAdmin: api.NewModelCatalogAdminHandlers(modelCatalog),
 		Usage:             api.NewUsageHandlers(modelCenter),
 		Runs:              api.NewRunHandlers(runService),
+		RBAC:              api.NewRBACHandlers(rbacService),
 		Operations: api.NewOperationHandlers(operation.NewService(
 			postgres.NewReportRepository(queries),
 			postgres.NewAuditLogReader(queries),

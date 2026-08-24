@@ -17,6 +17,11 @@ var (
 type Repository interface {
 	Create(ctx context.Context, email, passwordHash, displayName string) (User, error)
 	ByEmail(ctx context.Context, email string) (User, error)
+	// CountAdmins and CreateAdmin back BootstrapSuperAdmin only — every
+	// other write in this package creates an ordinary (is_admin=false)
+	// account through Create.
+	CountAdmins(ctx context.Context) (int64, error)
+	CreateAdmin(ctx context.Context, email, passwordHash, displayName string) (User, error)
 }
 
 // PasswordHasher hashes and verifies passwords. A port because which KDF
@@ -127,4 +132,38 @@ func (s *Service) session(user User) (Session, error) {
 		return Session{}, domain.Internal(err)
 	}
 	return Session{AccessToken: access, RefreshToken: refresh, User: user.Profile()}, nil
+}
+
+// BootstrapSuperAdmin ensures at least one is_admin account exists — every
+// admin-only surface (系统配置's 用户管理/角色权限/模型提供商, 运营中心)
+// is otherwise unreachable on a fresh install, since no API creates the
+// first admin. A no-op once any admin exists (created=false). password is
+// the plaintext to hand the operator exactly once — the caller (main.go)
+// is responsible for surfacing it (a log line) and never storing it; if
+// presetPassword is non-empty it's used as-is (a deploy pinning a known
+// bootstrap password via env) instead of generating a random one.
+func (s *Service) BootstrapSuperAdmin(ctx context.Context, email, displayName, presetPassword string) (created bool, password string, err error) {
+	count, err := s.repo.CountAdmins(ctx)
+	if err != nil {
+		return false, "", domain.Internal(err)
+	}
+	if count > 0 {
+		return false, "", nil
+	}
+
+	password = presetPassword
+	if password == "" {
+		password, err = randomPassword(20)
+		if err != nil {
+			return false, "", domain.Internal(err)
+		}
+	}
+	hash, err := s.hasher.Hash(password)
+	if err != nil {
+		return false, "", domain.Internal(err)
+	}
+	if _, err := s.repo.CreateAdmin(ctx, email, hash, displayName); err != nil {
+		return false, "", domain.Internal(err)
+	}
+	return true, password, nil
 }

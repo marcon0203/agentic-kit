@@ -46,6 +46,26 @@ func (f *fakeUserRepo) ByEmail(_ context.Context, email string) (iam.User, error
 	return u, nil
 }
 
+func (f *fakeUserRepo) CountAdmins(_ context.Context) (int64, error) {
+	var n int64
+	for _, u := range f.byEmail {
+		if u.IsAdmin {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeUserRepo) CreateAdmin(_ context.Context, email, passwordHash, displayName string) (iam.User, error) {
+	if _, exists := f.byEmail[email]; exists {
+		return iam.User{}, iam.ErrEmailTaken
+	}
+	u := iam.User{ID: f.nextID, Email: email, PasswordHash: passwordHash, DisplayName: displayName, IsAdmin: true, CreatedAt: time.Now()}
+	f.nextID++
+	f.byEmail[email] = u
+	return u, nil
+}
+
 // The real argon2id hasher is used rather than a stub: these tests are
 // cheap enough to afford it, and it keeps the register-then-login path
 // exercising the same verification production does.

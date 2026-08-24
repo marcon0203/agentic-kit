@@ -38,6 +38,26 @@ func (f *fakeRepo) ByEmail(_ context.Context, email string) (iam.User, error) {
 	return u, nil
 }
 
+func (f *fakeRepo) CountAdmins(_ context.Context) (int64, error) {
+	var n int64
+	for _, u := range f.byEmail {
+		if u.IsAdmin {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeRepo) CreateAdmin(_ context.Context, email, passwordHash, displayName string) (iam.User, error) {
+	if _, taken := f.byEmail[email]; taken {
+		return iam.User{}, iam.ErrEmailTaken
+	}
+	u := iam.User{ID: f.nextID, Email: email, PasswordHash: passwordHash, DisplayName: displayName, IsAdmin: true, CreatedAt: time.Now()}
+	f.nextID++
+	f.byEmail[email] = u
+	return u, nil
+}
+
 // countingHasher records every verification so a test can assert that a
 // sign-in for an unknown address still did the work — the property that
 // makes the two paths indistinguishable.
@@ -88,6 +108,42 @@ func newHarness() *harness {
 	h := &harness{repo: newFakeRepo(), hasher: &countingHasher{}}
 	h.svc = iam.NewService(h.repo, h.hasher, fakeTokens{})
 	return h
+}
+
+func TestBootstrapSuperAdmin_CreatesOnlyOnce(t *testing.T) {
+	h := newHarness()
+
+	created, password, err := h.svc.BootstrapSuperAdmin(context.Background(), "admin@example.com", "超级管理员", "")
+	if err != nil {
+		t.Fatalf("first bootstrap: %v", err)
+	}
+	if !created || password == "" {
+		t.Fatalf("first bootstrap must create an account with a generated password, got created=%v password=%q", created, password)
+	}
+	u, err := h.repo.ByEmail(context.Background(), "admin@example.com")
+	if err != nil || !u.IsAdmin {
+		t.Fatalf("bootstrapped account must be is_admin=true, got user=%+v err=%v", u, err)
+	}
+
+	created, password, err = h.svc.BootstrapSuperAdmin(context.Background(), "someone-else@example.com", "又一个", "")
+	if err != nil {
+		t.Fatalf("second bootstrap: %v", err)
+	}
+	if created || password != "" {
+		t.Fatalf("bootstrap must be a no-op once any admin exists, got created=%v password=%q", created, password)
+	}
+}
+
+func TestBootstrapSuperAdmin_UsesPresetPassword(t *testing.T) {
+	h := newHarness()
+
+	created, password, err := h.svc.BootstrapSuperAdmin(context.Background(), "admin@example.com", "超级管理员", "a-preset-password-123")
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if !created || password != "a-preset-password-123" {
+		t.Fatalf("expected the preset password to be used verbatim, got created=%v password=%q", created, password)
+	}
 }
 
 func mustDomainErr(t *testing.T, err error) *domain.Error {
@@ -260,6 +316,14 @@ func (errorRepo) Create(context.Context, string, string, string) (iam.User, erro
 }
 
 func (errorRepo) ByEmail(context.Context, string) (iam.User, error) {
+	return iam.User{}, errors.New("storage down")
+}
+
+func (errorRepo) CountAdmins(context.Context) (int64, error) {
+	return 0, errors.New("storage down")
+}
+
+func (errorRepo) CreateAdmin(context.Context, string, string, string) (iam.User, error) {
 	return iam.User{}, errors.New("storage down")
 }
 

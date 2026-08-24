@@ -44,6 +44,7 @@ type RouterConfig struct {
 	Usage             *UsageHandlers
 	Runs              *RunHandlers
 	Operations        *OperationHandlers
+	RBAC              *RBACHandlers
 }
 
 // NewRouter assembles the top-level chi router with the shared middleware
@@ -153,6 +154,17 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Post("/model-catalog/providers/{id}/models", cfg.ModelCatalogAdmin.CreateModel)
 				r.Patch("/model-catalog/providers/{id}/models/{model_id}", cfg.ModelCatalogAdmin.UpdateModelStatus)
 				r.Delete("/model-catalog/providers/{id}/models/{model_id}", cfg.ModelCatalogAdmin.DeleteModel)
+			}
+			if cfg.RBAC != nil {
+				r.Get("/me/permissions", cfg.RBAC.MyPermissions)
+				r.Get("/permissions", cfg.RBAC.ListPermissions)
+				r.Get("/roles", cfg.RBAC.ListRoles)
+				r.Post("/roles", cfg.RBAC.CreateRole)
+				r.Patch("/roles/{id}/permissions", cfg.RBAC.UpdateRolePermissions)
+				r.Delete("/roles/{id}", cfg.RBAC.DeleteRole)
+				r.Get("/users", cfg.RBAC.ListUsers)
+				r.Patch("/users/{id}/status", cfg.RBAC.UpdateUserStatus)
+				r.Patch("/users/{id}/roles", cfg.RBAC.UpdateUserRoles)
 			}
 			if cfg.Usage != nil {
 				r.Get("/usage/me", cfg.Usage.GetMyUsage)

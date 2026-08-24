@@ -11,7 +11,9 @@ import (
 type Querier interface {
 	CountActiveSubscribedListingsForAgentRef(ctx context.Context, arg CountActiveSubscribedListingsForAgentRefParams) (int64, error)
 	CountActiveSubscribedListingsForBundleRef(ctx context.Context, arg CountActiveSubscribedListingsForBundleRefParams) (int64, error)
+	CountAdminUsers(ctx context.Context) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
+	CreateAdminUser(ctx context.Context, arg CreateAdminUserParams) (User, error)
 	// Owner-view and subscriber-view queries are kept physically separate so the
 	// subscriber path can never accidentally SELECT `definition` (see
 	// docs/架构设计文档_AI-Agent平台_V1.md 五、"黑盒发布的实现要点").
@@ -39,6 +41,7 @@ type Querier interface {
 	CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error)
 	CreateModelProvider(ctx context.Context, arg CreateModelProviderParams) (CreateModelProviderRow, error)
 	CreateReport(ctx context.Context, arg CreateReportParams) (Report, error)
+	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error)
 	// ── Subscriptions ────────────────────────────────────────────────────
 	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error)
@@ -53,7 +56,10 @@ type Querier interface {
 	DeleteCatalogProvider(ctx context.Context, id int64) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
 	DeleteKBChunksBySource(ctx context.Context, arg DeleteKBChunksBySourceParams) error
+	DeleteRole(ctx context.Context, id int64) error
+	DeleteRolePermissions(ctx context.Context, roleID int64) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
+	DeleteUserRoles(ctx context.Context, userID int64) error
 	// Knowledge bases surface to an Agent as an entry in capabilities.tools
 	// (the DSL has no separate knowledge_base array) — same lookup as tools.
 	FindAgentsReferencingKnowledgeBaseRef(ctx context.Context, arg FindAgentsReferencingKnowledgeBaseRefParams) ([]FindAgentsReferencingKnowledgeBaseRefRow, error)
@@ -128,7 +134,9 @@ type Querier interface {
 	// self-loop retry), so this always resolves to the most recent occurrence
 	// for that run+node — the one actually blocking right now.
 	GetPendingHumanGateForRunNode(ctx context.Context, arg GetPendingHumanGateForRunNodeParams) (HumanGate, error)
+	GetPermissionIDsByKeys(ctx context.Context, keys []string) ([]int64, error)
 	GetReportByID(ctx context.Context, id int64) (Report, error)
+	GetRole(ctx context.Context, id int64) (Role, error)
 	GetSkillByIDForOwner(ctx context.Context, arg GetSkillByIDForOwnerParams) (Skill, error)
 	GetSkillByRefVersionForOwner(ctx context.Context, arg GetSkillByRefVersionForOwnerParams) (Skill, error)
 	GetSkillLatestByRef(ctx context.Context, arg GetSkillLatestByRefParams) (Skill, error)
@@ -165,6 +173,8 @@ type Querier interface {
 	InsertBundleRunEvent(ctx context.Context, arg InsertBundleRunEventParams) (BundleRunEvent, error)
 	InsertKBChunk(ctx context.Context, arg InsertKBChunkParams) (int64, error)
 	InsertMemoryEntry(ctx context.Context, arg InsertMemoryEntryParams) (int64, error)
+	InsertRolePermission(ctx context.Context, arg InsertRolePermissionParams) error
+	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
 	ListAPIKeysForOwner(ctx context.Context, ownerUserID int64) ([]ListAPIKeysForOwnerRow, error)
 	ListAgentVersionsForOwner(ctx context.Context, arg ListAgentVersionsForOwnerParams) ([]Agent, error)
 	ListAgentsForOwner(ctx context.Context, ownerUserID int64) ([]Agent, error)
@@ -204,14 +214,21 @@ type Querier interface {
 	// timeout_seconds set, whose deadline has passed.
 	ListPendingHumanGatesPastTimeout(ctx context.Context) ([]HumanGate, error)
 	ListPendingReportsPage(ctx context.Context, arg ListPendingReportsPageParams) ([]Report, error)
+	ListPermissionKeysForUser(ctx context.Context, userID int64) ([]string, error)
+	ListPermissions(ctx context.Context) ([]Permission, error)
 	// ── Browse / detail (blackbox: display_meta only, never definition) ────
 	ListPublishedAgentListingsPage(ctx context.Context, arg ListPublishedAgentListingsPageParams) ([]ListPublishedAgentListingsPageRow, error)
 	ListPublishedBundleListingsPage(ctx context.Context, arg ListPublishedBundleListingsPageParams) ([]ListPublishedBundleListingsPageRow, error)
 	ListPublishedMCPServerListingsPage(ctx context.Context, arg ListPublishedMCPServerListingsPageParams) ([]ListPublishedMCPServerListingsPageRow, error)
 	ListPublishedSkillListingsPage(ctx context.Context, arg ListPublishedSkillListingsPageParams) ([]ListPublishedSkillListingsPageRow, error)
+	ListRolePermissionKeys(ctx context.Context, roleIds []int64) ([]ListRolePermissionKeysRow, error)
+	ListRoles(ctx context.Context) ([]Role, error)
+	ListRolesForUser(ctx context.Context, userID int64) ([]Role, error)
 	ListSkillsForOwnerPage(ctx context.Context, arg ListSkillsForOwnerPageParams) ([]Skill, error)
 	ListSubscriptionsForUserPage(ctx context.Context, arg ListSubscriptionsForUserPageParams) ([]Subscription, error)
 	ListToolsForOwnerPage(ctx context.Context, arg ListToolsForOwnerPageParams) ([]Tool, error)
+	ListUserRoleIDs(ctx context.Context, userIds []int64) ([]ListUserRoleIDsRow, error)
+	ListUsersForAdmin(ctx context.Context, search string) ([]ListUsersForAdminRow, error)
 	MarkAgentImmutable(ctx context.Context, id int64) error
 	MarkBundleImmutable(ctx context.Context, id int64) error
 	MarkBundleRunCancelRequested(ctx context.Context, id string) error
@@ -237,6 +254,7 @@ type Querier interface {
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error
 	SetSkillDisplayMeta(ctx context.Context, arg SetSkillDisplayMetaParams) error
 	SetSkillStatusByID(ctx context.Context, arg SetSkillStatusByIDParams) error
+	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
 	TouchAPIKeyLastUsed(ctx context.Context, id int64) error
 	UpdateBundleRunStatus(ctx context.Context, arg UpdateBundleRunStatusParams) error
 	UpdateBundleRunUsage(ctx context.Context, arg UpdateBundleRunUsageParams) error
@@ -247,6 +265,7 @@ type Querier interface {
 	UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill, error)
 	UpdateSubscriptionListing(ctx context.Context, arg UpdateSubscriptionListingParams) (Subscription, error)
 	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)
+	UserHasPermission(ctx context.Context, arg UserHasPermissionParams) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

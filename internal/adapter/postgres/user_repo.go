@@ -33,6 +33,24 @@ func (r *UserRepository) Create(ctx context.Context, email, passwordHash, displa
 	return toDomainUser(row), nil
 }
 
+func (r *UserRepository) CountAdmins(ctx context.Context) (int64, error) {
+	return r.q.CountAdminUsers(ctx)
+}
+
+func (r *UserRepository) CreateAdmin(ctx context.Context, email, passwordHash, displayName string) (iam.User, error) {
+	row, err := r.q.CreateAdminUser(ctx, store.CreateAdminUserParams{
+		Email: email, PasswordHash: passwordHash, DisplayName: displayName,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return iam.User{}, iam.ErrEmailTaken
+		}
+		return iam.User{}, err
+	}
+	return toDomainUser(row), nil
+}
+
 func (r *UserRepository) ByEmail(ctx context.Context, email string) (iam.User, error) {
 	row, err := r.q.GetUserByEmail(ctx, email)
 	if errors.Is(err, pgx.ErrNoRows) {
