@@ -41,7 +41,7 @@ export function PropertiesPanel({
       <div className="flex h-full flex-col gap-space-5 border-l border-border bg-surface p-space-5">
         <div>
           <p className="text-label-md text-ink-900">节点</p>
-          <p className="text-body-sm font-mono text-ink-700">{selectedNode.data.alias || selectedNode.data.ref}</p>
+          <p className="text-ref text-ink-700">{selectedNode.data.alias || selectedNode.data.ref}</p>
         </div>
 
         <div className="flex items-center gap-space-2">
@@ -106,7 +106,7 @@ export function PropertiesPanel({
       <div className="flex h-full flex-col gap-space-5 border-l border-border bg-surface p-space-5">
         <div>
           <p className="text-label-md text-ink-900">连线</p>
-          <p className="text-body-sm font-mono text-ink-700">
+          <p className="text-ref text-ink-700">
             {selectedEdge.source} → {selectedEdge.target}
           </p>
         </div>
@@ -120,10 +120,10 @@ export function PropertiesPanel({
             value={condition}
             onChange={(e) => onUpdateEdge(selectedEdge.id, { condition: e.target.value || undefined })}
             aria-invalid={!!error}
-            className={error ? 'h-9 border-[var(--color-error)]' : 'h-9'}
+            className={error ? 'h-9 border-rust' : 'h-9'}
             placeholder="shared_state.tests_passed == true"
           />
-          {error && <p className="text-caption text-[var(--color-error)]">{error}</p>}
+          {error && <p className="text-caption text-rust">{error}</p>}
         </div>
 
         <div className="flex flex-col gap-space-2">
@@ -193,12 +193,12 @@ export function PropertiesPanel({
 
       {issues.length > 0 && (
         <div>
-          <p className="text-label-md mb-space-2 text-[var(--color-error)]">校验问题（{issues.length}）</p>
+          <p className="text-label-md mb-space-2 text-rust">校验问题（{issues.length}）</p>
           <ul className="flex flex-col gap-space-2">
             {issues.map((issue, i) => (
               <li key={i}>
-                <Button variant="outline" size="sm" className="h-auto w-full flex-col items-start gap-0.5 whitespace-normal border-[var(--color-error)] px-space-3 py-space-2 text-left" onClick={() => onFocusIssue(issue.target)}>
-                  <span className="text-caption font-mono text-[var(--color-error)]">{issue.target}</span>
+                <Button variant="outline" size="sm" className="h-auto w-full flex-col items-start gap-0.5 whitespace-normal border-rust px-space-3 py-space-2 text-left" onClick={() => onFocusIssue(issue.target)}>
+                  <span className="text-ref text-rust">{issue.target}</span>
                   <span className="text-body-sm text-ink-700">{issue.reason}</span>
                 </Button>
               </li>

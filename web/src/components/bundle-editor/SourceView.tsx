@@ -39,10 +39,10 @@ export function SourceView({
         value={value}
         onChange={(e) => handleChange(e.target.value)}
         spellCheck={false}
-        className={cn('h-full flex-1 resize-none font-mono text-body-sm', error && 'border-[var(--color-error)]')}
+        className={cn('h-full flex-1 resize-none text-ref', error && 'border-rust')}
       />
       {error && (
-        <p role="alert" className="text-body-sm rounded-md border border-[var(--color-error)] px-space-3 py-space-2 text-[var(--color-error)]">
+        <p role="alert" className="text-body-sm rounded-sm border border-rust bg-rust-tint px-space-3 py-space-2 text-rust">
           JSON 语法错误，无法切回画布：{error}
         </p>
       )}

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { FilterChip, FilterChips } from '@/components/common/Page'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { EmptyState, ErrorPanel } from '@/components/common/EmptyState'
@@ -27,7 +27,7 @@ function CardSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-space-6 md:grid-cols-2 lg:grid-cols-3">
       {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="h-56 animate-pulse rounded-lg bg-surface-muted" />
+        <div key={i} className="h-52 animate-pulse rounded-lg border border-border bg-surface-muted" />
       ))}
     </div>
   )
@@ -54,36 +54,29 @@ export function MarketplaceBrowsePage() {
 
   return (
     <div className="flex flex-col gap-space-7">
-      <div>
-        <h1 className="text-headline-lg text-ink-900">应用广场</h1>
-        <p className="text-body-lg mt-space-2 text-ink-700">订阅他人发布的 Bundle、Agent、Skill 或 MCP Server。</p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-space-4">
-        <Tabs value={type} onValueChange={(v) => setType(v as typeof type)}>
-          <TabsList>
-            {TYPES.map((t) => (
-              <TabsTrigger key={t.value} value={t.value}>
-                {t.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+      <div className="flex flex-wrap items-center justify-between gap-space-4">
+        <FilterChips>
+          {TYPES.map((t) => (
+            <FilterChip key={t.value} active={t.value === type} onClick={() => setType(t.value)}>
+              {t.label}
+            </FilterChip>
+          ))}
+        </FilterChips>
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="搜索名称或描述"
-          className="max-w-xs"
+          className="w-full max-w-[240px]"
         />
       </div>
 
       {query.isLoading && <CardSkeleton />}
-      {query.isError && <ErrorPanel message="广场列表加载失败" onRetry={() => query.refetch()} />}
+      {query.isError && <ErrorPanel message="广场列表没能加载出来" onRetry={() => query.refetch()} />}
 
       {query.isSuccess && items.length === 0 && !isFiltered && (
         <EmptyState
-          title="广场还没有内容"
-          description="发布一个 Bundle 或 Agent，让其他人可以订阅使用。"
+          title="广场上还没有人发布东西"
+          description="把你做好的 Bundle 或 Agent 发布出来，别人订阅后可以直接运行，但看不到你怎么编排的。"
           action={
             <Button size="sm" asChild>
               <Link to="/marketplace?tab=publish">发布我的第一个资源</Link>
@@ -94,11 +87,11 @@ export function MarketplaceBrowsePage() {
 
       {query.isSuccess && items.length === 0 && isFiltered && (
         <EmptyState
-          title="没有找到相关资源"
-          description="换一个关键词或类型试试。"
+          title="没有匹配的资源"
+          description="搜索只匹配名称和简介，不搜索资源内部内容——广场上的资源本来就是黑盒。"
           action={
             <Button
-              variant="secondary"
+              variant="outline"
               size="sm"
               onClick={() => {
                 setType('all')
@@ -112,7 +105,7 @@ export function MarketplaceBrowsePage() {
       )}
 
       {items.length > 0 && (
-        <div className="grid grid-cols-1 gap-space-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-space-5 md:grid-cols-2 xl:grid-cols-3">
           {items.map((listing) => (
             <ListingCard key={listing.id} listing={listing} onSubscribe={setSubscribeTarget} />
           ))}

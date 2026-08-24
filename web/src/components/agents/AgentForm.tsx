@@ -146,7 +146,7 @@ function formStateToDefinition(f: FormState): AgentDefinition {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-space-4 border-t border-border pt-space-7 first:border-t-0 first:pt-0">
-      <h2 className="text-headline-sm text-ink-900">{title}</h2>
+      <h2 className="text-display-md text-ink-900">{title}</h2>
       {children}
     </section>
   )
@@ -175,7 +175,7 @@ function Field({
       {children}
       {helper && !error && <p className="text-caption text-ink-500">{helper}</p>}
       {error && (
-        <p id={`${htmlFor}-error`} className="text-caption text-[var(--color-error)]">
+        <p id={`${htmlFor}-error`} className="text-caption text-rust">
           {error}
         </p>
       )}
@@ -266,8 +266,8 @@ export function AgentForm({
   function inputClass(key: string) {
     return cn(
       'h-12 rounded-sm',
-      errors[key] && 'border-[var(--color-error)]',
-      !errors[key] && touched[key] && 'border-mint',
+      errors[key] && 'border-rust',
+      !errors[key] && touched[key] && 'border-moss',
     )
   }
 
@@ -364,7 +364,7 @@ export function AgentForm({
             onChange={(e) => set('persona', e.target.value)}
             onBlur={() => validateField('persona')}
             rows={5}
-            className={cn(errors.persona && 'border-[var(--color-error)]', !errors.persona && touched.persona && 'border-mint')}
+            className={cn(errors.persona && 'border-rust', !errors.persona && touched.persona && 'border-moss')}
           />
         </Field>
       </Section>
@@ -430,7 +430,7 @@ export function AgentForm({
       </Section>
 
       {submitError && (
-        <p role="alert" className="text-body-sm text-[var(--color-error)]">
+        <p role="alert" className="text-body-sm text-rust">
           {submitError}
         </p>
       )}

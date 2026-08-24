@@ -20,7 +20,7 @@ export function UserBubble({ text }: { text: string }) {
 export function AgentBubble({ node, bubble, isBlackbox }: { node: string; bubble: NodeBubbleState; isBlackbox: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const borderColor =
-    bubble.status === 'failed' ? 'border-l-[var(--color-error)]' : bubble.status === 'done' ? 'border-l-[var(--color-success)]' : 'border-l-primary'
+    bubble.status === 'failed' ? 'border-l-[var(--color-rust)]' : bubble.status === 'done' ? 'border-l-[var(--color-moss)]' : 'border-l-primary'
 
   const lines = bubble.text.split('\n')
   const overflow = !isBlackbox && lines.length > MAX_LINES && !expanded
@@ -51,7 +51,7 @@ export function AgentBubble({ node, bubble, isBlackbox }: { node: string; bubble
       </div>
 
       {bubble.status === 'failed' ? (
-        <p className="text-body-md text-[var(--color-error)]">{bubble.errorText ?? '节点执行失败'}</p>
+        <p className="text-body-md text-rust">{bubble.errorText ?? '节点执行失败'}</p>
       ) : (
         <>
           {!isBlackbox && bubble.toolCalls.length > 0 && (
@@ -83,12 +83,12 @@ export function AgentBubble({ node, bubble, isBlackbox }: { node: string; bubble
             <button
               type="button"
               onClick={() => setExpanded(true)}
-              className="text-body-sm mt-space-2 text-primary hover:underline"
+              className="text-body-sm mt-space-2 text-blueprint hover:underline"
             >
               展开全部
             </button>
           )}
-          {bubble.status === 'done' && <p className="text-body-sm mt-space-3 text-primary">查看完整产出</p>}
+          {bubble.status === 'done' && <p className="text-body-sm mt-space-3 text-blueprint">查看完整产出</p>}
         </>
       )}
     </div>

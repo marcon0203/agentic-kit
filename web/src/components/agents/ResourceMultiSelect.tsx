@@ -59,7 +59,7 @@ export function ResourceMultiSelect({
             className={cn(
               'text-body-sm rounded-full border px-space-3 py-space-2',
               disabled && 'cursor-not-allowed border-border bg-surface-muted text-ink-500 opacity-60',
-              !disabled && active && 'border-primary bg-primary/10 text-primary',
+              !disabled && active && 'border-primary bg-blueprint-tint text-blueprint',
               !disabled && !active && 'border-border bg-surface text-ink-700 hover:border-border-strong',
             )}
           >

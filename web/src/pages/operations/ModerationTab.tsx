@@ -53,12 +53,15 @@ export function ModerationTab() {
       {query.isLoading && <ListSkeleton rows={6} />}
       {query.isError && <ErrorPanel message="举报队列加载失败" onRetry={() => query.refetch()} />}
       {actionError && (
-        <p role="alert" className="text-body-sm text-[var(--color-error)]">
+        <p role="alert" className="text-body-sm text-rust">
           {actionError}
         </p>
       )}
 
-      {query.isSuccess && items.length === 0 && <EmptyState title="暂无待处理举报" description="" />}
+      {query.isSuccess && items.length === 0 && <EmptyState
+          title="举报队列是空的"
+          description="有人举报广场上的资源时会出现在这里，等你决定驳回还是下架。"
+        />}
 
       {items.length > 0 && (
         <>
@@ -77,11 +80,11 @@ export function ModerationTab() {
                   <tr key={r.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
                     <td className="text-body-md px-space-4 py-space-3 font-mono text-ink-900">{r.listing_ref}</td>
                     <td className="text-body-sm px-space-4 py-space-3 text-ink-700">{r.reason}</td>
-                    <td className="text-body-sm px-space-4 py-space-3 font-mono text-ink-700">{fmtTime(r.created_at)}</td>
+                    <td className="text-ref tabular px-space-4 py-space-3 text-ink-700">{fmtTime(r.created_at)}</td>
                     <td className="px-space-4 py-space-3 text-right">
                       <div className="flex justify-end gap-space-2">
                         <Button
-                          variant="secondary"
+                          variant="outline"
                           size="sm"
                           disabled={resolve.isPending}
                           onClick={() => {
@@ -115,12 +118,12 @@ export function ModerationTab() {
               <div key={r.id} className="flex flex-col gap-space-2 rounded-lg border border-border bg-surface px-space-4 py-space-3">
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-body-md text-ink-900">{r.listing_ref}</span>
-                  <span className="font-mono text-caption text-ink-500">{fmtTime(r.created_at)}</span>
+                  <span className="text-ref text-ink-500">{fmtTime(r.created_at)}</span>
                 </div>
                 <p className="text-body-sm text-ink-700">{r.reason}</p>
                 <div className="flex gap-space-2">
                   <Button
-                    variant="secondary"
+                    variant="outline"
                     size="sm"
                     className="flex-1"
                     disabled={resolve.isPending}
@@ -160,7 +163,7 @@ export function ModerationTab() {
             <strong className="text-ink-900">{takedownTarget?.subscriber_count ?? 0}</strong> 个存量订阅者，下架后他们将无法继续使用。此操作不可撤销。
           </p>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setTakedownTarget(null)} disabled={resolve.isPending}>
+            <Button variant="outline" onClick={() => setTakedownTarget(null)} disabled={resolve.isPending}>
               取消
             </Button>
             <Button

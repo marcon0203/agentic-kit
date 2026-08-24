@@ -132,7 +132,7 @@ export function RunPage() {
         />
 
         {actionError && (
-          <p role="alert" className="text-body-sm mb-space-4 text-[var(--color-error)]">
+          <p role="alert" className="text-body-sm mb-space-4 text-rust">
             {actionError}
           </p>
         )}
@@ -142,7 +142,10 @@ export function RunPage() {
             {initialInput && <UserBubble text={initialInput} />}
 
             {timeline.entries.length === 0 && (
-              <p className="text-body-sm text-ink-500">正在启动…</p>
+              <p className="text-body-sm flex items-center gap-space-2 text-ink-500">
+                <span aria-hidden className="size-2 animate-pulse rounded-full bg-blueprint" />
+                正在启动，第一个节点马上开始…
+              </p>
             )}
 
             {timeline.entries.map((entry) => {
@@ -162,11 +165,11 @@ export function RunPage() {
                 <div
                   key={entry.key}
                   className={
-                    'text-body-sm rounded-md border px-space-4 py-space-3 ' +
+                    'text-body-sm rounded-sm border px-space-4 py-space-3 ' +
                     (entry.tone === 'error'
-                      ? 'border-[var(--color-error)] text-[var(--color-error)]'
+                      ? 'border-rust bg-rust-tint text-rust'
                       : entry.tone === 'success'
-                        ? 'border-[var(--color-success)] text-[var(--color-success)]'
+                        ? 'border-moss bg-moss-tint text-moss'
                         : 'border-border text-ink-700')
                   }
                 >
@@ -180,7 +183,7 @@ export function RunPage() {
             <button
               type="button"
               onClick={scrollToBottom}
-              className="absolute bottom-space-4 right-space-4 flex items-center gap-1 rounded-full bg-[image:var(--gradient-brand)] px-space-4 py-space-2 text-body-sm text-white shadow-md"
+              className="absolute bottom-space-4 right-space-4 flex items-center gap-1 rounded-full bg-blueprint px-space-4 py-space-2 text-body-sm text-white shadow-md"
             >
               有新消息 <ArrowDown className="size-3.5" aria-hidden />
             </button>

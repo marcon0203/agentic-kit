@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, TriangleAlert, X } from 'lucide-react'
+import { Check, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import type { TimelineEntry } from '@/lib/runs/timeline'
@@ -31,9 +31,9 @@ export function GateCard({
     return (
       <div className="text-body-sm flex items-center gap-space-2 rounded-md border border-border bg-surface px-space-4 py-space-3 text-ink-700">
         {done ? (
-          <Check className="size-4 text-[var(--color-success)]" aria-hidden />
+          <Check className="size-4 text-moss" aria-hidden />
         ) : (
-          <X className="size-4 text-[var(--color-error)]" aria-hidden />
+          <X className="size-4 text-rust" aria-hidden />
         )}
         <span>
           {gate.node} 的审批{label}
@@ -55,31 +55,45 @@ export function GateCard({
     <div
       role="status"
       aria-live="assertive"
-      className="rounded-md border border-[var(--color-warning)] p-space-5"
-      style={{ backgroundColor: 'color-mix(in srgb, var(--color-warning) 8%, var(--color-surface))' }}
+      className="overflow-hidden rounded-lg border border-signal bg-signal-tint"
     >
-      <div className="flex items-start gap-space-3">
-        <TriangleAlert className="mt-0.5 size-5 shrink-0 text-[var(--color-warning)]" aria-hidden />
-        <div className="flex-1">
-          <p className="text-label-md text-ink-900">{gate.node} 已完成，需要你确认后继续</p>
-          <p className="text-body-sm mt-space-1 text-ink-700">请查看上方产出，决定是否继续执行后续步骤。</p>
+      {/* The run has physically stopped here. The pulsing station is the
+          same mark the hero rail uses, so "停在这一步" reads instantly. */}
+      <div className="flex items-center gap-space-3 border-b border-signal/30 px-space-5 py-space-3">
+        <span aria-hidden className="animate-gate-await size-2.5 shrink-0 rounded-full bg-signal" />
+        <span className="text-label-md text-signal">运行已暂停，等你决定</span>
+      </div>
 
-          <div className="mt-space-4 flex justify-end gap-space-3">
-            {canApprove ? (
-              <>
-                {/* size="lg" (44px) — design-system.md's explicit
-                    ≥40×40px requirement for approval actions. */}
-                <Button variant="secondary" size="lg" disabled={pending !== null} onClick={() => act(false)}>
-                  {pending === 'reject' ? '处理中…' : '驳回'}
-                </Button>
-                <Button size="lg" disabled={pending !== null} onClick={() => act(true)}>
-                  {pending === 'approve' ? '处理中…' : '通过'}
-                </Button>
-              </>
-            ) : (
-              <span className="text-body-sm text-ink-500">等待他人审批</span>
-            )}
-          </div>
+      <div className="flex flex-col gap-space-4 px-space-5 py-space-4">
+        <div className="flex flex-col gap-space-1">
+          <p className="text-body-md text-ink-900">
+            <code className="text-ref-lg">{gate.node}</code> 已经跑完了。
+          </p>
+          <p className="text-body-sm text-ink-700">
+            通过就继续往下走；驳回会让这条分支带着你的理由停下，后面的节点不会执行。
+          </p>
+        </div>
+
+        <div className="flex justify-end gap-space-3">
+          {canApprove ? (
+            <>
+              {/* size="lg" (44px): an approval is a decision, and a decision
+                  deserves a target you cannot miss by accident. */}
+              <Button
+                variant="outline"
+                size="lg"
+                disabled={pending !== null}
+                onClick={() => act(false)}
+              >
+                {pending === 'reject' ? '驳回中…' : '驳回'}
+              </Button>
+              <Button size="lg" disabled={pending !== null} onClick={() => act(true)}>
+                {pending === 'approve' ? '通过中…' : '通过'}
+              </Button>
+            </>
+          ) : (
+            <span className="text-body-sm text-ink-500">只有发起这次运行的人可以审批</span>
+          )}
         </div>
       </div>
     </div>

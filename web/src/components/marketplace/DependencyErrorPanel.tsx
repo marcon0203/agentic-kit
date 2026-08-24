@@ -16,19 +16,19 @@ import type { FieldError } from '@/lib/api/client'
  */
 export function DependencyErrorPanel({ errors, onRevalidate }: { errors: FieldError[]; onRevalidate: () => void }) {
   return (
-    <div className="rounded-md border border-[var(--color-warning)] p-space-5">
+    <div className="rounded-sm border border-signal bg-signal-tint p-space-5">
       <div className="flex items-center gap-space-2">
-        <TriangleAlert className="size-4 text-[var(--color-warning)]" aria-hidden />
+        <TriangleAlert className="size-4 text-signal" aria-hidden />
         <p className="text-label-md text-ink-900">存在 {errors.length} 个未满足的发布依赖，无法发布</p>
       </div>
       <ol className="mt-space-4 flex flex-col gap-space-4">
         {errors.map((e, i) => (
           <li key={i} className="flex items-start justify-between gap-space-4 border-t border-border pt-space-3 first:border-t-0 first:pt-0">
             <div>
-              <p className="text-caption font-mono text-ink-500">{e.field}</p>
+              <p className="text-ref text-ink-500">{e.field}</p>
               <p className="text-body-sm text-ink-700">{e.reason}</p>
             </div>
-            <Button asChild variant="secondary" size="sm" className="shrink-0">
+            <Button asChild variant="outline" size="sm" className="shrink-0">
               <Link to="/apps" target="_blank" rel="noopener noreferrer">
                 去发布
               </Link>
@@ -38,7 +38,7 @@ export function DependencyErrorPanel({ errors, onRevalidate }: { errors: FieldEr
       </ol>
       <div className="mt-space-5 flex items-center justify-between">
         <p className="text-caption text-ink-500">全部发布后再回来重试</p>
-        <Button variant="secondary" size="sm" onClick={onRevalidate}>
+        <Button variant="outline" size="sm" onClick={onRevalidate}>
           重新校验
         </Button>
       </div>

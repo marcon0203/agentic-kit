@@ -50,13 +50,13 @@ export function StartRunCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-headline-sm">发起运行</CardTitle>
+        <CardTitle className="text-display-md">发起运行</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-space-4">
         {blocked && (
-          <p className="text-body-sm rounded-md border border-[var(--color-warning)] px-space-4 py-space-3 text-ink-700">
+          <p className="text-body-sm rounded-sm border border-signal bg-signal-tint px-space-4 py-space-3 text-ink-700">
             尚未接入任何模型 Provider，
-            <Link to="/models" className="text-primary hover:underline">
+            <Link to="/models" className="text-blueprint hover:underline">
               前往模型中心接入
             </Link>
             后才能运行。
@@ -86,7 +86,7 @@ export function StartRunCard() {
           />
         </div>
         {error && (
-          <p role="alert" className="text-body-sm text-[var(--color-error)]">
+          <p role="alert" className="text-body-sm text-rust">
             {error}
           </p>
         )}

@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { EmptyState, ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
+import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
+import { EmptyRail } from '@/components/common/Rail'
+import { Ref, Section } from '@/components/common/Page'
+import { cn } from '@/lib/utils'
 import { AgentForm, definitionToFormState, type FormState } from '@/components/agents/AgentForm'
 import { apiClient, unwrap } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
@@ -24,10 +26,10 @@ export function AgentDefinitionPage() {
   if (mode === 'create') {
     return (
       <div className="flex flex-col gap-space-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-headline-md text-ink-900">{copyFrom ? '复制 Agent' : '新建 Agent'}</h1>
+        <div className="flex items-center justify-between border-b border-border pb-space-3">
+          <h2 className="text-display-md text-ink-900">{copyFrom ? '复制 Agent' : '新建 Agent'}</h2>
           <Button
-            variant="secondary"
+            variant="outline"
             size="sm"
             onClick={() => {
               setMode('list')
@@ -52,49 +54,64 @@ export function AgentDefinitionPage() {
   const items = query.data?.items ?? []
 
   return (
-    <div className="flex flex-col gap-space-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-headline-md text-ink-900">Agent 定义</h1>
-        <Button onClick={() => setMode('create')}>新建 Agent</Button>
-      </div>
-
+    <Section
+      title="我的 Agent"
+      aside={
+        <Button size="sm" onClick={() => setMode('create')}>
+          新建 Agent
+        </Button>
+      }
+    >
       {query.isLoading && <ListSkeleton />}
-      {query.isError && <ErrorPanel message="Agent 列表加载失败" onRetry={() => query.refetch()} />}
+      {query.isError && <ErrorPanel message="Agent 列表没能加载出来" onRetry={() => query.refetch()} />}
 
       {query.isSuccess && items.length === 0 && (
-        <EmptyState
-          title="还没有创建任何 Agent"
-          description="Agent 定义模型、角色设定与能力白名单，是编排 Bundle 的基本单元。"
-          action={<Button size="sm" onClick={() => setMode('create')}>创建第一个 Agent</Button>}
+        <EmptyRail
+          title="先定义一个角色"
+          description="一个 Agent 就是一个角色：它是谁、能用哪些资源、单轮最多花多少 token。Bundle 编排的就是这些角色。"
+          action={
+            <Button size="sm" onClick={() => setMode('create')}>
+              新建 Agent
+            </Button>
+          }
         />
       )}
 
       {items.length > 0 && (
-        <ul className="flex flex-col gap-space-2">
+        <ul className="overflow-hidden rounded-lg border border-border bg-surface">
           {items.map((a) => (
-            <li key={a.id} className="flex items-center gap-space-4 rounded-md border border-border bg-surface px-space-5 py-space-4">
-              <div className="flex-1">
-                <div className="flex items-center gap-space-2">
-                  <span className="font-mono text-body-md text-ink-900">{a.agent_ref}</span>
-                  <span className="text-caption text-ink-500">v{a.version}</span>
-                </div>
-                <p className="text-body-sm text-ink-700">{a.definition.role}</p>
-              </div>
-              <Badge variant={a.status === 1 ? 'default' : 'secondary'}>{a.status === 1 ? '已启用' : '已停用'}</Badge>
+            <li
+              key={a.id}
+              className="flex items-center gap-space-4 border-b border-border px-space-5 py-space-3 last:border-0"
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  'size-2 shrink-0 rounded-full',
+                  a.status === 1 ? 'bg-moss' : 'bg-border-strong',
+                )}
+              />
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="flex items-center gap-space-2">
+                  <Ref>{a.agent_ref}</Ref>
+                  <span className="text-caption tabular text-ink-500">v{a.version}</span>
+                </span>
+                <span className="text-body-sm truncate text-ink-700">{a.definition.role}</span>
+              </span>
               <Button
-                variant="secondary"
+                variant="outline"
                 size="sm"
                 onClick={() => {
                   setCopyFrom(definitionToFormState(a.definition, true))
                   setMode('create')
                 }}
               >
-                从此复制
+                以此为模板
               </Button>
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </Section>
   )
 }

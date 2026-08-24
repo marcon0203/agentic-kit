@@ -46,7 +46,7 @@ export function StopRunDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={pending}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             继续运行
           </Button>
           <Button variant="destructive" onClick={confirm} disabled={pending}>

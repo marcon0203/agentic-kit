@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { EmptyState, ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
+import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
+import { EmptyRail } from '@/components/common/Rail'
+import { Ref, Section } from '@/components/common/Page'
+import { cn } from '@/lib/utils'
 import { StartRunCard } from '@/components/run/StartRunCard'
 import { apiClient, unwrap, assertOk, ApiError } from '@/lib/api/client'
 import { useHasModelProvider } from '@/lib/models/useHasModelProvider'
@@ -30,7 +32,7 @@ export function BundleListPage() {
       assertOk(await apiClient.DELETE('/bundles/{ref}', { params: { path: { ref } } }))
       queryClient.invalidateQueries({ queryKey: ['bundles'] })
     } catch (err) {
-      setDeleteError(err instanceof ApiError ? err.message : '删除失败')
+      setDeleteError(err instanceof ApiError ? err.message : '删除没能完成，请再试一次')
     }
   }
 
@@ -38,57 +40,77 @@ export function BundleListPage() {
 
   return (
     <div className="flex flex-col gap-space-8">
-      <div className="flex flex-col gap-space-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-headline-md text-ink-900">应用中心</h1>
+      <Section
+        title="我的 Bundle"
+        aside={
           <Button size="sm" onClick={() => navigate('/bundles/new')}>
             新建 Bundle
           </Button>
-        </div>
-
+        }
+      >
         {query.isLoading && <ListSkeleton />}
-        {query.isError && <ErrorPanel message="Bundle 列表加载失败" onRetry={() => query.refetch()} />}
+        {query.isError && (
+          <ErrorPanel message="Bundle 列表没能加载出来" onRetry={() => query.refetch()} />
+        )}
         {deleteError && (
-          <p role="alert" className="text-body-sm text-[var(--color-error)]">
+          <p role="alert" className="text-body-sm text-rust">
             {deleteError}
           </p>
         )}
 
         {query.isSuccess && items.length === 0 && (
-          <EmptyState
-            title="还没有创建任何 Bundle"
-            description="Bundle 编排多个 Agent 协作完成一次任务，是运行的最小单位。"
+          <EmptyRail
+            title="编排你的第一次协作"
+            description="Bundle 决定谁先做、谁并行、哪一步要停下来等人。它是运行的最小单位——有了 Bundle 才能发起运行。"
+            action={
+              <Button size="sm" onClick={() => navigate('/bundles/new')}>
+                新建 Bundle
+              </Button>
+            }
           />
         )}
 
         {items.length > 0 && (
-          <ul className="flex flex-col gap-space-2">
+          <ul className="overflow-hidden rounded-lg border border-border bg-surface">
             {items.map((b) => (
-              <li key={b.id} className="flex items-center gap-space-4 rounded-md border border-border bg-surface px-space-5 py-space-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-space-2">
-                    <span className="font-mono text-body-md text-ink-900">{b.bundle_ref}</span>
-                    <span className="text-caption text-ink-500">v{b.version}</span>
-                  </div>
-                  {b.definition.description && <p className="text-body-sm text-ink-700">{b.definition.description}</p>}
-                </div>
-                <Badge variant={b.status === 1 ? 'default' : 'secondary'}>{b.status === 1 ? '已启用' : '已停用'}</Badge>
+              <li
+                key={b.id}
+                className="flex items-center gap-space-4 border-b border-border px-space-5 py-space-3 last:border-0"
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    'size-2 shrink-0 rounded-full',
+                    b.status === 1 ? 'bg-moss' : 'bg-border-strong',
+                  )}
+                />
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="flex items-center gap-space-2">
+                    <Ref>{b.bundle_ref}</Ref>
+                    <span className="text-caption tabular text-ink-500">v{b.version}</span>
+                  </span>
+                  {b.definition.description && (
+                    <span className="text-body-sm truncate text-ink-700">
+                      {b.definition.description}
+                    </span>
+                  )}
+                </span>
                 <Button
                   size="sm"
                   disabled={runBlocked}
-                  title={runBlocked ? '请先在模型中心接入模型 Provider' : undefined}
+                  title={runBlocked ? '先去模型中心接入一个 Provider，才能发起运行' : undefined}
                   onClick={() => navigate('/apps', { state: { quickStartBundleRef: b.bundle_ref } })}
                 >
                   运行
                 </Button>
-                <Button variant="secondary" size="sm" onClick={() => remove(b.bundle_ref)}>
+                <Button variant="ghost" size="sm" onClick={() => remove(b.bundle_ref)}>
                   删除
                 </Button>
               </li>
             ))}
           </ul>
         )}
-      </div>
+      </Section>
 
       <StartRunCard />
     </div>

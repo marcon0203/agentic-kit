@@ -183,7 +183,7 @@ export function PublishForm({ onPublished }: { onPublished: () => void }) {
 
       {depErrors && <DependencyErrorPanel errors={depErrors} onRevalidate={submit} />}
       {genericError && (
-        <p role="alert" className="text-body-sm text-[var(--color-error)]">
+        <p role="alert" className="text-body-sm text-rust">
           {genericError}
         </p>
       )}

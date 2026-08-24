@@ -27,7 +27,7 @@ export function BundleEdgeView({
         path={edgePath}
         markerEnd={markerEnd}
         style={{
-          stroke: invalid ? 'var(--color-error)' : selected ? 'var(--color-primary)' : 'var(--color-border-strong)',
+          stroke: invalid ? 'var(--color-rust)' : selected ? 'var(--color-blueprint)' : 'var(--color-border-strong)',
           strokeWidth: selected || invalid ? 2.5 : 1.5,
         }}
       />
@@ -44,7 +44,7 @@ export function BundleEdgeView({
               <span
                 className={cn(
                   'text-caption rounded-xs border bg-surface px-1.5 py-0.5 font-mono',
-                  invalid ? 'border-[var(--color-error)] text-[var(--color-error)]' : 'border-border text-ink-700',
+                  invalid ? 'border-rust text-rust' : 'border-border text-ink-700',
                 )}
               >
                 {data.condition}
@@ -72,7 +72,7 @@ export function SelfLoopEdgeView({ id, sourceX, sourceY, selected, data }: EdgeP
         id={id}
         path={path}
         style={{
-          stroke: invalid ? 'var(--color-error)' : 'var(--color-warning)',
+          stroke: invalid ? 'var(--color-rust)' : 'var(--color-signal)',
           strokeWidth: selected || invalid ? 2.5 : 1.5,
           strokeDasharray: '3 3',
         }}
@@ -81,7 +81,7 @@ export function SelfLoopEdgeView({ id, sourceX, sourceY, selected, data }: EdgeP
         <EdgeLabelRenderer>
           <div
             style={{ transform: `translate(-50%, -100%) translate(${sourceX + 12}px, ${sourceY - radius - 4}px)` }}
-            className="text-caption pointer-events-none absolute rounded-xs border border-[var(--color-warning)] bg-surface px-1.5 py-0.5 font-mono text-ink-700"
+            className="text-caption pointer-events-none absolute rounded-xs border border-signal bg-surface px-1.5 py-0.5 font-mono text-ink-700"
           >
             {data.condition}
           </div>

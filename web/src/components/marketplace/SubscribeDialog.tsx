@@ -53,12 +53,12 @@ export function SubscribeDialog({
           </DialogDescription>
         </DialogHeader>
         {error && (
-          <p role="alert" className="text-body-sm text-[var(--color-error)]">
+          <p role="alert" className="text-body-sm text-rust">
             {error}
           </p>
         )}
         <DialogFooter>
-          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={pending}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             取消
           </Button>
           <Button disabled={pending} onClick={confirm}>

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import { Ref } from '@/components/common/Page'
 import { EmptyState, ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { PublishForm } from '@/components/marketplace/PublishForm'
 import { apiClient, unwrap, assertOk, ApiError } from '@/lib/api/client'
@@ -48,13 +48,13 @@ export function MyListingsPage() {
   return (
     <div className="flex flex-col gap-space-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-headline-md text-ink-900">我的发布</h1>
+        <h2 className="text-display-md text-ink-900">我的发布</h2>
         {!showForm && <Button onClick={() => setShowForm(true)}>发布新资源</Button>}
       </div>
 
       {showForm ? (
         <div className="flex flex-col gap-space-4">
-          <Button variant="secondary" size="sm" className="self-start" onClick={() => setShowForm(false)}>
+          <Button variant="outline" size="sm" className="self-start" onClick={() => setShowForm(false)}>
             返回列表
           </Button>
           <PublishForm
@@ -68,7 +68,7 @@ export function MyListingsPage() {
       ) : (
         <>
           {unpublishError && (
-            <p role="alert" className="text-body-sm text-[var(--color-error)]">
+            <p role="alert" className="text-body-sm text-rust">
               {unpublishError}
             </p>
           )}
@@ -92,13 +92,13 @@ export function MyListingsPage() {
                     <div className="flex items-center gap-space-2">
                       <span className="text-body-md text-ink-900">{l.display_meta.display_name}</span>
                       <span className="text-caption text-ink-500">v{l.version}</span>
-                      <Badge variant="outline">{l.resource_type}</Badge>
+                      <Ref tone="blueprint">{l.resource_type}</Ref>
                     </div>
                     <p className="text-body-sm text-ink-500">
                       {l.subscriber_count} 人订阅 · 运行 {l.run_count} 次
                     </p>
                   </div>
-                  <Button variant="secondary" size="sm" onClick={() => unpublish(l)}>
+                  <Button variant="outline" size="sm" onClick={() => unpublish(l)}>
                     停止分发
                   </Button>
                 </li>

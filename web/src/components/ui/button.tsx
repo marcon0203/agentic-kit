@@ -19,7 +19,7 @@ const buttonVariants = cva(
           'border border-border bg-surface text-ink-900 shadow-xs hover:border-border-strong hover:bg-surface-muted',
         secondary: 'bg-surface text-ink-700 border border-border hover:border-border-strong hover:bg-surface-muted',
         ghost: 'text-ink-700 hover:bg-accent hover:text-accent-foreground',
-        link: 'text-primary underline-offset-4 hover:underline',
+        link: 'text-blueprint underline-offset-4 hover:underline',
       },
       size: {
         default: 'h-9 px-4 has-[>svg]:px-3.5', // 36px — everyday actions

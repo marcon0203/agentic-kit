@@ -1,16 +1,22 @@
 import { Link } from 'react-router-dom'
 import { Lock } from 'lucide-react'
 
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Ref } from '@/components/common/Page'
 import type { components } from '@/lib/api/schema'
 
 type ListingSummary = components['schemas']['ListingSummary']
 
-/** ds-listing-card — design-system.md §八: cover/type chip → author row →
- * title(title-card, serif) → summary → tags → subscriber metric →
- * exactly one primary action. Hover moves up 4px, never scales. */
+/**
+ * A listing card.
+ *
+ * What a person is deciding here is "do I trust this enough to subscribe",
+ * so the card leads with the name and what it does, and puts the two facts
+ * that answer that question — who wrote it, how many people already use it
+ * — on the line above the action. The black-box mark is stated plainly
+ * rather than as a decorative badge: it is a real limit on what you get,
+ * and pretending otherwise would be a nasty surprise later.
+ */
 export function ListingCard({
   listing,
   onSubscribe,
@@ -19,41 +25,60 @@ export function ListingCard({
   onSubscribe: (listing: ListingSummary) => void
 }) {
   return (
-    <Card className="flex h-full flex-col transition-all duration-150 hover:-translate-y-1 hover:shadow-md">
-      <CardHeader className="flex-row items-start justify-between gap-space-2">
-        <Badge variant="outline">{listing.resource_type}</Badge>
-        <span className="text-caption inline-flex items-center gap-1 text-ink-500">
-          <Lock className="size-3" aria-hidden />
-          黑盒
-        </span>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-space-3">
-        <Link to={`/marketplace/listing/${listing.listing_ref}`} className="hover:underline">
-          <h3 className="text-title-card text-ink-900">{listing.display_meta.display_name}</h3>
-        </Link>
-        <p className="text-body-sm line-clamp-3 flex-1 text-ink-700">{listing.display_meta.description}</p>
-        <div className="flex items-center gap-space-2">
-          <div aria-hidden className="flex size-5 items-center justify-center rounded-full bg-surface-muted text-caption text-ink-700">
-            {listing.author.display_name.slice(0, 1).toUpperCase()}
-          </div>
-          <span className="text-caption text-ink-500">
-            {listing.author.display_name} · v{listing.version} · {listing.subscriber_count} 人订阅
+    <article className="flex h-full flex-col rounded-lg border border-border bg-surface transition-colors hover:border-border-strong">
+      <div className="flex flex-1 flex-col gap-space-3 p-space-5">
+        <div className="flex items-center justify-between gap-space-2">
+          <Ref tone="blueprint">{listing.resource_type}</Ref>
+          <span className="text-caption inline-flex items-center gap-1 text-ink-500" title="黑盒分发：订阅后可以运行，但看不到内部定义">
+            <Lock className="size-3" aria-hidden />
+            黑盒
           </span>
         </div>
 
+        <Link
+          to={`/marketplace/listing/${listing.listing_ref}`}
+          className="text-display-md text-ink-900 hover:underline"
+        >
+          {listing.display_meta.display_name}
+        </Link>
+
+        <p className="text-body-sm line-clamp-3 flex-1 text-ink-700">
+          {listing.display_meta.description}
+        </p>
+
+        <div className="flex items-center gap-space-2 border-t border-border pt-space-3">
+          <span
+            aria-hidden
+            className="text-caption flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-muted text-ink-700"
+          >
+            {listing.author.display_name.slice(0, 1).toUpperCase()}
+          </span>
+          <span className="text-caption min-w-0 flex-1 truncate text-ink-500">
+            {listing.author.display_name}
+          </span>
+          <span className="text-caption tabular shrink-0 text-ink-500">
+            v{listing.version} · {listing.subscriber_count} 人订阅
+          </span>
+        </div>
+      </div>
+
+      <div className="border-t border-border px-space-5 py-space-3">
         {listing.subscribed ? (
-          <div className="flex items-center gap-space-2">
-            <Badge>已订阅</Badge>
-            <Button asChild variant="secondary" size="sm" className="ml-auto">
-              <Link to={`/marketplace/listing/${listing.listing_ref}`}>进入使用</Link>
+          <div className="flex items-center justify-between gap-space-3">
+            <span className="text-caption inline-flex items-center gap-1.5 text-moss">
+              <span aria-hidden className="size-1.5 rounded-full bg-moss" />
+              已订阅 v{listing.version}
+            </span>
+            <Button asChild variant="outline" size="sm">
+              <Link to={`/marketplace/listing/${listing.listing_ref}`}>打开</Link>
             </Button>
           </div>
         ) : (
-          <Button size="sm" onClick={() => onSubscribe(listing)}>
+          <Button size="sm" className="w-full" onClick={() => onSubscribe(listing)}>
             订阅 v{listing.version}
           </Button>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </article>
   )
 }

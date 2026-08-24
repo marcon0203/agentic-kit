@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { EmptyState, ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { UpgradeDialog } from '@/components/marketplace/UpgradeDialog'
 import { apiClient, unwrap, assertOk, ApiError } from '@/lib/api/client'
@@ -41,7 +40,7 @@ export function MySubscriptionsPage() {
       {query.isLoading && <ListSkeleton />}
       {query.isError && <ErrorPanel message="订阅列表加载失败" onRetry={() => query.refetch()} />}
       {actionError && (
-        <p role="alert" className="text-body-sm text-[var(--color-error)]">
+        <p role="alert" className="text-body-sm text-rust">
           {actionError}
         </p>
       )}
@@ -66,24 +65,24 @@ export function MySubscriptionsPage() {
               <li key={sub.id} className="flex items-center gap-space-4 rounded-md border border-border bg-surface px-space-5 py-space-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-space-2">
-                    <Link to={`/marketplace/listing/${sub.listing.listing_ref}`} className="font-mono text-body-md text-ink-900 hover:underline">
+                    <Link to={`/marketplace/listing/${sub.listing.listing_ref}`} className="text-ref-lg text-ink-900 hover:underline">
                       {sub.listing.display_meta.display_name}
                     </Link>
                     <span className="text-caption text-ink-500">v{sub.subscribed_version}</span>
                     {hasNewVersion && (
-                      <Badge variant="outline" className="border-[var(--color-warning)] text-[var(--color-warning)]">
+                      <span className="text-caption inline-flex items-center gap-1 rounded-xs border border-signal bg-signal-tint px-1.5 py-0.5 text-signal">
                         有新版本 v{sub.latest_version}
-                      </Badge>
+                      </span>
                     )}
                   </div>
                   <p className="text-body-sm text-ink-500">{sub.listing.author.display_name}</p>
                 </div>
                 {hasNewVersion && (
-                  <Button variant="secondary" size="sm" onClick={() => setUpgradeTarget(sub)}>
+                  <Button size="sm" onClick={() => setUpgradeTarget(sub)}>
                     查看更新
                   </Button>
                 )}
-                <Button variant="secondary" size="sm" onClick={() => unsubscribe(sub.id)}>
+                <Button variant="ghost" size="sm" onClick={() => unsubscribe(sub.id)}>
                   退订
                 </Button>
               </li>

@@ -37,7 +37,7 @@ export function RunHeader({
   return (
     <div className="mb-space-6 flex items-center justify-between rounded-lg border border-border bg-surface px-space-6 py-space-4">
       <div className="flex items-center gap-space-4">
-        <span className="font-mono text-body-sm text-ink-700">{runId}</span>
+        <code className="text-ref-lg text-ink-900">{runId}</code>
         <StatusChip status={status} />
         <span className="text-caption inline-flex items-center gap-1 text-ink-500">
           {streamStatus === 'open' || streamStatus === 'connecting' ? (
@@ -57,7 +57,7 @@ export function RunHeader({
           </Button>
         )}
         {isRunning && (
-          <Button variant="secondary" size="sm" onClick={() => setStopOpen(true)}>
+          <Button variant="outline" size="sm" onClick={() => setStopOpen(true)}>
             停止运行
           </Button>
         )}

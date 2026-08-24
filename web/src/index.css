@@ -4,67 +4,68 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Design tokens — the single source of truth is design-system.md (values
- * from tokens-pc.md). V1 is PC-only, light-mode-only (架构文档's original
- * dark console palette is superseded here, per design-system.md §零).
- * Every color/spacing/radius/shadow/font value used anywhere in the app
- * must come from a token below — no hardcoded values in components.
+ * Design tokens — single source of truth, mirrored in design-system.md.
+ *
+ * The palette is drafting-table, not dashboard: warm paper, blueprint ink,
+ * and one signal colour reserved for the single thing on this platform that
+ * genuinely needs a human — an approval gate. Nothing else is allowed to
+ * shout, which is what makes the gate readable across a busy run.
+ *
+ * Every colour/spacing/radius/font value used anywhere in the app comes from
+ * a token below. No hardcoded values in components.
  */
 :root {
-  /* ── Color: brand + tertiary ─────────────────────────────────────── */
-  --color-primary: #4264ff;
-  --color-secondary: #8b5cff;
-  --color-tertiary: #63d8ff;
-  --color-mint: #6ce0c7;
-  --color-success: #199572;
-  --color-warning: #d8862f;
-  --color-error: #dc5970;
+  /* ── Color: the six ──────────────────────────────────────────────── */
+  --color-paper: #fbfaf9; /* page ground — warm white, not cream */
+  --color-blueprint: #1f4e79; /* primary: structure, links, running   */
+  --color-signal: #c2570f; /* the ONLY attention colour: needs a human */
+  --color-moss: #2e6b4f; /* finished, healthy, approved               */
+  --color-rust: #a93636; /* failed, rejected, destructive             */
+  --color-graphite: #16181d; /* ink                                     */
 
-  /* ── Color: ink (text) ───────────────────────────────────────────── */
-  --color-ink-900: #11162f;
-  --color-ink-700: #4d5572;
-  --color-ink-500: #7d849e;
+  /* Tints derived from the six — never new hues, only these at strength. */
+  --color-blueprint-tint: #eef3f8;
+  --color-blueprint-edge: #c7d8e8;
+  --color-signal-tint: #fdf2e9;
+  --color-moss-tint: #edf5f1;
+  --color-rust-tint: #fbeded;
 
-  /* ── Color: navy (dark surfaces — auth modal, footer only) ──────── */
-  --color-navy-950: #090d2b;
-  --color-navy-900: #111746;
+  /* ── Color: ink ranks ────────────────────────────────────────────── */
+  --color-ink-900: var(--color-graphite);
+  --color-ink-700: #4a505c;
+  --color-ink-500: #767d8b;
 
-  /* ── Color: surfaces + borders ───────────────────────────────────── */
+  /* ── Color: surfaces + rules ─────────────────────────────────────── */
   --color-surface: #ffffff;
-  --color-surface-page: #f6f7fb;
-  --color-surface-muted: #f1f4fa;
-  --color-border: #e4e7f0;
-  --color-border-strong: #cfd8e8;
-  --color-tab-text: #64708b;
-  --color-tab-active: #5861dc;
+  --color-surface-page: var(--color-paper);
+  --color-surface-muted: #f3f1ee;
+  --color-surface-ink: #14161b; /* dark surfaces: auth modal, code       */
+  --color-border: #e6e2dc;
+  --color-border-strong: #cdc7bd;
 
-  /* Brand gradient — primary buttons / key selected states only, never a
-     large background fill. */
-  --gradient-brand: linear-gradient(128deg, #365fff 0%, #655eff 46%, #9858ee 100%);
-
-  /* ── Platform semantic status mapping (design-system.md §1.2) ────── */
+  /* ── Platform semantic status (design-system.md §1.2) ────────────── */
   --color-status-pending: var(--color-ink-500);
-  --color-status-running: var(--color-primary);
-  --color-status-gate: var(--color-warning);
-  --color-status-done: var(--color-success);
-  --color-status-failed: var(--color-error);
+  --color-status-running: var(--color-blueprint);
+  --color-status-gate: var(--color-signal);
+  --color-status-done: var(--color-moss);
+  --color-status-failed: var(--color-rust);
   --color-status-blackbox: var(--color-ink-700);
 
-  /* ── Radius ───────────────────────────────────────────────────────── */
-  --radius-xs: 8px;
-  --radius-sm: 12px;
-  --radius-md: 16px;
-  --radius-lg: 22px;
-  --radius-xl: 28px;
+  /* ── Radius — small and consistent; this is an instrument, not a toy */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
   --radius-full: 9999px;
   --radius: var(--radius-sm); /* shadcn/ui default control radius */
 
-  /* ── Shadow (used sparingly — real elevation only) ───────────────── */
-  --shadow-sm: 0 1px 2px 0 rgb(17 22 47 / 0.06), 0 1px 1px 0 rgb(17 22 47 / 0.04);
-  --shadow-md: 0 8px 24px -4px rgb(17 22 47 / 0.12), 0 2px 8px -2px rgb(17 22 47 / 0.06);
-  --shadow-lg: 0 24px 48px -12px rgb(17 22 47 / 0.24), 0 8px 16px -4px rgb(17 22 47 / 0.08);
+  /* ── Shadow — used only for true elevation (popover, modal, drag) ── */
+  --shadow-sm: 0 1px 2px 0 rgb(22 24 29 / 0.06);
+  --shadow-md: 0 6px 20px -6px rgb(22 24 29 / 0.14), 0 2px 6px -2px rgb(22 24 29 / 0.06);
+  --shadow-lg: 0 24px 48px -16px rgb(22 24 29 / 0.24), 0 6px 14px -6px rgb(22 24 29 / 0.08);
 
-  /* ── Spacing (4px baseline, space-1..space-12) ───────────────────── */
+  /* ── Spacing (4px baseline) ──────────────────────────────────────── */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -79,17 +80,16 @@
   --space-12: 96px;
   --gutter: 24px;
 
-  /* Shared page width — set once here, never redefined per-page. */
-  --container-app: 1380px;
+  --container-app: 1320px;
 
-  /* ── Typography ───────────────────────────────────────────────────── */
-  --font-serif: 'Source Serif 4', 'Noto Serif SC', Georgia, serif;
+  /* ── Typography ──────────────────────────────────────────────────── */
+  --font-display: 'Space Grotesk', 'Noto Sans SC', -apple-system, sans-serif;
   --font-sans:
-    'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
-    Arial, sans-serif;
-  --font-mono: 'Manrope', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    'Inter', 'Noto Sans SC', 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
 
-  /* ── shadcn/ui variable contract ──────────────────────────────────── */
+  /* ── shadcn/ui variable contract ─────────────────────────────────── */
   --background: var(--color-surface-page);
   --foreground: var(--color-ink-900);
 
@@ -99,7 +99,7 @@
   --popover: var(--color-surface);
   --popover-foreground: var(--color-ink-900);
 
-  --primary: var(--color-primary);
+  --primary: var(--color-blueprint);
   --primary-foreground: #ffffff;
 
   --secondary: var(--color-surface-muted);
@@ -108,22 +108,24 @@
   --muted: var(--color-surface-muted);
   --muted-foreground: var(--color-ink-500);
 
-  --accent: var(--color-surface-muted);
-  --accent-foreground: var(--color-ink-900);
+  --accent: var(--color-blueprint-tint);
+  --accent-foreground: var(--color-blueprint);
 
-  --destructive: var(--color-error);
+  --destructive: var(--color-rust);
   --destructive-foreground: #ffffff;
 
   --border: var(--color-border);
-  --input: var(--color-border);
-  --ring: var(--color-primary);
+  --input: var(--color-border-strong);
+  --ring: var(--color-blueprint);
 }
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-xs: var(--radius-xs);
+  --radius-full: var(--radius-full);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -145,27 +147,27 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Expose the full platform token set as Tailwind utilities, e.g.
-     bg-surface, text-ink-700, border-border-strong, shadow-status-running,
-     rounded-xs, p-space-7, w-container-app. */
-  --color-brand-primary: var(--color-primary);
-  --color-brand-secondary: var(--color-secondary);
-  --color-brand-tertiary: var(--color-tertiary);
-  --color-mint: var(--color-mint);
-  --color-success: var(--color-success);
-  --color-warning: var(--color-warning);
-  --color-error: var(--color-error);
+  /* Platform tokens as Tailwind utilities: bg-paper, text-blueprint,
+     border-border-strong, text-status-gate, p-space-7, max-w-container-app. */
+  --color-paper: var(--color-paper);
+  --color-blueprint: var(--color-blueprint);
+  --color-blueprint-tint: var(--color-blueprint-tint);
+  --color-blueprint-edge: var(--color-blueprint-edge);
+  --color-signal: var(--color-signal);
+  --color-signal-tint: var(--color-signal-tint);
+  --color-moss: var(--color-moss);
+  --color-moss-tint: var(--color-moss-tint);
+  --color-rust: var(--color-rust);
+  --color-rust-tint: var(--color-rust-tint);
+  --color-graphite: var(--color-graphite);
   --color-ink-900: var(--color-ink-900);
   --color-ink-700: var(--color-ink-700);
   --color-ink-500: var(--color-ink-500);
-  --color-navy-950: var(--color-navy-950);
-  --color-navy-900: var(--color-navy-900);
   --color-surface: var(--color-surface);
   --color-surface-page: var(--color-surface-page);
   --color-surface-muted: var(--color-surface-muted);
+  --color-surface-ink: var(--color-surface-ink);
   --color-border-strong: var(--color-border-strong);
-  --color-tab-text: var(--color-tab-text);
-  --color-tab-active: var(--color-tab-active);
   --color-status-pending: var(--color-status-pending);
   --color-status-running: var(--color-status-running);
   --color-status-gate: var(--color-status-gate);
@@ -190,23 +192,11 @@
   --width-container-app: var(--container-app);
   --max-width-container-app: var(--container-app);
 
-  --radius-xs: var(--radius-xs);
-  --radius-full: var(--radius-full);
-
-  /* design-system.md 三、圆角: rounded.lg 22px (卡片/面板) and rounded.xl
-     28px (特色卡片/弹窗). These can't be reached through `rounded-lg` /
-     `rounded-xl` because shadcn/ui's own scale (above) rebinds those two
-     names to 12px/16px for its control components. Exposed under distinct
-     names so a panel can use the documented platform radius without
-     disturbing every shadcn control in the app. */
-  --radius-panel: 22px;
-  --radius-feature: 28px;
-
   --shadow-status-sm: var(--shadow-sm);
   --shadow-status-md: var(--shadow-md);
   --shadow-status-lg: var(--shadow-lg);
 
-  --font-family-serif: var(--font-serif);
+  --font-family-display: var(--font-display);
   --font-family-sans: var(--font-sans);
   --font-family-mono: var(--font-mono);
 }
@@ -217,65 +207,80 @@
   }
   html {
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
   }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
   }
   h1,
-  h2 {
-    font-family: var(--font-serif);
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+  }
+  /* Every identifier is monospace by default — refs, versions, run ids and
+     node names all read as the machine-facing strings they are. */
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+  /* Focus must always be visible, on every interactive element, including
+     ones a component library forgot about. */
+  :focus-visible {
+    outline: 2px solid var(--color-blueprint);
+    outline-offset: 2px;
   }
 }
 
-/* ── Typography scale (design-system.md §二) — use these classes instead
-   of ad hoc text-[Npx], so every heading/body/label size traces back to a
-   single named layer. ── */
+/* ── Typography scale ─────────────────────────────────────────────────
+   Named layers rather than ad hoc text-[Npx], so every size traces back
+   here. Display sizes are tight and set in Space Grotesk; identifiers get
+   .text-ref, which is the reason the mono face is in the stack at all. */
 @layer utilities {
-  .text-headline-lg {
-    font-family: var(--font-serif);
-    font-size: 44px;
+  .text-display-xl {
+    font-family: var(--font-display);
+    font-size: 52px;
     font-weight: 700;
-    line-height: 1.2;
+    line-height: 1.06;
+    letter-spacing: -0.03em;
   }
-  .text-headline-md {
-    font-family: var(--font-serif);
+  .text-display-lg {
+    font-family: var(--font-display);
     font-size: 34px;
     font-weight: 600;
-    line-height: 1.4;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
   }
-  .text-headline-sm {
-    font-family: var(--font-sans);
-    font-size: 19px;
-    font-weight: 700;
-    line-height: 1.45;
+  .text-display-md {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.015em;
   }
-  .text-title-card {
-    font-family: var(--font-serif);
-    font-size: 20px;
-    font-weight: 700;
-    line-height: 1.48;
-  }
-  .text-title-modal {
-    font-family: var(--font-sans);
-    font-size: 24px;
-    font-weight: 500;
-    line-height: 1.3;
+  .text-display-sm {
+    font-family: var(--font-display);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.35;
   }
   .text-body-lg {
     font-size: 15px;
     font-weight: 400;
-    line-height: 1.72;
+    line-height: 1.68;
   }
   .text-body-md {
     font-size: 14px;
     font-weight: 400;
-    line-height: 1.72;
+    line-height: 1.65;
   }
   .text-body-sm {
     font-size: 13px;
     font-weight: 400;
-    line-height: 1.7;
+    line-height: 1.6;
   }
   .text-label-md {
     font-size: 13px;
@@ -284,24 +289,97 @@
   }
   .text-caption {
     font-size: 12px;
-    font-weight: 600;
-    line-height: 1.5;
+    font-weight: 500;
+    line-height: 1.45;
   }
-  .text-data {
-    font-size: 30px;
-    font-weight: 800;
+  /* Identifiers: ref, version, run_id, node name, DSL keys. */
+  .text-ref {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .text-ref-lg {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  /* Figures: token counts, costs, durations — tabular so columns align. */
+  .text-figure {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    font-weight: 500;
     line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
   }
   .text-eyebrow {
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.18em;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* The blueprint grid — the ground the orchestration graph sits on. Used
+     only behind the hero rail and the Bundle canvas, never as page chrome. */
+  .bg-blueprint-grid {
+    background-image:
+      linear-gradient(to right, rgb(31 78 121 / 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(31 78 121 / 0.06) 1px, transparent 1px);
+    background-size: 22px 22px;
   }
 }
 
-/* Respect the OS-level reduced-motion preference everywhere — required by
-   design-system.md §四点五 and the accessibility checklist. */
+/* ── The run rail ─────────────────────────────────────────────────────
+   The platform's signature: a track that work advances along, halting at a
+   gate until a person answers. Its motion is the one orchestrated moment in
+   the app; everything else moves only on hover or focus. */
+@keyframes rail-advance {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes station-arrive {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* A gate is the only thing in this interface that is allowed to pulse — it
+   is literally waiting for the person looking at it. */
+@keyframes gate-await {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(194 87 15 / 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgb(194 87 15 / 0);
+  }
+}
+
+.animate-gate-await {
+  animation: gate-await 2.4s ease-out infinite;
+}
+
+/* Respect the OS reduced-motion preference everywhere. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

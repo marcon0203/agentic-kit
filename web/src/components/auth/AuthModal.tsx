@@ -69,7 +69,7 @@ export function AuthModal() {
     <Dialog open={modalOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="w-[420px] max-w-[92vw] rounded-xl p-8">
         <DialogHeader>
-          <DialogTitle className="text-title-modal text-ink-900">{REASON_COPY[modalReason ?? 'manual']}</DialogTitle>
+          <DialogTitle className="text-display-md text-ink-900">{REASON_COPY[modalReason ?? 'manual']}</DialogTitle>
           <DialogDescription className="sr-only">
             {tab === 'login' ? '使用邮箱和密码登录' : '使用邮箱、密码和昵称注册新账号'}
           </DialogDescription>
@@ -110,13 +110,13 @@ export function AuthModal() {
         </Tabs>
 
         {error && (
-          <p role="alert" className="mt-space-3 text-body-sm text-[var(--color-error)]">
+          <p role="alert" className="mt-space-3 text-body-sm text-rust">
             {error}
           </p>
         )}
 
         <Button
-          className="mt-space-6 h-11 w-full rounded-full bg-[image:var(--gradient-brand)] text-body-md hover:brightness-[1.04]"
+          className="mt-space-6 h-11 w-full rounded-sm bg-blueprint text-body-md text-white hover:bg-blueprint/90"
           disabled={pending || !email || !password || (tab === 'register' && !displayName)}
           onClick={submit}
         >

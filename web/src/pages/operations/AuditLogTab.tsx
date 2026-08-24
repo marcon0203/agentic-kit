@@ -31,7 +31,10 @@ export function AuditLogTab() {
       {query.isError && <ErrorPanel message="审计日志加载失败" onRetry={() => query.refetch()} />}
 
       {query.isSuccess && items.length === 0 && (
-        <EmptyState title="还没有审计记录" description="你审批或驳回过的 human gate 会记录在这里，append-only，不可编辑或删除。" />
+        <EmptyState
+          title="还没有需要你决定的事"
+          description="你批准或驳回过的每一个 human gate 都会记在这里。记录只增不改，谁也删不掉——包括你自己。"
+        />
       )}
 
       {items.length > 0 && (
@@ -50,13 +53,13 @@ export function AuditLogTab() {
                 {items.map((log) => (
                   <tr key={log.id} className="border-b border-border last:border-0 hover:bg-surface-muted">
                     <td className="text-body-md px-space-4 py-space-3 text-ink-900">{ACTION_LABELS[log.action] ?? log.action}</td>
-                    <td className="text-body-sm px-space-4 py-space-3 font-mono text-ink-700">
+                    <td className="text-ref tabular px-space-4 py-space-3 text-ink-700">
                       {log.target_type}#{log.target_id}
                     </td>
-                    <td className="text-body-sm px-space-4 py-space-3 font-mono text-ink-700">{fmtTime(log.created_at)}</td>
+                    <td className="text-ref tabular px-space-4 py-space-3 text-ink-700">{fmtTime(log.created_at)}</td>
                     <td className="px-space-4 py-space-3 text-right">
                       <details>
-                        <summary className="text-body-sm cursor-pointer text-primary">查看详情</summary>
+                        <summary className="text-body-sm cursor-pointer text-blueprint">查看详情</summary>
                         <pre className="text-caption mt-space-2 max-w-[360px] overflow-x-auto rounded-md bg-surface-muted p-space-2 text-left text-ink-700">
                           {JSON.stringify(log.detail, null, 2)}
                         </pre>
@@ -73,13 +76,13 @@ export function AuditLogTab() {
               <div key={log.id} className="flex flex-col gap-space-2 rounded-lg border border-border bg-surface px-space-4 py-space-3">
                 <div className="flex items-center justify-between">
                   <span className="text-body-md text-ink-900">{ACTION_LABELS[log.action] ?? log.action}</span>
-                  <span className="font-mono text-caption text-ink-700">{fmtTime(log.created_at)}</span>
+                  <span className="text-ref text-ink-700">{fmtTime(log.created_at)}</span>
                 </div>
-                <span className="font-mono text-caption text-ink-500">
+                <span className="text-ref text-ink-500">
                   {log.target_type}#{log.target_id}
                 </span>
                 <details>
-                  <summary className="text-body-sm cursor-pointer text-primary">查看详情</summary>
+                  <summary className="text-body-sm cursor-pointer text-blueprint">查看详情</summary>
                   <pre className="text-caption mt-space-2 overflow-x-auto rounded-md bg-surface-muted p-space-2 text-ink-700">
                     {JSON.stringify(log.detail, null, 2)}
                   </pre>

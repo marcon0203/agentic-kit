@@ -23,9 +23,11 @@ export function StatusChip({ status, className }: { status: PlatformStatus; clas
   return (
     <span
       className={cn(
-        'text-caption inline-flex items-center gap-1 rounded-full bg-surface-muted px-space-2 py-1',
+        'text-caption inline-flex items-center gap-1.5',
         meta.color,
-        status === 'running' && 'animate-pulse',
+        // A gate is the only status that pulses — it is waiting on the
+        // person reading it. "Running" is not waiting on anybody.
+        status === 'gate' && 'animate-gate-await rounded-full',
         className,
       )}
     >

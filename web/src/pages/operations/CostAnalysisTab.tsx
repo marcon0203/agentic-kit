@@ -89,7 +89,7 @@ export function CostAnalysisTab() {
             <TabsTrigger value="month">月</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button variant="secondary" size="sm" onClick={exportCSV} disabled={!query.data || query.data.breakdown.length === 0}>
+        <Button variant="outline" size="sm" onClick={exportCSV} disabled={!query.data || query.data.breakdown.length === 0}>
           导出
         </Button>
       </div>
@@ -106,21 +106,24 @@ export function CostAnalysisTab() {
         <>
           <div className="grid grid-cols-1 gap-space-8 rounded-lg border border-border bg-surface px-space-6 py-space-5 min-[901px]:grid-cols-3">
             <div className="flex flex-col gap-space-1">
-              <span className="text-data text-ink-900">{query.data.total_tokens.toLocaleString()}</span>
+              <span className="text-figure text-ink-900">{query.data.total_tokens.toLocaleString()}</span>
               <span className="text-caption text-ink-500">Token 总量（{query.data.period}）</span>
             </div>
             <div className="flex flex-col gap-space-1">
-              <span className="text-data text-ink-900">${query.data.total_cost_usd.toFixed(2)}</span>
+              <span className="text-figure text-ink-900">${query.data.total_cost_usd.toFixed(2)}</span>
               <span className="text-caption text-ink-500">成本总额</span>
             </div>
             <div className="flex flex-col gap-space-1">
-              <span className="text-data text-ink-900">{query.data.run_count ?? 0}</span>
+              <span className="text-figure text-ink-900">{query.data.run_count ?? 0}</span>
               <span className="text-caption text-ink-500">运行次数</span>
             </div>
           </div>
 
           {points.length === 0 ? (
-            <EmptyState title="还没有运行记录" description="发起一次 Bundle 运行后，这里会显示 Token 与成本趋势。" />
+            <EmptyState
+              title="还没有花掉一分钱"
+              description="发起一次 Bundle 运行后，这里会按 Bundle 和按天拆开显示 Token 与成本。"
+            />
           ) : (
             <>
               <TrendChart points={points} />
@@ -138,7 +141,7 @@ export function CostAnalysisTab() {
                   <tbody>
                     {query.data.breakdown.map((b) => (
                       <tr key={b.key} className="border-b border-border last:border-0 hover:bg-surface-muted">
-                        <td className="text-body-sm px-space-4 py-space-3 font-mono text-ink-700">{b.key}</td>
+                        <td className="text-ref tabular px-space-4 py-space-3 text-ink-700">{b.key}</td>
                         <td className="text-body-md px-space-4 py-space-3 text-ink-900">{(b.tokens ?? 0).toLocaleString()}</td>
                         <td className="text-body-md px-space-4 py-space-3 text-ink-900">${(b.cost_usd ?? 0).toFixed(4)}</td>
                         <td className="text-body-md px-space-4 py-space-3 text-ink-900">{b.run_count}</td>
@@ -151,7 +154,7 @@ export function CostAnalysisTab() {
               <div className="flex flex-col gap-space-3 min-[901px]:hidden">
                 {query.data.breakdown.map((b) => (
                   <div key={b.key} className="flex flex-col gap-space-2 rounded-lg border border-border bg-surface px-space-4 py-space-3">
-                    <span className="font-mono text-body-sm text-ink-900">{b.key}</span>
+                    <span className="text-ref text-ink-900">{b.key}</span>
                     <div className="text-caption flex justify-between text-ink-700">
                       <span>Token：{(b.tokens ?? 0).toLocaleString()}</span>
                       <span>成本：${(b.cost_usd ?? 0).toFixed(4)}</span>

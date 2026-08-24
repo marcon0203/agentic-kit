@@ -15,7 +15,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { TabRail, TabRailItem } from '@/components/common/Page'
 import { Button } from '@/components/ui/button'
 import { AgentPanel, AGENT_DRAG_MIME } from '@/components/bundle-editor/AgentPanel'
 import { PropertiesPanel } from '@/components/bundle-editor/PropertiesPanel'
@@ -261,15 +261,17 @@ function EditorInner() {
   return (
     <div className="flex h-[calc(100vh-160px)] flex-col gap-space-3">
       <div className="flex items-center justify-between">
-        <Tabs value={tab} onValueChange={(v) => (v === 'source' ? switchToSource() : switchToCanvas())}>
-          <TabsList>
-            <TabsTrigger value="canvas">画布</TabsTrigger>
-            <TabsTrigger value="source">DSL 源码</TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <TabRail className="border-b-0">
+          <TabRailItem active={tab === 'canvas'} onClick={switchToCanvas}>
+            画布
+          </TabRailItem>
+          <TabRailItem active={tab === 'source'} onClick={switchToSource}>
+            DSL 源码
+          </TabRailItem>
+        </TabRail>
 
         <div className="flex items-center gap-space-3">
-          {dirty && <span className="text-caption text-[var(--color-warning)]">有未保存的更改</span>}
+          {dirty && <span className="text-caption text-signal">有未保存的更改</span>}
           <Button disabled={saving || (tab === 'source' && !sourceValid)} onClick={save}>
             {saving ? '保存中…' : '保存并校验'}
           </Button>
@@ -277,7 +279,7 @@ function EditorInner() {
       </div>
 
       {saveError && (
-        <p role="alert" className="text-body-sm rounded-md border border-[var(--color-error)] px-space-4 py-space-2 text-[var(--color-error)]">
+        <p role="alert" className="text-body-sm rounded-md border border-rust px-space-4 py-space-2 text-rust">
           {saveError}
         </p>
       )}
@@ -294,8 +296,20 @@ function EditorInner() {
           >
             {nodes.length <= 1 && (
               <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
-                <div className="rounded-lg border border-dashed border-border bg-surface/90 px-space-6 py-space-5 text-center">
-                  <p className="text-label-md text-ink-900">← 从左侧拖入第一个 Agent 开始编排</p>
+                <div className="flex flex-col items-center gap-space-3 rounded-lg border border-border bg-surface px-space-7 py-space-6 text-center">
+                  {/* An empty rail: three stations with nothing on them yet,
+                      the same mark used everywhere else for "not here yet". */}
+                  <span aria-hidden className="flex w-[180px] items-center">
+                    <span className="size-2.5 shrink-0 rounded-full border-2 border-border-strong bg-surface" />
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="size-2.5 shrink-0 rounded-full border-2 border-border-strong bg-surface" />
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="size-2.5 shrink-0 rounded-full border-2 border-border-strong bg-surface" />
+                  </span>
+                  <p className="text-display-sm text-ink-900">从左侧拖一个 Agent 进来</p>
+                  <p className="text-body-sm max-w-[34ch] text-ink-700">
+                    拖进来的 Agent 是图上的节点；把它们连起来就定义了执行顺序。
+                  </p>
                 </div>
               </div>
             )}
@@ -320,7 +334,7 @@ function EditorInner() {
               }}
               fitView
             >
-              <Background gap={20} />
+              <Background gap={22} color="var(--color-border-strong)" />
               <Controls />
             </ReactFlow>
           </div>

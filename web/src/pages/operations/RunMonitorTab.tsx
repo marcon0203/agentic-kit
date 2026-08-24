@@ -5,36 +5,34 @@ import { CheckCircle2, CircleDashed, XCircle } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { EmptyState, ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
+import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
+import { EmptyRail } from '@/components/common/Rail'
+import { Figure, FigureCell, FigureRow, Ref } from '@/components/common/Page'
+import { cn } from '@/lib/utils'
 import { apiClient, unwrap } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 
 type RunSummary = components['schemas']['RunSummary']
 type RunStatus = components['schemas']['RunStatus']
 
-const STATUS_META: Record<RunStatus, { label: string; icon: typeof CheckCircle2; className: string }> = {
-  running: { label: '运行中', icon: CircleDashed, className: 'bg-primary/10 text-primary' },
-  finished: { label: '成功', icon: CheckCircle2, className: 'bg-[color-mix(in_srgb,var(--color-success)_12%,transparent)] text-[var(--color-success)]' },
-  failed: { label: '失败', icon: XCircle, className: 'bg-[color-mix(in_srgb,var(--color-error)_12%,transparent)] text-[var(--color-error)]' },
+/* Status reads as icon + word; colour alone never carries it. */
+const STATUS_META: Record<
+  RunStatus,
+  { label: string; icon: typeof CheckCircle2; className: string }
+> = {
+  running: { label: '运行中', icon: CircleDashed, className: 'text-blueprint' },
+  finished: { label: '成功', icon: CheckCircle2, className: 'text-moss' },
+  failed: { label: '失败', icon: XCircle, className: 'text-rust' },
 }
 
 function StatusPill({ status }: { status: RunStatus }) {
   const meta = STATUS_META[status]
   const Icon = meta.icon
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-caption ${meta.className}`}>
-      <Icon className="size-3.5" />
+    <span className={cn('text-caption inline-flex items-center gap-1.5', meta.className)}>
+      <Icon className="size-3.5" aria-hidden />
       {meta.label}
     </span>
-  )
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-space-1">
-      <span className="text-data text-ink-900">{value}</span>
-      <span className="text-caption text-ink-500">{label}</span>
-    </div>
   )
 }
 
@@ -67,11 +65,26 @@ export function RunMonitorTab() {
 
   return (
     <div className="flex flex-col gap-space-6">
-      <div className="grid grid-cols-1 gap-space-8 rounded-lg border border-border bg-surface px-space-6 py-space-5 min-[901px]:grid-cols-3">
-        <Metric label="今日运行数" value={String(metrics.todayCount)} />
-        <Metric label="成功率" value={`${metrics.successRate}%`} />
-        <Metric label="运行总数（近 50 条）" value={String(items.length)} />
-      </div>
+      {/* Three zeros stacked above an empty state is the same "big number"
+          opener this redesign set out to remove — with nothing measured yet,
+          the empty rail already says everything there is to say. */}
+      {items.length > 0 && (
+      <FigureRow>
+        <FigureCell>
+          <Figure value={String(metrics.todayCount)} label="今日运行数" />
+        </FigureCell>
+        <FigureCell>
+          <Figure
+            value={`${metrics.successRate}%`}
+            label="成功率（已结束的运行）"
+            tone={metrics.successRate >= 90 ? 'moss' : metrics.successRate > 0 ? 'signal' : 'ink'}
+          />
+        </FigureCell>
+        <FigureCell>
+          <Figure value={String(items.length)} label="运行总数（近 50 条）" />
+        </FigureCell>
+      </FigureRow>
+      )}
 
       <div className="flex items-center gap-space-3">
         <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>
@@ -88,12 +101,12 @@ export function RunMonitorTab() {
       </div>
 
       {query.isLoading && <ListSkeleton rows={8} />}
-      {query.isError && <ErrorPanel message="运行列表加载失败" onRetry={() => query.refetch()} />}
+      {query.isError && <ErrorPanel message="运行列表没能加载出来" onRetry={() => query.refetch()} />}
 
       {query.isSuccess && items.length === 0 && status === 'all' && (
-        <EmptyState
-          title="还没有运行记录"
-          description="从应用中心发起一次 Bundle 运行后，这里会显示它的状态与耗时。"
+        <EmptyRail
+          title="还没有运行经过这里"
+          description="从应用中心发起一次 Bundle 运行，它的每一步、耗时和失败原因都会出现在这张表里。"
           action={
             <Button asChild size="sm">
               <Link to="/apps">去应用中心发起一次运行</Link>
@@ -102,11 +115,11 @@ export function RunMonitorTab() {
         />
       )}
       {query.isSuccess && items.length === 0 && status !== 'all' && (
-        <EmptyState
-          title="当前条件下没有记录"
-          description="换一个状态筛选试试。"
+        <EmptyRail
+          title="没有处于这个状态的运行"
+          description="筛选只作用于最近 50 条运行记录。"
           action={
-            <Button variant="secondary" size="sm" onClick={() => setStatus('all')}>
+            <Button variant="outline" size="sm" onClick={() => setStatus('all')}>
               清除筛选
             </Button>
           }
@@ -132,18 +145,20 @@ export function RunMonitorTab() {
                   <tr key={run.run_id} className="border-b border-border last:border-0 hover:bg-surface-muted">
                     <td className="text-body-md px-space-4 py-space-3 text-ink-900">
                       {run.bundle_ref}
-                      <span className="ml-space-2 font-mono text-caption text-ink-500">{run.run_id}</span>
+                      <Ref tone="muted" className="ml-space-2">
+                        {run.run_id}
+                      </Ref>
                     </td>
                     <td className="px-space-4 py-space-3">
                       <StatusPill status={run.status} />
                     </td>
-                    <td className="text-body-sm px-space-4 py-space-3 font-mono text-ink-700">{fmtTime(run.created_at)}</td>
-                    <td className="text-body-sm px-space-4 py-space-3 font-mono text-ink-700">
+                    <td className="text-ref tabular px-space-4 py-space-3 text-ink-700">{fmtTime(run.created_at)}</td>
+                    <td className="text-ref tabular px-space-4 py-space-3 text-ink-700">
                       {run.finished_at ? fmtTime(run.finished_at) : '—'}
                     </td>
                     <td className="px-space-4 py-space-3 text-right">
                       {run.status === 'failed' ? (
-                        <Link to={`/runs/${run.run_id}`} className="text-body-sm font-medium text-primary hover:underline">
+                        <Link to={`/runs/${run.run_id}`} className="text-body-sm font-medium text-blueprint hover:underline">
                           查看原因
                         </Link>
                       ) : (
@@ -165,14 +180,14 @@ export function RunMonitorTab() {
                   <span className="text-body-md text-ink-900">{run.bundle_ref}</span>
                   <StatusPill status={run.status} />
                 </div>
-                <span className="font-mono text-caption text-ink-500">{run.run_id}</span>
-                <div className="text-caption flex justify-between font-mono text-ink-700">
+                <Ref tone="muted">{run.run_id}</Ref>
+                <div className="text-ref tabular flex justify-between text-ink-700">
                   <span>{fmtTime(run.created_at)}</span>
                   <span>{run.finished_at ? fmtTime(run.finished_at) : '—'}</span>
                 </div>
                 <Link
                   to={`/runs/${run.run_id}`}
-                  className={`text-body-sm font-medium hover:underline ${run.status === 'failed' ? 'text-primary' : 'text-ink-700'}`}
+                  className={`text-body-sm font-medium hover:underline ${run.status === 'failed' ? 'text-blueprint' : 'text-ink-700'}`}
                 >
                   {run.status === 'failed' ? '查看原因' : '查看'}
                 </Link>

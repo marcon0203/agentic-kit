@@ -40,7 +40,7 @@ export function AgentPanel() {
               e.dataTransfer.setData(AGENT_DRAG_MIME, JSON.stringify({ ref: a.agent_ref, version: a.version }))
               e.dataTransfer.effectAllowed = 'move'
             }}
-            className="cursor-grab select-none rounded-md border border-border bg-surface-page px-space-3 py-space-2 active:cursor-grabbing"
+            className="text-ref cursor-grab select-none rounded-sm border border-border-strong bg-surface-page px-space-3 py-space-2 active:cursor-grabbing"
           >
             <p className="text-body-sm font-medium text-ink-900">{a.agent_ref}</p>
             <p className="text-caption text-ink-500">{a.definition.role}</p>

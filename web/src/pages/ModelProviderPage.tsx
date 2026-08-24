@@ -1,8 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -14,6 +12,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ListSkeleton, ErrorPanel } from '@/components/common/EmptyState'
+import { PageHeader } from '@/components/common/Page'
+import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 
@@ -40,44 +40,52 @@ export function ModelProviderPage() {
 
   return (
     <div className="flex flex-col gap-space-6">
-      <h1 className="text-headline-md text-ink-900">模型中心</h1>
-      <p className="text-body-md max-w-[640px] text-ink-700">
-        接入至少一个模型 Provider 后才能运行 Bundle；未接入时，全站的运行入口会被禁用。
-      </p>
+      <PageHeader
+        eyebrow="MODEL PROVIDERS"
+        title="模型中心"
+        description="Bundle 要跑起来，至少得接入一个 Provider。密钥先拿去真实验证一次再保存，所以存进来的 key 一定是能用的。"
+      />
 
       {query.isLoading && <ListSkeleton rows={4} />}
-      {query.isError && <ErrorPanel message="Provider 列表加载失败" onRetry={() => query.refetch()} />}
+      {query.isError && (
+        <ErrorPanel message="Provider 列表没能加载出来" onRetry={() => query.refetch()} />
+      )}
 
       {query.isSuccess && (
-        <div className="grid grid-cols-1 gap-space-5 md:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2">
           {PROVIDERS.map((p) => {
             const existing = connected.get(p.value)
             return (
-              <Card key={p.value}>
-                <CardHeader>
-                  <CardTitle className="text-headline-sm flex items-center justify-between">
-                    {p.label}
-                    {existing && <Badge>已接入</Badge>}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-space-3">
-                  {existing ? (
-                    <>
-                      <p className="font-mono text-body-sm text-ink-500">sk-••••••••</p>
-                      <Button variant="secondary" size="sm" onClick={() => setConnecting(p.value)}>
-                        更换密钥
-                      </Button>
-                    </>
-                  ) : (
-                    <Button size="sm" onClick={() => setConnecting(p.value)}>
-                      接入
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
+              <li
+                key={p.value}
+                className="flex items-center justify-between gap-space-4 bg-surface px-space-5 py-space-4"
+              >
+                <span className="flex min-w-0 flex-col gap-1">
+                  <span className="flex items-center gap-space-3">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'size-2 shrink-0 rounded-full',
+                        existing ? 'bg-moss' : 'bg-border-strong',
+                      )}
+                    />
+                    <span className="text-display-sm text-ink-900">{p.label}</span>
+                  </span>
+                  <span className="text-caption pl-space-5 text-ink-500">
+                    {existing ? '已接入，密钥加密保存，不再回显' : '尚未接入'}
+                  </span>
+                </span>
+                <Button
+                  variant={existing ? 'outline' : 'default'}
+                  size="sm"
+                  onClick={() => setConnecting(p.value)}
+                >
+                  {existing ? '更换密钥' : '接入'}
+                </Button>
+              </li>
             )
           })}
-        </div>
+        </ul>
       )}
 
       {connecting && (
@@ -145,13 +153,13 @@ function ConnectProviderDialog({
             className="h-12 rounded-sm"
           />
           {error && (
-            <p role="alert" className="text-caption text-[var(--color-error)]">
+            <p role="alert" className="text-caption text-rust">
               {error}
             </p>
           )}
         </div>
         <DialogFooter>
-          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={pending}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             取消
           </Button>
           <Button disabled={pending || !apiKey} onClick={submit}>

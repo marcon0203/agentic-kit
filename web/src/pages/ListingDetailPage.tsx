@@ -5,7 +5,7 @@ import { Flag, Lock, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { Ref } from '@/components/common/Page'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -61,13 +61,13 @@ export function ListingDetailPage() {
         <div className="flex flex-col gap-space-6">
           <div>
             <div className="flex items-center gap-space-3">
-              <Badge variant="outline">{listing.resource_type}</Badge>
+              <Ref tone="blueprint">{listing.resource_type}</Ref>
               <span className="text-caption inline-flex items-center gap-1 text-ink-700">
                 <Lock className="size-3" aria-hidden />
                 黑盒
               </span>
             </div>
-            <h1 className="text-headline-lg mt-space-2 text-ink-900">{listing.display_meta.display_name}</h1>
+            <h1 className="text-display-lg mt-space-2 text-ink-900">{listing.display_meta.display_name}</h1>
             <p className="text-body-sm mt-space-2 text-ink-500">
               @{listing.author.display_name} · v{listing.version} · {listing.subscriber_count} 人订阅 · 运行{' '}
               {listing.run_count} 次
@@ -76,7 +76,7 @@ export function ListingDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-headline-sm">简介</CardTitle>
+              <CardTitle className="text-display-md">简介</CardTitle>
             </CardHeader>
             <CardContent className="text-body-md text-ink-700">{listing.display_meta.description}</CardContent>
           </Card>
@@ -84,7 +84,7 @@ export function ListingDetailPage() {
           {listing.display_meta.usage && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-headline-sm">怎么用</CardTitle>
+                <CardTitle className="text-display-md">怎么用</CardTitle>
               </CardHeader>
               <CardContent className="text-body-md whitespace-pre-wrap text-ink-700">
                 {listing.display_meta.usage}
@@ -95,7 +95,7 @@ export function ListingDetailPage() {
           {listing.display_meta.io_description && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-headline-sm">输入输出</CardTitle>
+                <CardTitle className="text-display-md">输入输出</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-space-2 text-body-md text-ink-700">
                 {listing.display_meta.io_description.input && <p>输入：{listing.display_meta.io_description.input}</p>}
@@ -125,12 +125,15 @@ export function ListingDetailPage() {
           <Card>
             <CardContent className="pt-space-6">
               {listing.subscribed ? (
-                <Badge className="w-full justify-center py-space-2">已订阅</Badge>
+                <span className="text-label-md flex w-full items-center justify-center gap-space-2 rounded-sm border border-moss bg-moss-tint py-space-2 text-moss">
+                  <span aria-hidden className="size-1.5 rounded-full bg-moss" />
+                  已订阅
+                </span>
               ) : (
                 <button
                   type="button"
                   onClick={() => setSubscribeOpen(true)}
-                  className="h-11 w-full rounded-full bg-[image:var(--gradient-brand)] text-body-md font-medium text-white shadow-sm hover:brightness-[1.04]"
+                  className="h-11 w-full rounded-sm bg-blueprint text-body-md font-medium text-white hover:bg-blueprint/90"
                 >
                   订阅 v{listing.version}
                 </button>
@@ -141,8 +144,8 @@ export function ListingDetailPage() {
           {constraints && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-headline-sm flex items-center gap-space-2">
-                  <TriangleAlert className="size-4 text-[var(--color-warning)]" aria-hidden />
+                <CardTitle className="text-display-md flex items-center gap-space-2">
+                  <TriangleAlert className="size-4 text-signal" aria-hidden />
                   执行约束
                 </CardTitle>
               </CardHeader>
@@ -158,7 +161,7 @@ export function ListingDetailPage() {
           {listing.versions && listing.versions.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-headline-sm">版本历史</CardTitle>
+                <CardTitle className="text-display-md">版本历史</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-space-4">
                 {listing.versions.map((v) => (
@@ -201,12 +204,12 @@ export function ListingDetailPage() {
             className="min-h-[100px]"
           />
           {reportError && (
-            <p role="alert" className="text-body-sm text-[var(--color-error)]">
+            <p role="alert" className="text-body-sm text-rust">
               {reportError}
             </p>
           )}
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setReportOpen(false)} disabled={submitReport.isPending}>
+            <Button variant="outline" onClick={() => setReportOpen(false)} disabled={submitReport.isPending}>
               取消
             </Button>
             <Button

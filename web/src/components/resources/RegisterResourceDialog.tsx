@@ -124,11 +124,11 @@ export function RegisterResourceDialog({
               onBlur={(e) => validateRef(e.target.value)}
               aria-invalid={!!refError}
               aria-describedby={refError ? 'resource-ref-error' : undefined}
-              className={cn(refError && 'border-[var(--color-error)]', !refError && ref && 'border-mint')}
+              className={cn(refError && 'border-rust', !refError && ref && 'border-moss')}
               placeholder="internal-search"
             />
             {refError && (
-              <p id="resource-ref-error" className="text-caption text-[var(--color-error)]">
+              <p id="resource-ref-error" className="text-caption text-rust">
                 {refError}
               </p>
             )}
@@ -152,25 +152,25 @@ export function RegisterResourceDialog({
               onBlur={(e) => validateConfig(e.target.value)}
               aria-invalid={!!configError}
               aria-describedby={configError ? 'resource-config-error' : undefined}
-              className={cn('font-mono', configError && 'border-[var(--color-error)]')}
+              className={cn('font-mono', configError && 'border-rust')}
               rows={6}
             />
             {configError && (
-              <p id="resource-config-error" className="text-caption text-[var(--color-error)]">
+              <p id="resource-config-error" className="text-caption text-rust">
                 {configError}
               </p>
             )}
           </div>
 
           {submitError && (
-            <p role="alert" className="text-body-sm text-[var(--color-error)]">
+            <p role="alert" className="text-body-sm text-rust">
               {submitError}
             </p>
           )}
         </div>
 
         <DialogFooter>
-          <Button variant="secondary" onClick={() => onOpenChange(false)} disabled={pending}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             取消
           </Button>
           <Button disabled={pending || !ref} onClick={submit}>

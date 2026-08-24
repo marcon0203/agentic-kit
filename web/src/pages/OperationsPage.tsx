@@ -1,6 +1,6 @@
 import { useSearchParams } from 'react-router-dom'
 
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PageHeader, TabRail, TabRailItem } from '@/components/common/Page'
 import { RunMonitorTab } from '@/pages/operations/RunMonitorTab'
 import { CostAnalysisTab } from '@/pages/operations/CostAnalysisTab'
 import { AuditLogTab } from '@/pages/operations/AuditLogTab'
@@ -20,16 +20,28 @@ export function OperationsPage() {
 
   return (
     <div className="flex flex-col gap-space-6">
-      <h1 className="text-headline-md text-ink-900">运营中心</h1>
+      <PageHeader
+        eyebrow="OPERATIONS"
+        title="运营中心"
+        description="运行发生了什么、花了多少钱、谁批准过什么。这里只读，改动都发生在各自的中心里。"
+      />
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
-        <TabsList>
-          <TabsTrigger value="monitor">监控中心</TabsTrigger>
-          <TabsTrigger value="cost">成本分析</TabsTrigger>
-          <TabsTrigger value="audit">审计日志</TabsTrigger>
-          {isAdmin && <TabsTrigger value="moderation">举报处理</TabsTrigger>}
-        </TabsList>
-      </Tabs>
+      <TabRail>
+        <TabRailItem active={tab === 'monitor'} onClick={() => setTab('monitor')}>
+          运行监控
+        </TabRailItem>
+        <TabRailItem active={tab === 'cost'} onClick={() => setTab('cost')}>
+          成本分析
+        </TabRailItem>
+        <TabRailItem active={tab === 'audit'} onClick={() => setTab('audit')}>
+          审计日志
+        </TabRailItem>
+        {isAdmin && (
+          <TabRailItem active={tab === 'moderation'} onClick={() => setTab('moderation')}>
+            举报处理
+          </TabRailItem>
+        )}
+      </TabRail>
 
       {tab === 'monitor' && <RunMonitorTab />}
       {tab === 'cost' && <CostAnalysisTab />}

@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Lock } from 'lucide-react'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Figure, Ref } from '@/components/common/Page'
+import { cn } from '@/lib/utils'
 import { StatusChip, type PlatformStatus } from '@/components/run/StatusChip'
 import type { NodeBubbleState } from '@/lib/runs/timeline'
 import type { RunEvent } from '@/lib/runs/useRunEvents'
@@ -52,11 +54,13 @@ export function RunSidebar({
             {isBlackbox ? (
               <BlackboxPlaceholder />
             ) : nodes.length === 0 ? (
-              <p className="text-body-sm text-ink-500">尚无节点开始执行</p>
+              <p className="text-body-sm text-ink-500">还没有节点开始执行。</p>
             ) : (
-              <ul className="flex flex-col gap-space-2">
-                {nodes.map((b) => (
-                  <GraphNode key={b.node} bubble={b} />
+              /* The rail again, running downwards: each node is a station
+                 and the track between them shows how far the run got. */
+              <ul className="flex flex-col">
+                {nodes.map((b, i) => (
+                  <GraphNode key={b.node} bubble={b} isLast={i === nodes.length - 1} />
                 ))}
               </ul>
             )}
@@ -65,10 +69,12 @@ export function RunSidebar({
           <TabsContent value="shared_state" className="mt-space-4">
             {Object.keys(sharedState).length === 0 ? (
               <p className="text-body-sm text-ink-500">
-                {isBlackbox ? '该资源作者未声明可见输出字段' : '尚无共享状态数据'}
+                {isBlackbox
+                  ? '作者没有声明对外可见的输出字段，所以这里是空的。'
+                  : '还没有节点往共享状态里写过东西。'}
               </p>
             ) : (
-              <pre className="max-h-80 overflow-auto rounded-xs bg-surface-muted p-space-3 font-mono text-body-sm text-ink-700">
+              <pre className="text-ref max-h-80 overflow-auto rounded-sm border border-border bg-surface-muted p-space-3 text-ink-700">
                 {JSON.stringify(sharedState, null, 2)}
               </pre>
             )}
@@ -79,12 +85,12 @@ export function RunSidebar({
               {events
                 .filter((e) => !isBlackbox || e.type !== 'node.thinking')
                 .map((e) => (
-                  <li key={e.id} className="text-body-sm flex items-center gap-space-2 text-ink-700">
-                    <span className="text-caption font-mono text-ink-500">
+                  <li key={e.id} className="flex items-baseline gap-space-2">
+                    <span className="text-ref tabular shrink-0 text-ink-500">
                       {new Date(e.timestamp).toLocaleTimeString()}
                     </span>
-                    <span className="font-mono">{e.type}</span>
-                    {e.node && <span className="text-ink-500">· {e.node}</span>}
+                    <span className="text-ref min-w-0 truncate text-ink-900">{e.type}</span>
+                    {e.node && <span className="text-caption shrink-0 text-ink-500">{e.node}</span>}
                   </li>
                 ))}
             </ol>
@@ -93,22 +99,15 @@ export function RunSidebar({
       </div>
 
       <div className="rounded-lg border border-border bg-surface p-space-5">
-        <p className="text-headline-sm mb-space-4 text-ink-900">本次运行</p>
+        <p className="text-display-sm mb-space-4 border-b border-border pb-space-2 text-ink-900">
+          这次运行花了
+        </p>
         <div className="grid grid-cols-3 gap-space-4">
-          <Metric label="耗时" value={`${durationSeconds}s`} />
-          <Metric label="Token" value={totalTokens.toLocaleString()} />
-          <Metric label="成本" value={`$${costUsd.toFixed(4)}`} />
+          <Figure value={`${durationSeconds}s`} label="耗时" />
+          <Figure value={totalTokens.toLocaleString()} label="Token" />
+          <Figure value={`$${costUsd.toFixed(4)}`} label="成本" />
         </div>
       </div>
-    </div>
-  )
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col gap-space-1">
-      <span className="text-data text-ink-900">{value}</span>
-      <span className="text-caption text-ink-500">{label}</span>
     </div>
   )
 }
@@ -121,35 +120,52 @@ function Metric({ label, value }: { label: string; value: string }) {
  * the equivalent plain-text path either way; a real node-link diagram is
  * deferred to spec-17's Bundle editor, which already needs one.
  */
-function GraphNode({ bubble }: { bubble: NodeBubbleState }) {
+function GraphNode({ bubble, isLast }: { bubble: NodeBubbleState; isLast: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const status = nodeStatus(bubble)
 
+  const dot =
+    status === 'failed' ? 'bg-rust' : status === 'done' ? 'bg-moss' : 'bg-blueprint'
+
   return (
-    <li className="rounded-xs border border-border bg-surface-page">
-      <button
-        type="button"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between px-space-3 py-space-2 text-left focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-      >
-        <span className="text-body-sm font-mono text-ink-900">{bubble.node}</span>
-        <StatusChip status={status} />
-      </button>
-      {expanded && (
-        <p className="text-body-sm border-t border-border px-space-3 py-space-2 text-ink-700">
-          {bubble.status === 'failed' ? (bubble.errorText ?? '节点执行失败') : bubble.text || '（尚无产出）'}
-        </p>
-      )}
+    <li className="flex gap-space-3">
+      {/* The vertical track. It continues past every node but the last, so
+          the column reads as one run rather than a stack of chips. */}
+      <span aria-hidden className="flex flex-col items-center pt-[9px]">
+        <span className={cn('size-2.5 shrink-0 rounded-full', dot)} />
+        {!isLast && <span className="w-px flex-1 bg-border" />}
+      </span>
+
+      <div className={cn('min-w-0 flex-1', !isLast && 'pb-space-3')}>
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((v) => !v)}
+          className="flex w-full items-center justify-between gap-space-2 rounded-xs py-0.5 text-left"
+        >
+          <Ref>{bubble.node}</Ref>
+          <StatusChip status={status} />
+        </button>
+        {expanded && (
+          <p className="text-body-sm mt-space-2 rounded-sm bg-surface-muted px-space-3 py-space-2 text-ink-700">
+            {bubble.status === 'failed'
+              ? (bubble.errorText ?? '这个节点执行失败了，没有更多信息。')
+              : bubble.text || '这个节点还没有产出内容。'}
+          </p>
+        )}
+      </div>
     </li>
   )
 }
 
 function BlackboxPlaceholder() {
   return (
-    <div className="flex flex-col items-center gap-space-2 rounded-md border border-dashed border-border py-space-8 text-center">
+    <div className="flex flex-col items-center gap-space-2 rounded-sm border border-border bg-surface-muted px-space-4 py-space-8 text-center">
       <Lock className="size-5 text-ink-500" aria-hidden />
-      <p className="text-body-sm text-ink-500">黑盒节点</p>
+      <p className="text-body-sm text-ink-700">这是别人发布的资源</p>
+      <p className="text-caption max-w-[32ch] text-ink-500">
+        你能看到它的输出，但看不到内部有哪些节点、怎么连的。
+      </p>
     </div>
   )
 }
