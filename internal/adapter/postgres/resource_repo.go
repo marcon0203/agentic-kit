@@ -66,6 +66,12 @@ func (r *ResourceRepository) Create(ctx context.Context, res resource.Resource) 
 			return resource.Resource{}, translateResourceErr(e)
 		}
 		out = fromMCP(got)
+	case resource.KindMemory:
+		got, e := r.q.CreateMemory(ctx, store.CreateMemoryParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta})
+		if e != nil {
+			return resource.Resource{}, translateResourceErr(e)
+		}
+		out = fromMemory(got)
 	default:
 		return resource.Resource{}, resource.ErrNotFound
 	}
@@ -98,6 +104,12 @@ func (r *ResourceRepository) GetByID(ctx context.Context, kind resource.Kind, id
 			return resource.Resource{}, translateResourceErr(err)
 		}
 		return fromMCP(got), nil
+	case resource.KindMemory:
+		got, err := r.q.GetMemoryByIDForOwner(ctx, store.GetMemoryByIDForOwnerParams{ID: id, OwnerUserID: ownerID})
+		if err != nil {
+			return resource.Resource{}, translateResourceErr(err)
+		}
+		return fromMemory(got), nil
 	default:
 		return resource.Resource{}, resource.ErrNotFound
 	}
@@ -145,6 +157,16 @@ func (r *ResourceRepository) ListPage(ctx context.Context, kind resource.Kind, o
 			out[i] = fromMCP(x)
 		}
 		return out, nil
+	case resource.KindMemory:
+		rows, err := r.q.ListMemoriesForOwnerPage(ctx, store.ListMemoriesForOwnerPageParams{OwnerUserID: ownerID, ID: afterID, Limit: limit})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]resource.Resource, len(rows))
+		for i, x := range rows {
+			out[i] = fromMemory(x)
+		}
+		return out, nil
 	default:
 		return nil, nil
 	}
@@ -182,6 +204,12 @@ func (r *ResourceRepository) Update(ctx context.Context, res resource.Resource) 
 			return resource.Resource{}, translateResourceErr(e)
 		}
 		return fromMCP(got), nil
+	case resource.KindMemory:
+		got, e := r.q.UpdateMemory(ctx, store.UpdateMemoryParams{ID: res.ID, OwnerUserID: res.OwnerID, DisplayMeta: displayMeta, Config: config, Status: status})
+		if e != nil {
+			return resource.Resource{}, translateResourceErr(e)
+		}
+		return fromMemory(got), nil
 	default:
 		return resource.Resource{}, resource.ErrNotFound
 	}
@@ -229,6 +257,12 @@ func (r *ResourceRepository) FindReferencingAgents(ctx context.Context, kind res
 			out[i] = resource.AgentReference{AgentRef: x.AgentRef, Version: x.Version}
 		}
 		return out, nil
+	case resource.KindMemory:
+		// A memory resource is never referenced from an Agent's
+		// capabilities.tools/skills[] (it's wired in at the run level, not
+		// per-Agent — see internal/adapter/orchestrator's run engine), so
+		// it's always safe to delete.
+		return nil, nil
 	default:
 		return nil, nil
 	}
@@ -302,5 +336,13 @@ func fromMCP(x store.McpServer) resource.Resource {
 		ID: x.ID, OwnerID: x.OwnerUserID, Kind: resource.KindMCP, Ref: x.Ref, Version: x.Version,
 		DisplayName: decodeDisplayName(x.DisplayMeta), Config: decodeConfig(x.Config),
 		Status: resource.Status(x.Status), Health: resource.Health(x.Health), CreatedAt: x.CreatedAt.Time,
+	}
+}
+
+func fromMemory(x store.Memory) resource.Resource {
+	return resource.Resource{
+		ID: x.ID, OwnerID: x.OwnerUserID, Kind: resource.KindMemory, Ref: x.Ref, Version: x.Version,
+		DisplayName: decodeDisplayName(x.DisplayMeta), Config: decodeConfig(x.Config),
+		Status: resource.Status(x.Status), CreatedAt: x.CreatedAt.Time,
 	}
 }

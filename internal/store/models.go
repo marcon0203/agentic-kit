@@ -6,6 +6,7 @@ package store
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
+	pgvector "github.com/pgvector/pgvector-go"
 )
 
 type Agent struct {
@@ -100,6 +101,17 @@ type IdempotencyKey struct {
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
 }
 
+type KbChunk struct {
+	ID              int64              `json:"id"`
+	KnowledgeBaseID int64              `json:"knowledge_base_id"`
+	OwnerUserID     int64              `json:"owner_user_id"`
+	SourceRef       string             `json:"source_ref"`
+	ChunkIndex      int32              `json:"chunk_index"`
+	Content         string             `json:"content"`
+	Embedding       pgvector.Vector    `json:"embedding"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type KnowledgeBasis struct {
 	ID          int64              `json:"id"`
 	OwnerUserID int64              `json:"owner_user_id"`
@@ -137,6 +149,31 @@ type McpServer struct {
 	Status      int16              `json:"status"`
 	Health      string             `json:"health"`
 	Immutable   bool               `json:"immutable"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type Memory struct {
+	ID          int64              `json:"id"`
+	OwnerUserID int64              `json:"owner_user_id"`
+	Ref         string             `json:"ref"`
+	Version     string             `json:"version"`
+	Config      []byte             `json:"config"`
+	DisplayMeta []byte             `json:"display_meta"`
+	Status      int16              `json:"status"`
+	Immutable   bool               `json:"immutable"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type MemoryEntry struct {
+	ID          int64              `json:"id"`
+	MemoryID    int64              `json:"memory_id"`
+	OwnerUserID int64              `json:"owner_user_id"`
+	AppName     string             `json:"app_name"`
+	AgentUserID string             `json:"agent_user_id"`
+	SessionID   string             `json:"session_id"`
+	Author      string             `json:"author"`
+	Content     string             `json:"content"`
+	ContentTsv  interface{}        `json:"content_tsv"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 

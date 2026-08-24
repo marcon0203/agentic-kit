@@ -3,6 +3,7 @@ package modelgateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -207,6 +208,35 @@ func TestOpenAICompatibleClient_Complete(t *testing.T) {
 	}
 	if result.Content != "hi from openai" || result.InputTokens != 8 || result.OutputTokens != 4 {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestOpenAICompatibleClient_Embed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Response order deliberately reversed to prove Embed sorts back
+		// into request order by index rather than trusting response order.
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","embedding":[0.4,0.5],"index":1},{"object":"embedding","embedding":[0.1,0.2],"index":0}],"model":"text-embedding-3-small","usage":{"prompt_tokens":4,"total_tokens":4}}`))
+	}))
+	defer srv.Close()
+
+	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
+	vecs, err := c.Embed(context.Background(), "key", "", "text-embedding-3-small", []string{"a", "b"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(vecs) != 2 || vecs[0][0] != 0.1 || vecs[1][0] != 0.4 {
+		t.Fatalf("unexpected vectors, not sorted into request order: %+v", vecs)
+	}
+}
+
+func TestGateway_Embed_UnsupportedProviderReturnsClearError(t *testing.T) {
+	gw := NewGatewayWithClients(map[string]Client{
+		"anthropic": &anthropicClient{},
+	}, nil)
+	_, err := gw.Embed(context.Background(), ModelSpec{Provider: "anthropic", Name: "n/a"},
+		map[string]Credential{"anthropic": {APIKey: "key"}}, []string{"hi"})
+	if !errors.Is(err, ErrEmbeddingsNotSupported) {
+		t.Fatalf("expected ErrEmbeddingsNotSupported, got %v", err)
 	}
 }
 

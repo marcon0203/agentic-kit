@@ -8,29 +8,96 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/tool"
+	"google.golang.org/adk/tool/exitlooptool"
 	"google.golang.org/adk/tool/functiontool"
+	"google.golang.org/adk/tool/geminitool"
+	"google.golang.org/adk/tool/loadartifactstool"
+	"google.golang.org/adk/tool/loadmemorytool"
+	"google.golang.org/adk/tool/mcptoolset"
+	"google.golang.org/adk/tool/preloadmemorytool"
 )
+
+// BuiltinToolNames are the ADK-shipped tools an Agent's
+// capabilities.builtin_tools[] may name (schemas/agent.schema.json's enum
+// mirrors this list exactly). Unlike tool/skill/mcp/knowledge_base, these
+// aren't registered in the resource center at all — they're the SDK's own
+// implementations, wired in directly at compile time.
+const (
+	BuiltinGoogleSearch  = "google_search"
+	BuiltinLoadMemory    = "load_memory"
+	BuiltinPreloadMemory = "preload_memory"
+	BuiltinLoadArtifacts = "load_artifacts"
+	BuiltinExitLoop      = "exit_loop"
+)
+
+// BuildBuiltinTool maps one capabilities.builtin_tools[] entry to the ADK
+// SDK's own tool implementation. load_memory/preload_memory only do
+// anything useful when the run's agent.Memory is actually wired (see
+// ADKRunner.MemoryService) — building them here doesn't require that; not
+// having it just means they search an empty memory.
+func BuildBuiltinTool(name string) (tool.Tool, error) {
+	switch name {
+	case BuiltinGoogleSearch:
+		return geminitool.GoogleSearch{}, nil
+	case BuiltinLoadMemory:
+		return loadmemorytool.New(), nil
+	case BuiltinPreloadMemory:
+		return preloadmemorytool.New(), nil
+	case BuiltinLoadArtifacts:
+		return loadartifactstool.New(), nil
+	case BuiltinExitLoop:
+		return exitlooptool.New()
+	default:
+		return nil, fmt.Errorf("unknown builtin tool %q", name)
+	}
+}
 
 // ResourceKind mirrors the four resource-center tables (spec-05): "tool"
 // and "mcp" are callable, "skill" contributes instructions rather than a
-// callable action.
+// callable action, "knowledge_base" is a real vector-search call.
 type ResourceKind string
 
 const (
-	KindTool  ResourceKind = "tool"
-	KindMCP   ResourceKind = "mcp"
-	KindSkill ResourceKind = "skill"
+	KindTool          ResourceKind = "tool"
+	KindMCP           ResourceKind = "mcp"
+	KindSkill         ResourceKind = "skill"
+	KindKnowledgeBase ResourceKind = "knowledge_base"
 )
 
 // ToolSpec is what an authorized capabilities.tools/skills ref resolves
 // to — everything BuildTool needs to construct the ADK tool.Tool, already
-// scoped to the requesting owner (the caller did that check).
+// scoped to the requesting owner (the caller did that check). OwnerID and
+// ResourceID are only used by KindKnowledgeBase, to call the search
+// service scoped correctly; the other kinds carry everything they need in
+// Config already.
 type ToolSpec struct {
-	Ref    string
-	Kind   ResourceKind
-	Config map[string]any // resource's decrypted config (endpoint, description, ...)
+	Ref        string
+	Kind       ResourceKind
+	Config     map[string]any // resource's decrypted config (endpoint, description, ...)
+	OwnerID    int64
+	ResourceID int64
+}
+
+// KnowledgeBaseSearchResult is one ranked chunk returned by a
+// KnowledgeBaseSearcher — a package-local mirror of
+// internal/domain/knowledgebase.SearchResult so this package doesn't need
+// to import the domain layer directly (spec-10: ADK wiring stays
+// self-contained; the concrete searcher is injected from outside).
+type KnowledgeBaseSearchResult struct {
+	SourceRef string
+	Content   string
+	Score     float64
+}
+
+// KnowledgeBaseSearcher answers a knowledge_base resource's real
+// vector-search query. Implementations live outside this package
+// (internal/adapter/orchestrator, backed by internal/domain/knowledgebase).
+type KnowledgeBaseSearcher interface {
+	Search(ctx context.Context, ownerID, knowledgeBaseID int64, query string, topK int) ([]KnowledgeBaseSearchResult, error)
 }
 
 // ResourceAuthorizer authorizes one capabilities.tools/skills ref against
@@ -47,18 +114,91 @@ type ResourceAuthorizer interface {
 const toolCallTimeout = 30 * time.Second
 
 // BuildTool constructs the ADK tool.Tool for one authorized resource. A
-// "tool"/"mcp" resource makes a real HTTP call to its configured endpoint
+// "tool" resource makes a real HTTP call to its configured endpoint
 // (mirroring internal/api's MCP connectivity probe — the same "config
 // carries an `endpoint`" convention, spec-05); a "skill" has no callable
 // action, so it surfaces its own instructions as the tool's result,
-// letting the agent read and follow them.
-func BuildTool(spec ToolSpec) (tool.Tool, error) {
+// letting the agent read and follow them; a "knowledge_base" calls kb's
+// real vector search. "mcp" is handled separately by BuildMCPToolset (it
+// produces a tool.Toolset, not a single tool.Tool — an MCP server can
+// expose any number of tools, discovered at connect time).
+func BuildTool(spec ToolSpec, kb KnowledgeBaseSearcher) (tool.Tool, error) {
 	switch spec.Kind {
 	case KindSkill:
 		return buildSkillTool(spec)
+	case KindKnowledgeBase:
+		return buildKnowledgeBaseTool(spec, kb)
+	case KindMCP:
+		return nil, fmt.Errorf("resource %q: mcp resources build a tool.Toolset via BuildMCPToolset, not BuildTool", spec.Ref)
 	default:
 		return buildEndpointTool(spec)
 	}
+}
+
+// BuildMCPToolset connects to a "mcp" resource's real MCP server (via
+// ADK's mcptoolset, a genuine JSON-RPC MCP client) and exposes whatever
+// tools that server advertises. Unlike every other resource kind, the
+// number and shape of tools aren't known until connect time — that's why
+// this returns a tool.Toolset rather than a single tool.Tool.
+//
+// spec.Config carries the same "endpoint" convention as buildEndpointTool
+// (mirroring internal/api's MCP connectivity probe), plus an optional
+// "api_key" sent as a Bearer token on every request to the server.
+func BuildMCPToolset(spec ToolSpec) (tool.Toolset, error) {
+	endpoint, _ := spec.Config["endpoint"].(string)
+	if endpoint == "" {
+		return nil, fmt.Errorf("resource %q has no endpoint configured", spec.Ref)
+	}
+	apiKey, _ := spec.Config["api_key"].(string)
+
+	client := &http.Client{Timeout: toolCallTimeout}
+	if apiKey != "" {
+		client.Transport = &bearerAuthTransport{apiKey: apiKey, base: http.DefaultTransport}
+	}
+
+	return mcptoolset.New(mcptoolset.Config{
+		Transport: &mcp.StreamableClientTransport{Endpoint: endpoint, HTTPClient: client},
+	})
+}
+
+// bearerAuthTransport adds an Authorization header to every request — the
+// MCP transport takes an *http.Client, not a per-request header option, so
+// this is how a resource's stored credential reaches the server.
+type bearerAuthTransport struct {
+	apiKey string
+	base   http.RoundTripper
+}
+
+func (t *bearerAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+	req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	return t.base.RoundTrip(req)
+}
+
+type kbSearchArgs struct {
+	Query string `json:"query" jsonschema_description:"The question or topic to search this knowledge base for."`
+}
+type kbSearchResult struct {
+	Results []KnowledgeBaseSearchResult `json:"results"`
+}
+
+func buildKnowledgeBaseTool(spec ToolSpec, kb KnowledgeBaseSearcher) (tool.Tool, error) {
+	description, _ := spec.Config["description"].(string)
+	if description == "" {
+		description = fmt.Sprintf("Searches the %q knowledge base and returns the most relevant passages.", spec.Ref)
+	}
+	if kb == nil {
+		return nil, fmt.Errorf("resource %q: no knowledge base searcher configured", spec.Ref)
+	}
+
+	return functiontool.New(functiontool.Config{Name: spec.Ref, Description: description},
+		func(ctx agent.ToolContext, args kbSearchArgs) (kbSearchResult, error) {
+			results, err := kb.Search(ctx, spec.OwnerID, spec.ResourceID, args.Query, 0)
+			if err != nil {
+				return kbSearchResult{}, err
+			}
+			return kbSearchResult{Results: results}, nil
+		})
 }
 
 type toolArgs struct {

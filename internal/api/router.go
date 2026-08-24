@@ -34,6 +34,7 @@ type RouterConfig struct {
 	Tokens           *auth.TokenIssuer
 	APIKeys          APIKeyLookup
 	Resources        *ResourceHandlers
+	KnowledgeBases   *KnowledgeBaseHandlers
 	Agents           *AgentHandlers
 	Bundles          *BundleHandlers
 	Marketplace      *MarketplaceHandlers
@@ -100,6 +101,12 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Post("/resources", cfg.Resources.Create)
 				r.Patch("/resources/{id}", cfg.Resources.Update)
 				r.Get("/resources/{id}/delete-check", cfg.Resources.DeleteCheck)
+			}
+			if cfg.KnowledgeBases != nil {
+				r.Post("/resources/{id}/kb/documents", cfg.KnowledgeBases.IngestDocument)
+				r.Get("/resources/{id}/kb/documents", cfg.KnowledgeBases.ListDocuments)
+				r.Delete("/resources/{id}/kb/documents/{source_ref}", cfg.KnowledgeBases.DeleteDocument)
+				r.Post("/resources/{id}/kb/search", cfg.KnowledgeBases.Search)
 			}
 			if cfg.Agents != nil {
 				r.Get("/agents", cfg.Agents.List)

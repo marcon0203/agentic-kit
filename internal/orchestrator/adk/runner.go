@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"google.golang.org/adk/agent"
+	"google.golang.org/adk/memory"
 	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
 	"google.golang.org/genai"
@@ -46,6 +47,13 @@ type ADKRunner struct {
 	AppName        string
 	Agent          agent.Agent
 	SessionService session.Service
+	// MemoryService backs the load_memory/preload_memory builtin tools
+	// (capabilities.builtin_tools). Nil defaults to an in-process
+	// InMemoryService — same durability tradeoff as the default
+	// SessionService below; a real persisted implementation is a
+	// "memory" resource concern (internal/domain/knowledgebase's sibling),
+	// injected here the same way a real SessionService eventually would be.
+	MemoryService memory.Service
 }
 
 // NewADKRunner builds an ADKRunner backed by ADK's in-memory session
@@ -58,8 +66,13 @@ func NewADKRunner(appName string, root agent.Agent) (*ADKRunner, error) {
 }
 
 func (r *ADKRunner) Run(ctx context.Context, in AgentInput, emit func(Event)) (AgentOutput, error) {
+	memSvc := r.MemoryService
+	if memSvc == nil {
+		memSvc = memory.InMemoryService()
+	}
 	rn, err := runner.New(runner.Config{
-		AppName: r.AppName, Agent: r.Agent, SessionService: r.SessionService, AutoCreateSession: true,
+		AppName: r.AppName, Agent: r.Agent, SessionService: r.SessionService,
+		MemoryService: memSvc, AutoCreateSession: true,
 	})
 	if err != nil {
 		return AgentOutput{}, fmt.Errorf("adk: build runner: %w", err)
@@ -81,6 +94,13 @@ func (r *ADKRunner) Run(ctx context.Context, in AgentInput, emit func(Event)) (A
 				}
 			}
 		}
+	}
+
+	// The runner doesn't do this automatically (per ADK's own examples) —
+	// without it, load_memory would only ever search an empty store no
+	// matter how many turns had already happened.
+	if resp, err := r.SessionService.Get(ctx, &session.GetRequest{AppName: r.AppName, UserID: in.UserID, SessionID: in.SessionID}); err == nil && resp.Session != nil {
+		_ = memSvc.AddSessionToMemory(ctx, resp.Session)
 	}
 	return out, nil
 }

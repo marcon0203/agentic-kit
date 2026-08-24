@@ -68,6 +68,20 @@ type Client interface {
 	Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error)
 }
 
+// EmbeddingClient is implemented by Clients that also speak an embeddings
+// API. Not every provider does (Anthropic has none; Google's is a
+// different wire shape not yet implemented here), so this is a separate,
+// optional interface rather than a method on Client — a provider that
+// can't embed simply doesn't implement it, and Gateway.Embed reports that
+// plainly instead of every Client needing a stub that always errors.
+type EmbeddingClient interface {
+	Embed(ctx context.Context, apiKey, baseURL, model string, texts []string) ([][]float32, error)
+}
+
+// ErrEmbeddingsNotSupported is returned by Gateway.Embed when the
+// resolved provider's Client doesn't implement EmbeddingClient.
+var ErrEmbeddingsNotSupported = errors.New("modelgateway: provider does not support embeddings")
+
 // ModelSpec is a parsed "provider/name" DSL reference (spec-09: Agent DSL's
 // model.provider + model.fallback[] are resolved into a real call chain
 // here — never in the orchestrator).
@@ -213,6 +227,26 @@ func (g *Gateway) Complete(ctx context.Context, primary ModelSpec, fallbacks []M
 	return CompletionResult{}, fmt.Errorf("%w (last: %v)", ErrAllProvidersUnavailable, lastErr)
 }
 
+// Embed calls one provider's embeddings API — no fallback chain, since an
+// embedding vector from a different model isn't a valid substitute for
+// another (they aren't comparable in the same vector space), unlike a
+// chat completion where any model can plausibly answer.
+func (g *Gateway) Embed(ctx context.Context, spec ModelSpec, creds map[string]Credential, texts []string) ([][]float32, error) {
+	client, ok := g.clients[spec.Provider]
+	if !ok {
+		return nil, fmt.Errorf("modelgateway: no client configured for provider %q", spec.Provider)
+	}
+	embedder, ok := client.(EmbeddingClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrEmbeddingsNotSupported, spec.Provider)
+	}
+	cred, ok := creds[spec.Provider]
+	if !ok || cred.APIKey == "" {
+		return nil, fmt.Errorf("modelgateway: no credentials configured for provider %q", spec.Provider)
+	}
+	return embedder.Embed(ctx, cred.APIKey, cred.BaseURL, spec.Name, texts)
+}
+
 // ── Anthropic ────────────────────────────────────────────────────────
 //
 // Anthropic's wire format (content blocks, x-api-key auth) doesn't fit the
@@ -333,6 +367,45 @@ func (c *openAICompatibleClient) Complete(ctx context.Context, apiKey, baseURL, 
 		InputTokens:  int64(resp.Usage.PromptTokens),
 		OutputTokens: int64(resp.Usage.CompletionTokens),
 	}, nil
+}
+
+// Embed implements EmbeddingClient. OpenAI, DeepSeek, Qwen (compatible
+// mode) and any "custom" OpenAI-wire-compatible endpoint all publish the
+// same POST /embeddings shape, so this is the one implementation for the
+// whole family, mirroring Complete above.
+func (c *openAICompatibleClient) Embed(ctx context.Context, apiKey, baseURL, model string, texts []string) ([][]float32, error) {
+	base := c.defaultBaseURL
+	if baseURL != "" {
+		base = baseURL
+	}
+	if base == "" {
+		return nil, fmt.Errorf("%s: no base_url configured", c.label)
+	}
+
+	cfg := openai.DefaultConfig(apiKey)
+	cfg.BaseURL = strings.TrimSuffix(base, "/")
+	cfg.HTTPClient = c.httpClient
+	client := openai.NewClientWithConfig(cfg)
+
+	resp, err := client.CreateEmbeddings(ctx, openai.EmbeddingRequestStrings{
+		Input: texts,
+		Model: openai.EmbeddingModel(model),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", c.label, err)
+	}
+	if len(resp.Data) != len(texts) {
+		return nil, fmt.Errorf("%s: expected %d embeddings, got %d", c.label, len(texts), len(resp.Data))
+	}
+
+	// The API returns each embedding tagged with its input index, not
+	// necessarily in request order — sort back into caller order rather
+	// than trusting response order.
+	out := make([][]float32, len(texts))
+	for _, e := range resp.Data {
+		out[e.Index] = e.Embedding
+	}
+	return out, nil
 }
 
 // ── Google ───────────────────────────────────────────────────────────

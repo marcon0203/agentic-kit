@@ -106,6 +106,22 @@
           "uniqueItems": true,
           "default": []
         },
+        "builtin_tools": {
+          "type": "array",
+          "description": "ADK 自带的工具，不经过资源中心登记，编译时直接映射到 SDK 的对应实现",
+          "items": {
+            "type": "string",
+            "enum": [
+              "google_search",
+              "load_memory",
+              "preload_memory",
+              "load_artifacts",
+              "exit_loop"
+            ]
+          },
+          "uniqueItems": true,
+          "default": []
+        },
         "hooks": {
           "type": "object",
           "description": "生命周期钩子，值为已注册 hook 的名称，按数组顺序依次执行",

@@ -24,15 +24,16 @@ const (
 	KindSkill         Kind = "skill"
 	KindMCP           Kind = "mcp"
 	KindKnowledgeBase Kind = "knowledge_base"
+	KindMemory        Kind = "memory"
 )
 
 // AllKinds lists every kind, in the order the unfiltered list endpoint
 // queries them.
-var AllKinds = []Kind{KindTool, KindSkill, KindMCP, KindKnowledgeBase}
+var AllKinds = []Kind{KindTool, KindSkill, KindMCP, KindKnowledgeBase, KindMemory}
 
 func ParseKind(s string) (Kind, bool) {
 	switch Kind(s) {
-	case KindTool, KindSkill, KindMCP, KindKnowledgeBase:
+	case KindTool, KindSkill, KindMCP, KindKnowledgeBase, KindMemory:
 		return Kind(s), true
 	default:
 		return "", false

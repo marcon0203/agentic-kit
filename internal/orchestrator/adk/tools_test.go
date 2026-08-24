@@ -62,7 +62,7 @@ func TestSkillInstructions_FallsBackToDescription(t *testing.T) {
 }
 
 func TestBuildTool_Skill(t *testing.T) {
-	tl, err := BuildTool(ToolSpec{Ref: "code-review", Kind: KindSkill, Config: map[string]any{"instructions": "review carefully"}})
+	tl, err := BuildTool(ToolSpec{Ref: "code-review", Kind: KindSkill, Config: map[string]any{"instructions": "review carefully"}}, nil)
 	if err != nil {
 		t.Fatalf("BuildTool: %v", err)
 	}
@@ -71,12 +71,32 @@ func TestBuildTool_Skill(t *testing.T) {
 	}
 }
 
-func TestBuildTool_MCP(t *testing.T) {
-	tl, err := BuildTool(ToolSpec{Ref: "internal-search", Kind: KindMCP, Config: map[string]any{"endpoint": "http://example.com"}})
-	if err != nil {
-		t.Fatalf("BuildTool: %v", err)
+// A "mcp" resource builds a tool.Toolset via BuildMCPToolset, not a single
+// Tool via BuildTool — BuildTool rejects it outright so a caller can't
+// silently get a broken half-built tool for the wrong resource kind.
+func TestBuildTool_MCPIsRejected(t *testing.T) {
+	_, err := BuildTool(ToolSpec{Ref: "internal-search", Kind: KindMCP, Config: map[string]any{"endpoint": "http://example.com"}}, nil)
+	if err == nil {
+		t.Fatal("expected BuildTool to reject a KindMCP spec")
 	}
-	if tl.Name() != "internal-search" {
-		t.Fatalf("unexpected tool name: %q", tl.Name())
+}
+
+func TestBuildMCPToolset_RequiresEndpoint(t *testing.T) {
+	_, err := BuildMCPToolset(ToolSpec{Ref: "internal-search", Kind: KindMCP, Config: map[string]any{}})
+	if err == nil {
+		t.Fatal("expected an error for a resource with no endpoint")
+	}
+}
+
+// Connecting to the MCP server happens lazily on first use (the SDK's own
+// doc comment), so building the toolset against an unreachable endpoint
+// should still succeed — only calling Tools()/a tool would fail.
+func TestBuildMCPToolset_ConnectsLazily(t *testing.T) {
+	ts, err := BuildMCPToolset(ToolSpec{Ref: "internal-search", Kind: KindMCP, Config: map[string]any{"endpoint": "http://127.0.0.1:1"}})
+	if err != nil {
+		t.Fatalf("BuildMCPToolset: %v", err)
+	}
+	if ts.Name() == "" {
+		t.Fatal("expected a non-empty toolset name")
 	}
 }

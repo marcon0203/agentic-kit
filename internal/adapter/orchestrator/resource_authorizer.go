@@ -36,33 +36,31 @@ func newResourceAuthorizer(ctx context.Context, q store.Querier, ownerID int64, 
 // hit should surface as.
 type lookup struct {
 	kind  adk.ResourceKind
-	query func() (config []byte, status int16, err error)
+	query func() (id int64, config []byte, status int16, err error)
 }
 
 func (a *resourceAuthorizer) Authorize(_ context.Context, ref string) (adk.ToolSpec, bool, error) {
-	// A ref may name a tool, an MCP server or a knowledge base (all three
-	// surface via capabilities.tools[], per spec-05), or a skill. Knowledge
-	// bases have no ADK kind of their own — they are endpoint-backed
-	// lookups, so they surface as a plain tool call.
+	// A ref may name a tool, an MCP server, a knowledge base or a skill —
+	// all four surface via capabilities.tools[]/skills[], per spec-05.
 	for _, l := range []lookup{
-		{adk.KindTool, func() ([]byte, int16, error) {
+		{adk.KindTool, func() (int64, []byte, int16, error) {
 			row, err := a.q.GetToolLatestByRef(a.ctx, store.GetToolLatestByRefParams{OwnerUserID: a.ownerID, Ref: ref})
-			return row.Config, row.Status, err
+			return row.ID, row.Config, row.Status, err
 		}},
-		{adk.KindMCP, func() ([]byte, int16, error) {
+		{adk.KindMCP, func() (int64, []byte, int16, error) {
 			row, err := a.q.GetMCPServerLatestByRef(a.ctx, store.GetMCPServerLatestByRefParams{OwnerUserID: a.ownerID, Ref: ref})
-			return row.Config, row.Status, err
+			return row.ID, row.Config, row.Status, err
 		}},
-		{adk.KindTool, func() ([]byte, int16, error) {
+		{adk.KindKnowledgeBase, func() (int64, []byte, int16, error) {
 			row, err := a.q.GetKnowledgeBaseLatestByRef(a.ctx, store.GetKnowledgeBaseLatestByRefParams{OwnerUserID: a.ownerID, Ref: ref})
-			return row.Config, row.Status, err
+			return row.ID, row.Config, row.Status, err
 		}},
-		{adk.KindSkill, func() ([]byte, int16, error) {
+		{adk.KindSkill, func() (int64, []byte, int16, error) {
 			row, err := a.q.GetSkillLatestByRef(a.ctx, store.GetSkillLatestByRefParams{OwnerUserID: a.ownerID, Ref: ref})
-			return row.Config, row.Status, err
+			return row.ID, row.Config, row.Status, err
 		}},
 	} {
-		rawConfig, status, err := l.query()
+		id, rawConfig, status, err := l.query()
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
@@ -76,7 +74,7 @@ func (a *resourceAuthorizer) Authorize(_ context.Context, ref string) (adk.ToolS
 		if err != nil {
 			return adk.ToolSpec{}, false, err
 		}
-		return adk.ToolSpec{Ref: ref, Kind: l.kind, Config: config}, true, nil
+		return adk.ToolSpec{Ref: ref, Kind: l.kind, Config: config, OwnerID: a.ownerID, ResourceID: id}, true, nil
 	}
 	return adk.ToolSpec{}, false, nil
 }

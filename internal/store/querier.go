@@ -34,6 +34,7 @@ type Querier interface {
 	// only an admin delisting actually removes it from the graph.
 	CreateListing(ctx context.Context, arg CreateListingParams) (MarketplaceListing, error)
 	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
+	CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error)
 	CreateModelProvider(ctx context.Context, arg CreateModelProviderParams) (CreateModelProviderRow, error)
 	CreateReport(ctx context.Context, arg CreateReportParams) (Report, error)
 	CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error)
@@ -47,6 +48,7 @@ type Querier interface {
 	DeleteBundle(ctx context.Context, id int64) error
 	DeleteBundlesByRef(ctx context.Context, arg DeleteBundlesByRefParams) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
+	DeleteKBChunksBySource(ctx context.Context, arg DeleteKBChunksBySourceParams) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
 	// Knowledge bases surface to an Agent as an entry in capabilities.tools
 	// (the DSL has no separate knowledge_base array) — same lookup as tools.
@@ -111,7 +113,12 @@ type Querier interface {
 	GetMCPServerLatestStatusByRef(ctx context.Context, arg GetMCPServerLatestStatusByRefParams) (int16, error)
 	GetMCPServerListingDisplayByListingID(ctx context.Context, id int64) (GetMCPServerListingDisplayByListingIDRow, error)
 	GetMCPServerListingForOwnerByRef(ctx context.Context, arg GetMCPServerListingForOwnerByRefParams) (MarketplaceListing, error)
+	GetMemoryByIDForOwner(ctx context.Context, arg GetMemoryByIDForOwnerParams) (Memory, error)
 	GetModelProviderCredentials(ctx context.Context, arg GetModelProviderCredentialsParams) ([]byte, error)
+	// The run engine's "which memory store backs this owner's runs" lookup —
+	// newest-enabled-wins, the same rule postgres.ProviderKeyStore already
+	// applies to provider credentials.
+	GetNewestEnabledMemoryForOwner(ctx context.Context, ownerUserID int64) (Memory, error)
 	// A node can gate more than once across a Bundle's lifetime (e.g. inside a
 	// self-loop retry), so this always resolves to the most recent occurrence
 	// for that run+node — the one actually blocking right now.
@@ -151,6 +158,8 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	IncrementListingSubscriberCount(ctx context.Context, id int64) error
 	InsertBundleRunEvent(ctx context.Context, arg InsertBundleRunEventParams) (BundleRunEvent, error)
+	InsertKBChunk(ctx context.Context, arg InsertKBChunkParams) (int64, error)
+	InsertMemoryEntry(ctx context.Context, arg InsertMemoryEntryParams) (int64, error)
 	ListAPIKeysForOwner(ctx context.Context, ownerUserID int64) ([]ListAPIKeysForOwnerRow, error)
 	ListAgentVersionsForOwner(ctx context.Context, arg ListAgentVersionsForOwnerParams) ([]Agent, error)
 	ListAgentsForOwner(ctx context.Context, ownerUserID int64) ([]Agent, error)
@@ -174,9 +183,11 @@ type Querier interface {
 	// One row per bundle_ref (its most recently created version).
 	ListBundlesForOwnerLatestPage(ctx context.Context, arg ListBundlesForOwnerLatestPageParams) ([]Bundle, error)
 	ListHumanGatesForRun(ctx context.Context, runID string) ([]HumanGate, error)
+	ListKBSources(ctx context.Context, arg ListKBSourcesParams) ([]ListKBSourcesRow, error)
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
 	ListListingVersionHistory(ctx context.Context, listingRef string) ([]ListListingVersionHistoryRow, error)
 	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)
+	ListMemoriesForOwnerPage(ctx context.Context, arg ListMemoriesForOwnerPageParams) ([]Memory, error)
 	ListModelProvidersForOwner(ctx context.Context, ownerUserID int64) ([]ListModelProvidersForOwnerRow, error)
 	// Backs the timeout-scanning job (spec-11): a pending gate with a
 	// timeout_seconds set, whose deadline has passed.
@@ -201,6 +212,8 @@ type Querier interface {
 	ResolveHumanGate(ctx context.Context, arg ResolveHumanGateParams) (HumanGate, error)
 	ResolveReport(ctx context.Context, arg ResolveReportParams) (Report, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
+	SearchKBChunks(ctx context.Context, arg SearchKBChunksParams) ([]SearchKBChunksRow, error)
+	SearchMemoryEntries(ctx context.Context, arg SearchMemoryEntriesParams) ([]SearchMemoryEntriesRow, error)
 	SetAgentDisplayMeta(ctx context.Context, arg SetAgentDisplayMetaParams) error
 	SetAgentStatusByID(ctx context.Context, arg SetAgentStatusByIDParams) error
 	SetBundleDisplayMeta(ctx context.Context, arg SetBundleDisplayMetaParams) error
@@ -217,6 +230,7 @@ type Querier interface {
 	UpdateKnowledgeBase(ctx context.Context, arg UpdateKnowledgeBaseParams) (KnowledgeBasis, error)
 	UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error)
 	UpdateMCPServerHealth(ctx context.Context, arg UpdateMCPServerHealthParams) error
+	UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Memory, error)
 	UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill, error)
 	UpdateSubscriptionListing(ctx context.Context, arg UpdateSubscriptionListingParams) (Subscription, error)
 	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)

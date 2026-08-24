@@ -10,6 +10,7 @@ import (
 
 	"github.com/marcon0203/agentic-kit/internal/adapter/postgres"
 	"github.com/marcon0203/agentic-kit/internal/bundlegraph"
+	"github.com/marcon0203/agentic-kit/internal/domain/knowledgebase"
 	"github.com/marcon0203/agentic-kit/internal/domain/run"
 	"github.com/marcon0203/agentic-kit/internal/modelgateway"
 	"github.com/marcon0203/agentic-kit/internal/orchestrator/adk"
@@ -19,14 +20,15 @@ import (
 // Engine implements run.Orchestrator. It is the only place that wires the
 // ADK compiler to the model gateway and to persistence.
 type Engine struct {
-	queries  store.Querier
-	runs     run.Repository
-	events   run.EventStore
-	gates    run.GateRepository
-	registry *GateRegistry
-	keys     providerKeys
-	aesKey   []byte
-	appName  string
+	queries    store.Querier
+	runs       run.Repository
+	events     run.EventStore
+	gates      run.GateRepository
+	registry   *GateRegistry
+	keys       providerKeys
+	aesKey     []byte
+	appName    string
+	kbSearcher adk.KnowledgeBaseSearcher
 
 	cancelMu sync.Mutex
 	cancels  map[string]context.CancelFunc
@@ -41,10 +43,12 @@ type providerKeys interface {
 func NewEngine(
 	queries store.Querier, runs run.Repository, events run.EventStore,
 	gates run.GateRepository, registry *GateRegistry, keys providerKeys, aesKey []byte,
+	kbService *knowledgebase.Service,
 ) *Engine {
 	return &Engine{
 		queries: queries, runs: runs, events: events, gates: gates, registry: registry,
 		keys: keys, aesKey: aesKey, appName: "agentic-kit", cancels: map[string]context.CancelFunc{},
+		kbSearcher: newKnowledgeBaseSearcher(kbService),
 	}
 }
 
@@ -87,7 +91,9 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 		}
 		agentDef["agent"] = node
 
-		compiledAgent, err := adk.CompileAgent(ctx, agentDef, adk.AgentCompileOptions{Gateway: gateway, Credentials: creds, Authorizer: authorizer})
+		compiledAgent, err := adk.CompileAgent(ctx, agentDef, adk.AgentCompileOptions{
+			Gateway: gateway, Credentials: creds, Authorizer: authorizer, KnowledgeBaseSearcher: e.kbSearcher,
+		})
 		if err != nil {
 			return nil, fmt.Errorf("compile agent %q: %w", node, err)
 		}
@@ -107,7 +113,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 	if err != nil {
 		return nil, err
 	}
-	return &execution{engine: e, runID: runID, root: root}, nil
+	return &execution{engine: e, runID: runID, root: root, ownerID: b.OwnerUserID}, nil
 }
 
 func (e *Engine) loadAgentDefinition(ctx context.Context, ownerID int64, ref, version string) (map[string]any, error) {
@@ -153,9 +159,10 @@ func (e *Engine) unregisterCancel(runID string) {
 
 // execution is one compiled Bundle waiting to be driven.
 type execution struct {
-	engine *Engine
-	runID  string
-	root   adk.CompiledAgent
+	engine  *Engine
+	runID   string
+	root    adk.CompiledAgent
+	ownerID int64
 }
 
 // Start drives the run to completion, persisting each translated event and
@@ -184,6 +191,12 @@ func (x *execution) Start(triggeredBy int64, input map[string]any, limits run.Li
 	if err != nil {
 		x.finish(persist, run.StatusFailed, err.Error())
 		return
+	}
+	// Real, persisted memory when the owner has registered a "memory"
+	// resource — otherwise ADKRunner falls back to its own process-local
+	// default, same as it always did before 记忆库 existed.
+	if row, err := e.queries.GetNewestEnabledMemoryForOwner(ctx, x.ownerID); err == nil {
+		runner.MemoryService = adk.NewMemoryService(postgres.NewMemoryStore(e.queries, row.ID, x.ownerID))
 	}
 
 	msg, err := json.Marshal(input)

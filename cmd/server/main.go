@@ -13,7 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	pgxvec "github.com/pgvector/pgvector-go/pgx"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
@@ -30,12 +32,14 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/agent"
 	"github.com/marcon0203/agentic-kit/internal/domain/bundle"
 	"github.com/marcon0203/agentic-kit/internal/domain/iam"
+	"github.com/marcon0203/agentic-kit/internal/domain/knowledgebase"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 	"github.com/marcon0203/agentic-kit/internal/domain/operation"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	domainrun "github.com/marcon0203/agentic-kit/internal/domain/run"
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
+	"github.com/marcon0203/agentic-kit/internal/modelgateway"
 	"github.com/marcon0203/agentic-kit/internal/observability"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
@@ -71,7 +75,17 @@ func run() error {
 		}
 	}()
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("parse DATABASE_URL: %w", err)
+	}
+	// Registers pgvector's Go <-> `vector` column codec on every pooled
+	// connection — required for the knowledge-base embedding columns to
+	// scan/bind as pgvector.Vector instead of failing with an unknown OID.
+	poolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		return pgxvec.RegisterTypes(ctx, conn)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return fmt.Errorf("connect to database: %w", err)
 	}
@@ -125,6 +139,20 @@ func run() error {
 		mcp.NewReachabilityProbe(),
 	)
 
+	providerKeys := postgres.NewProviderKeyStore(queries, aesKey)
+
+	// A standalone Gateway for calls that happen outside a Bundle run
+	// (embedding a document at ingest time, embedding a search query) —
+	// Engine builds its own per-run Gateway for completions, but knowledge
+	// base ingest/search need one too and aren't part of a run.
+	embeddingGateway := modelgateway.NewGateway(nil)
+	knowledgeBaseService := knowledgebase.NewService(
+		postgres.NewKnowledgeBaseRepository(queries),
+		embeddingGateway,
+		providerKeys,
+		resourceService,
+	)
+
 	// The run context is assembled from more parts than the others: it
 	// needs persistence, the ADK orchestrator behind it, and the gate
 	// registry that both the orchestrator (which blocks on gates) and the
@@ -133,14 +161,13 @@ func run() error {
 	runEvents := postgres.NewRunEventStore(queries)
 	gateRepo := postgres.NewGateRepository(queries)
 	gateRegistry := orchestrator.NewGateRegistry()
-	providerKeys := postgres.NewProviderKeyStore(queries, aesKey)
 
 	runService := domainrun.NewService(
 		runRepo,
 		runEvents,
 		postgres.NewRunBundleResolver(queries),
 		postgres.NewRunDependencyChecker(queries, resourceCatalog, providerKeys),
-		orchestrator.NewEngine(queries, runRepo, runEvents, gateRepo, gateRegistry, providerKeys, aesKey),
+		orchestrator.NewEngine(queries, runRepo, runEvents, gateRepo, gateRegistry, providerKeys, aesKey, knowledgeBaseService),
 		gateRepo,
 		gateRegistry,
 		postgres.NewAuditLogWriter(queries),
@@ -174,6 +201,7 @@ func run() error {
 		Tokens:           auth.NewTokenIssuer(cfg.JWTSecret),
 		APIKeys:          api.NewPostgresAPIKeyLookup(queries),
 		Resources:        api.NewResourceHandlers(resourceService),
+		KnowledgeBases:   api.NewKnowledgeBaseHandlers(knowledgeBaseService),
 		Agents:           api.NewAgentHandlers(agentService),
 		Bundles:          api.NewBundleHandlers(bundleService),
 		Marketplace:      api.NewMarketplaceHandlers(marketplaceService),

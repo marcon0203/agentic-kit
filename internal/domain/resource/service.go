@@ -165,6 +165,22 @@ func (s *Service) List(ctx context.Context, ownerID int64, q ListQuery) (domain.
 	return domain.Page[Resource]{Items: items, HasMore: hasMore, NextCursor: nextCursor}, nil
 }
 
+// Get returns one resource, redacted. Exposed (List only returns pages)
+// for callers that need a single resource's own config by id — the
+// knowledge-base retrieval service reads embedding_provider/embedding_model
+// off it this way.
+func (s *Service) Get(ctx context.Context, ownerID int64, kind Kind, id int64) (Resource, error) {
+	res, err := s.repo.GetByID(ctx, kind, id, ownerID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Resource{}, domain.NotFound(domain.CodeResourceNotFound, "resource not found")
+		}
+		return Resource{}, domain.Internal(err)
+	}
+	res.Config = res.Config.Redact()
+	return res, nil
+}
+
 // CreateCommand registers a new resource.
 type CreateCommand struct {
 	Kind        string
@@ -179,7 +195,7 @@ func (s *Service) Create(ctx context.Context, ownerID int64, cmd CreateCommand) 
 
 	kind, ok := ParseKind(cmd.Kind)
 	if !ok {
-		errs = append(errs, domain.FieldError{Field: "type", Reason: "must be one of tool, skill, mcp, knowledge_base"})
+		errs = append(errs, domain.FieldError{Field: "type", Reason: "must be one of tool, skill, mcp, knowledge_base, memory"})
 	}
 	if !refPattern.MatchString(cmd.Ref) {
 		errs = append(errs, domain.FieldError{Field: "ref", Reason: "must match ^[a-z][a-z0-9_-]*$"})

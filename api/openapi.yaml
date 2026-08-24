@@ -590,6 +590,124 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /resources/{id}/kb/documents:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: 一个 knowledge_base 类型资源的 id；其他类型返回 404
+        schema: { type: string }
+    get:
+      tags: [Resources]
+      summary: 已摄入的文档列表（按 source_ref 聚合，不是按 chunk）
+      operationId: listKnowledgeBaseDocuments
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/KnowledgeBaseDocument' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Resources]
+      summary: 摄入一份文档（分块、向量化、存储）
+      description: 用相同 source_ref 重新摄入即为更新——旧的 chunk 会先被整体替换
+      operationId: ingestKnowledgeBaseDocument
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_ref, content]
+              properties:
+                source_ref: { type: string, description: 文档标识，如文件名或标题 }
+                content: { type: string }
+      responses:
+        '201':
+          description: 摄入成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          chunk_count: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: embedding 调用失败或维度不匹配
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /resources/{id}/kb/documents/{source_ref}:
+    delete:
+      tags: [Resources]
+      summary: 删除一份文档的全部 chunk
+      operationId: deleteKnowledgeBaseDocument
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: source_ref
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: 已删除 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /resources/{id}/kb/search:
+    post:
+      tags: [Resources]
+      summary: 检索预览——手动验证摄入的内容能不能被合理召回
+      operationId: searchKnowledgeBase
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string }
+                top_k: { type: integer, default: 5 }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/KnowledgeBaseSearchResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /agents:
     get:
       tags: [Agents]
@@ -1340,7 +1458,7 @@ components:
 
     ResourceType:
       type: string
-      enum: [tool, skill, mcp, knowledge_base]
+      enum: [tool, skill, mcp, knowledge_base, memory]
 
     ProviderName:
       type: string
@@ -1400,6 +1518,12 @@ components:
             skills:
               type: array
               items: { type: string }
+            builtin_tools:
+              type: array
+              description: ADK 自带工具，不经过资源中心登记
+              items:
+                type: string
+                enum: [google_search, load_memory, preload_memory, load_artifacts, exit_loop]
             hooks:
               type: object
               properties:
@@ -1776,3 +1900,21 @@ components:
         base_url: { type: string }
         status: { $ref: '#/components/schemas/Status' }
         created_at: { type: string, format: date-time }
+
+    KnowledgeBaseDocument:
+      type: object
+      required: [source_ref, chunk_count, ingested_at]
+      properties:
+        source_ref: { type: string }
+        chunk_count: { type: integer }
+        ingested_at: { type: string, format: date-time }
+
+    KnowledgeBaseSearchResult:
+      type: object
+      required: [source_ref, content, score]
+      properties:
+        source_ref: { type: string }
+        content: { type: string }
+        score:
+          type: number
+          description: 1 - 余弦距离，越大越相关

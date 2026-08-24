@@ -27,6 +27,9 @@ type AgentCompileOptions struct {
 	Gateway     *modelgateway.Gateway
 	Credentials map[string]modelgateway.Credential // provider -> decrypted credential
 	Authorizer  ResourceAuthorizer
+	// KnowledgeBaseSearcher backs a "knowledge_base" resource's real vector
+	// search; nil is fine when no Agent in the Bundle references one.
+	KnowledgeBaseSearcher KnowledgeBaseSearcher
 }
 
 // CompileAgent turns one validated Agent DSL document (schemas/agent.schema.json)
@@ -52,7 +55,7 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		}
 	}
 
-	tools, err := compileTools(ctx, def, opts.Authorizer)
+	tools, toolsets, err := compileTools(ctx, def, opts.Authorizer, opts.KnowledgeBaseSearcher)
 	if err != nil {
 		return nil, fmt.Errorf("adk: agent %q: %w", ref, err)
 	}
@@ -65,6 +68,7 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		Instruction: persona,
 		Model:       llm,
 		Tools:       tools,
+		Toolsets:    toolsets,
 		OutputKey:   ref,
 	})
 	if err != nil {
@@ -103,21 +107,31 @@ func anyFallbackHasKey(fallbacks []modelgateway.ModelSpec, creds map[string]mode
 	return modelgateway.ModelSpec{}, false
 }
 
-func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAuthorizer) ([]tool.Tool, error) {
+func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAuthorizer, kb KnowledgeBaseSearcher) ([]tool.Tool, []tool.Toolset, error) {
 	caps, _ := def["capabilities"].(map[string]any)
 	if caps == nil || authorizer == nil {
-		return nil, nil
+		return nil, nil, nil
+	}
+
+	var tools []tool.Tool
+	var toolsets []tool.Toolset
+
+	for _, name := range toStringList(caps["builtin_tools"]) {
+		t, err := BuildBuiltinTool(name)
+		if err != nil {
+			return nil, nil, fmt.Errorf("builtin tool %q: %w", name, err)
+		}
+		tools = append(tools, t)
 	}
 
 	var refs []string
 	refs = append(refs, toStringList(caps["tools"])...)
 	refs = append(refs, toStringList(caps["skills"])...)
 
-	var tools []tool.Tool
 	for _, ref := range refs {
 		spec, ok, err := authorizer.Authorize(ctx, ref)
 		if err != nil {
-			return nil, fmt.Errorf("authorize %q: %w", ref, err)
+			return nil, nil, fmt.Errorf("authorize %q: %w", ref, err)
 		}
 		if !ok {
 			// Not authorized: silently omitted, per spec-10 — the model
@@ -125,13 +139,24 @@ func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAu
 			// runtime when it tries to call it.
 			continue
 		}
-		t, err := BuildTool(spec)
+		// An MCP server's tool count isn't known until connect time, so it
+		// builds a Toolset (discovered per-invocation) rather than a
+		// single Tool like every other resource kind.
+		if spec.Kind == KindMCP {
+			ts, err := BuildMCPToolset(spec)
+			if err != nil {
+				return nil, nil, fmt.Errorf("build mcp toolset %q: %w", ref, err)
+			}
+			toolsets = append(toolsets, ts)
+			continue
+		}
+		t, err := BuildTool(spec, kb)
 		if err != nil {
-			return nil, fmt.Errorf("build tool %q: %w", ref, err)
+			return nil, nil, fmt.Errorf("build tool %q: %w", ref, err)
 		}
 		tools = append(tools, t)
 	}
-	return tools, nil
+	return tools, toolsets, nil
 }
 
 func toStringList(v any) []string {
