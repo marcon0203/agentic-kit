@@ -35,7 +35,7 @@ type Engine struct {
 // providerKeys is the owner's decrypted model credentials, which the
 // compiler needs to build a working gateway.
 type providerKeys interface {
-	Keys(ctx context.Context, ownerID int64) (map[string]string, error)
+	Keys(ctx context.Context, ownerID int64) (map[string]modelgateway.Credential, error)
 }
 
 func NewEngine(
@@ -59,7 +59,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 		return nil, fmt.Errorf("parse orchestration graph: %w", err)
 	}
 
-	apiKeys, err := e.keys.Keys(ctx, b.OwnerUserID)
+	creds, err := e.keys.Keys(ctx, b.OwnerUserID)
 	if err != nil {
 		return nil, fmt.Errorf("load provider keys: %w", err)
 	}
@@ -87,7 +87,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 		}
 		agentDef["agent"] = node
 
-		compiledAgent, err := adk.CompileAgent(ctx, agentDef, adk.AgentCompileOptions{Gateway: gateway, APIKeys: apiKeys, Authorizer: authorizer})
+		compiledAgent, err := adk.CompileAgent(ctx, agentDef, adk.AgentCompileOptions{Gateway: gateway, Credentials: creds, Authorizer: authorizer})
 		if err != nil {
 			return nil, fmt.Errorf("compile agent %q: %w", node, err)
 		}

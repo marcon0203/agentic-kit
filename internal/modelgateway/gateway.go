@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	openai "github.com/sashabaranov/go-openai"
 )
 
 // completionTimeout bounds a single provider call. Fallback tries the next
@@ -45,9 +47,25 @@ type CompletionResult struct {
 	Model        string
 }
 
-// Client speaks one provider's completion API.
+// Credential is what a caller supplies to reach one provider: the API key,
+// and — for an OpenAI-compatible provider whose endpoint isn't fixed
+// (spec-09's 自定义 provider, and any built-in provider a caller wants to
+// point at a proxy or regional mirror) — the base URL to send requests to.
+// BaseURL empty means "use that provider's documented default"; for
+// "custom" there is no default, so an empty BaseURL there is a
+// configuration error the connectivity check catches at registration time.
+type Credential struct {
+	APIKey  string
+	BaseURL string
+}
+
+// Client speaks one provider's completion API. baseURL is the resolved
+// endpoint for this call — empty means the Client's own default applies;
+// it is a parameter rather than baked into the Client at construction
+// because a "custom" or overridden endpoint is a per-owner Credential, not
+// a fact fixed by the provider name.
 type Client interface {
-	Complete(ctx context.Context, apiKey, model string, req CompletionRequest) (CompletionResult, error)
+	Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error)
 }
 
 // ModelSpec is a parsed "provider/name" DSL reference (spec-09: Agent DSL's
@@ -100,9 +118,10 @@ type Gateway struct {
 	sink    EventSink
 }
 
-// NewGateway builds a Gateway against the real Anthropic/OpenAI/Google
-// APIs. sink may be nil (no fallback events emitted, e.g. in tests that
-// don't care).
+// NewGateway builds a Gateway against the real Anthropic/OpenAI/DeepSeek/
+// Qwen/Google APIs, plus a slot for a caller-supplied "custom"
+// OpenAI-compatible endpoint. sink may be nil (no fallback events emitted,
+// e.g. in tests that don't care).
 func NewGateway(sink EventSink) *Gateway {
 	return newGatewayWithEndpoints(sink, providerEndpoints{})
 }
@@ -113,20 +132,28 @@ func newGatewayWithEndpoints(sink EventSink, ep providerEndpoints) *Gateway {
 		sink: sink,
 		clients: map[string]Client{
 			"anthropic": &anthropicClient{client: httpClient, baseURL: ep.anthropicBase()},
-			"openai":    &openaiClient{client: httpClient, baseURL: ep.openaiBase()},
 			"google":    &googleClient{client: httpClient, baseURL: ep.googleBase()},
+			// OpenAI, DeepSeek and Qwen (DashScope's OpenAI-compatible
+			// mode) all speak the same chat-completions wire format, so
+			// one Client type serves all three plus "custom" — only the
+			// default base URL differs, and "custom" has none: a Credential
+			// with an empty BaseURL there is a configuration error, caught
+			// at registration by the connectivity check rather than here.
+			"openai":   &openAICompatibleClient{httpClient: httpClient, defaultBaseURL: ep.openaiBase(), label: "openai"},
+			"deepseek": &openAICompatibleClient{httpClient: httpClient, defaultBaseURL: ep.deepseekBase(), label: "deepseek"},
+			"qwen":     &openAICompatibleClient{httpClient: httpClient, defaultBaseURL: ep.qwenBase(), label: "qwen"},
+			"custom":   &openAICompatibleClient{httpClient: httpClient, defaultBaseURL: "", label: "custom"},
 		},
 	}
 }
 
 // NewGatewayWithClients builds a Gateway against caller-supplied Clients —
-// used by tests, and available to callers who want a "custom" provider
-// wired in.
+// used by tests.
 func NewGatewayWithClients(clients map[string]Client, sink EventSink) *Gateway {
 	return &Gateway{clients: clients, sink: sink}
 }
 
-// apiKeyNotConfiguredError names the provider so ErrAllProvidersUnavailable's
+// chainStepError names the provider so ErrAllProvidersUnavailable's
 // wrapped cause is legible, without exporting a type callers would need to
 // match on.
 type chainStepError struct {
@@ -140,11 +167,12 @@ func (e *chainStepError) Error() string {
 func (e *chainStepError) Unwrap() error { return e.cause }
 
 // Complete tries primary, then each entry in fallbacks in order, stopping
-// at the first provider that answers successfully. apiKeys maps provider
-// name -> decrypted credential. Every failure — network, auth, unknown
-// provider, missing credential — advances to the next link; only running
-// out of chain is fatal (ErrAllProvidersUnavailable).
-func (g *Gateway) Complete(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, apiKeys map[string]string, req CompletionRequest) (CompletionResult, error) {
+// at the first provider that answers successfully. creds maps provider
+// name -> the caller's decrypted Credential for it. Every failure —
+// network, auth, unknown provider, missing credential — advances to the
+// next link; only running out of chain is fatal
+// (ErrAllProvidersUnavailable).
+func (g *Gateway) Complete(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, creds map[string]Credential, req CompletionRequest) (CompletionResult, error) {
 	chain := make([]ModelSpec, 0, 1+len(fallbacks))
 	chain = append(chain, primary)
 	chain = append(chain, fallbacks...)
@@ -167,13 +195,13 @@ func (g *Gateway) Complete(ctx context.Context, primary ModelSpec, fallbacks []M
 			lastErr = &chainStepError{spec.Provider, fmt.Errorf("no client configured")}
 			continue
 		}
-		apiKey, ok := apiKeys[spec.Provider]
-		if !ok || apiKey == "" {
+		cred, ok := creds[spec.Provider]
+		if !ok || cred.APIKey == "" {
 			lastErr = &chainStepError{spec.Provider, fmt.Errorf("no credentials configured")}
 			continue
 		}
 
-		result, err := client.Complete(ctx, apiKey, spec.Name, req)
+		result, err := client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, req)
 		if err != nil {
 			lastErr = &chainStepError{spec.Provider, err}
 			continue
@@ -186,13 +214,23 @@ func (g *Gateway) Complete(ctx context.Context, primary ModelSpec, fallbacks []M
 }
 
 // ── Anthropic ────────────────────────────────────────────────────────
+//
+// Anthropic's wire format (content blocks, x-api-key auth) doesn't fit the
+// OpenAI-compatible family below, so it stays its own small hand-rolled
+// client — there is no well-established open-source Go SDK for it worth
+// taking a dependency on for the one endpoint this platform calls.
 
 type anthropicClient struct {
 	client  *http.Client
 	baseURL string
 }
 
-func (c *anthropicClient) Complete(ctx context.Context, apiKey, model string, req CompletionRequest) (CompletionResult, error) {
+func (c *anthropicClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
+	base := c.baseURL
+	if baseURL != "" {
+		base = baseURL
+	}
+
 	type msg struct {
 		Role    string `json:"role"`
 		Content string `json:"content"`
@@ -220,7 +258,7 @@ func (c *anthropicClient) Complete(ctx context.Context, apiKey, model string, re
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	status, err := postJSON(ctx, c.client, c.baseURL+"/v1/messages", map[string]string{
+	status, err := postJSON(ctx, c.client, base+"/v1/messages", map[string]string{
 		"x-api-key": apiKey, "anthropic-version": "2023-06-01",
 	}, body, &out)
 	if err != nil {
@@ -242,60 +280,58 @@ func (c *anthropicClient) Complete(ctx context.Context, apiKey, model string, re
 	return CompletionResult{Content: text.String(), InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens}, nil
 }
 
-// ── OpenAI ───────────────────────────────────────────────────────────
-
-type openaiClient struct {
-	client  *http.Client
-	baseURL string
+// ── OpenAI-compatible family ─────────────────────────────────────────
+//
+// OpenAI, DeepSeek and Qwen (via DashScope's compatible-mode endpoint) all
+// publish the same chat-completions wire format, and "custom" exists
+// precisely so a caller can point this same client at anything else that
+// does too (a self-hosted vLLM/Ollama server, an internal proxy). Built on
+// github.com/sashabaranov/go-openai rather than hand-rolled JSON — the
+// request/response shapes, retry-relevant status codes and the streaming
+// guard are exactly the part not worth re-deriving per provider.
+type openAICompatibleClient struct {
+	httpClient     *http.Client
+	defaultBaseURL string
+	// label names the provider in error messages only; it never affects
+	// the wire format, which is identical across this whole family.
+	label string
 }
 
-func (c *openaiClient) Complete(ctx context.Context, apiKey, model string, req CompletionRequest) (CompletionResult, error) {
-	type msg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+func (c *openAICompatibleClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
+	base := c.defaultBaseURL
+	if baseURL != "" {
+		base = baseURL
 	}
-	body := struct {
-		Model       string  `json:"model"`
-		MaxTokens   int     `json:"max_tokens,omitempty"`
-		Temperature float64 `json:"temperature,omitempty"`
-		Messages    []msg   `json:"messages"`
-	}{Model: model, MaxTokens: req.MaxTokens, Temperature: req.Temperature}
-	for _, m := range req.Messages {
-		body.Messages = append(body.Messages, msg(m))
+	if base == "" {
+		return CompletionResult{}, fmt.Errorf("%s: no base_url configured", c.label)
 	}
 
-	var out struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
-			PromptTokens     int64 `json:"prompt_tokens"`
-			CompletionTokens int64 `json:"completion_tokens"`
-		} `json:"usage"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
+	cfg := openai.DefaultConfig(apiKey)
+	cfg.BaseURL = strings.TrimSuffix(base, "/")
+	cfg.HTTPClient = c.httpClient
+	client := openai.NewClientWithConfig(cfg)
+
+	messages := make([]openai.ChatCompletionMessage, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		messages = append(messages, openai.ChatCompletionMessage{Role: m.Role, Content: m.Content})
 	}
-	status, err := postJSON(ctx, c.client, c.baseURL+"/v1/chat/completions", map[string]string{
-		"Authorization": "Bearer " + apiKey,
-	}, body, &out)
+
+	resp, err := client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
+		Model:       model,
+		Messages:    messages,
+		MaxTokens:   req.MaxTokens,
+		Temperature: float32(req.Temperature),
+	})
 	if err != nil {
-		return CompletionResult{}, err
+		return CompletionResult{}, fmt.Errorf("%s: %w", c.label, err)
 	}
-	if out.Error != nil {
-		return CompletionResult{}, errors.New(out.Error.Message)
-	}
-	if status < 200 || status >= 300 {
-		return CompletionResult{}, fmt.Errorf("openai: http %d", status)
-	}
-	if len(out.Choices) == 0 {
-		return CompletionResult{}, errors.New("openai: no choices in response")
+	if len(resp.Choices) == 0 {
+		return CompletionResult{}, fmt.Errorf("%s: no choices in response", c.label)
 	}
 	return CompletionResult{
-		Content:     out.Choices[0].Message.Content,
-		InputTokens: out.Usage.PromptTokens, OutputTokens: out.Usage.CompletionTokens,
+		Content:      resp.Choices[0].Message.Content,
+		InputTokens:  int64(resp.Usage.PromptTokens),
+		OutputTokens: int64(resp.Usage.CompletionTokens),
 	}, nil
 }
 
@@ -306,7 +342,12 @@ type googleClient struct {
 	baseURL string
 }
 
-func (c *googleClient) Complete(ctx context.Context, apiKey, model string, req CompletionRequest) (CompletionResult, error) {
+func (c *googleClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
+	base := c.baseURL
+	if baseURL != "" {
+		base = baseURL
+	}
+
 	type part struct {
 		Text string `json:"text"`
 	}
@@ -345,7 +386,7 @@ func (c *googleClient) Complete(ctx context.Context, apiKey, model string, req C
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", c.baseURL, model, apiKey)
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, model, apiKey)
 	status, err := postJSON(ctx, c.client, url, nil, body, &out)
 	if err != nil {
 		return CompletionResult{}, err
@@ -366,14 +407,8 @@ func (c *googleClient) Complete(ctx context.Context, apiKey, model string, req C
 	}, nil
 }
 
-// ── shared HTTP helper ───────────────────────────────────────────────
-
-// postJSON sends a JSON POST and decodes the response body into out
-// regardless of status code — every Client's out struct carries an
-// optional Error field for the provider's own error shape, which the
-// caller checks after this returns. The returned status is what the
-// caller falls back to (a plain "http 401") when the body didn't carry a
-// structured error it recognizes.
+// postJSON is the shared low-level helper for the two hand-rolled clients
+// (Anthropic, Google) that don't go through the go-openai SDK.
 func postJSON(ctx context.Context, client *http.Client, url string, headers map[string]string, body, out any) (status int, err error) {
 	payload, err := json.Marshal(body)
 	if err != nil {

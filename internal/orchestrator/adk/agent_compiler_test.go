@@ -37,7 +37,7 @@ func TestCompileAgent_Success(t *testing.T) {
 	}}
 
 	a, err := CompileAgent(context.Background(), def, AgentCompileOptions{
-		Gateway: gw, APIKeys: map[string]string{"anthropic": "sk-test"}, Authorizer: authorizer,
+		Gateway: gw, Credentials: map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}}, Authorizer: authorizer,
 	})
 	if err != nil {
 		t.Fatalf("CompileAgent: %v", err)
@@ -85,7 +85,7 @@ func TestCompileAgent_NoAPIKeyForProvider_ReturnsError(t *testing.T) {
 		"model":   map[string]any{"provider": "anthropic", "name": "claude-sonnet-5"},
 		"persona": "p",
 	}
-	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, APIKeys: map[string]string{}})
+	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, Credentials: map[string]modelgateway.Credential{}})
 	if !errors.Is(err, ErrNoAPIKey) {
 		t.Fatalf("expected ErrNoAPIKey, got %v", err)
 	}
@@ -101,7 +101,7 @@ func TestCompileAgent_APIKeyOnlyForFallback_Succeeds(t *testing.T) {
 		},
 		"persona": "p",
 	}
-	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, APIKeys: map[string]string{"openai": "sk-test"}})
+	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, Credentials: map[string]modelgateway.Credential{"openai": {APIKey: "sk-test"}}})
 	if err != nil {
 		t.Fatalf("expected compilation to succeed when only a fallback provider has a key, got %v", err)
 	}
@@ -121,7 +121,7 @@ func TestCompileAgent_InvalidFallbackSpec_ReturnsError(t *testing.T) {
 		"agent": "a", "role": "r", "persona": "p",
 		"model": map[string]any{"provider": "anthropic", "name": "claude-sonnet-5", "fallback": []any{"not-a-valid-spec"}},
 	}
-	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, APIKeys: map[string]string{"anthropic": "k"}})
+	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, Credentials: map[string]modelgateway.Credential{"anthropic": {APIKey: "k"}}})
 	if err == nil {
 		t.Fatal("expected an error for a malformed model.fallback entry")
 	}

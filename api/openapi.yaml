@@ -1234,6 +1234,9 @@ paths:
                   type: string
                   description: 加密存储，任何接口都不回显
                   writeOnly: true
+                base_url:
+                  type: string
+                  description: 自定义调用地址；provider 为 custom 时必填，其余 provider 缺省时使用官方地址
       responses:
         '201':
           description: 接入成功
@@ -1341,7 +1344,7 @@ components:
 
     ProviderName:
       type: string
-      enum: [anthropic, openai, google, custom]
+      enum: [anthropic, openai, google, deepseek, qwen, custom]
 
     RunStatus:
       type: string
@@ -1770,5 +1773,6 @@ components:
       properties:
         id: { type: string }
         provider: { $ref: '#/components/schemas/ProviderName' }
+        base_url: { type: string }
         status: { $ref: '#/components/schemas/Status' }
         created_at: { type: string, format: date-time }

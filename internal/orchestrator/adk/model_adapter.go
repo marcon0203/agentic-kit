@@ -27,13 +27,13 @@ type gatewayLLM struct {
 	gateway   *modelgateway.Gateway
 	primary   modelgateway.ModelSpec
 	fallbacks []modelgateway.ModelSpec
-	apiKeys   map[string]string
+	creds     map[string]modelgateway.Credential
 }
 
 // NewGatewayLLM builds a model.LLM for one Agent's model.provider +
 // model.fallback chain (schemas/agent.schema.json), backed by gw.
-func NewGatewayLLM(gw *modelgateway.Gateway, primary modelgateway.ModelSpec, fallbacks []modelgateway.ModelSpec, apiKeys map[string]string) model.LLM {
-	return &gatewayLLM{gateway: gw, primary: primary, fallbacks: fallbacks, apiKeys: apiKeys}
+func NewGatewayLLM(gw *modelgateway.Gateway, primary modelgateway.ModelSpec, fallbacks []modelgateway.ModelSpec, creds map[string]modelgateway.Credential) model.LLM {
+	return &gatewayLLM{gateway: gw, primary: primary, fallbacks: fallbacks, creds: creds}
 }
 
 func (m *gatewayLLM) Name() string { return m.primary.Provider + "/" + m.primary.Name }
@@ -61,7 +61,7 @@ func (m *gatewayLLM) GenerateContent(ctx context.Context, req *model.LLMRequest,
 			}
 		}
 
-		result, err := m.gateway.Complete(ctx, m.primary, m.fallbacks, m.apiKeys, modelgateway.CompletionRequest{
+		result, err := m.gateway.Complete(ctx, m.primary, m.fallbacks, m.creds, modelgateway.CompletionRequest{
 			Messages: messages, MaxTokens: maxTokens, Temperature: temperature,
 		})
 		if err != nil {

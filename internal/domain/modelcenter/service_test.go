@@ -31,9 +31,9 @@ func (f *fakeRepo) ListForOwner(_ context.Context, ownerID int64) ([]modelcenter
 	return f.byOwner[ownerID], nil
 }
 
-func (f *fakeRepo) Store(_ context.Context, ownerID int64, provider, ciphertext string) (modelcenter.Provider, error) {
+func (f *fakeRepo) Store(_ context.Context, ownerID int64, provider, ciphertext, baseURL string) (modelcenter.Provider, error) {
 	f.stored = append(f.stored, storedProvider{provider: provider, ciphertext: ciphertext})
-	p := modelcenter.Provider{ID: f.nextID, OwnerID: ownerID, Name: provider, Status: 1}
+	p := modelcenter.Provider{ID: f.nextID, OwnerID: ownerID, Name: provider, BaseURL: baseURL, Status: 1}
 	f.nextID++
 	f.byOwner[ownerID] = append(f.byOwner[ownerID], p)
 	return p, nil
@@ -54,6 +54,7 @@ func (c markingCipher) Encrypt(plaintext string) (string, error) {
 type checkCall struct {
 	provider string
 	apiKey   string
+	baseURL  string
 }
 
 type fakeChecker struct {
@@ -61,8 +62,8 @@ type fakeChecker struct {
 	err   error
 }
 
-func (f *fakeChecker) Check(_ context.Context, provider, apiKey string) error {
-	f.calls = append(f.calls, checkCall{provider: provider, apiKey: apiKey})
+func (f *fakeChecker) Check(_ context.Context, provider, apiKey, baseURL string) error {
+	f.calls = append(f.calls, checkCall{provider: provider, apiKey: apiKey, baseURL: baseURL})
 	return f.err
 }
 
@@ -119,7 +120,7 @@ func mustDomainErr(t *testing.T, err error) *domain.Error {
 
 func TestRegister_RequiresBothFields(t *testing.T) {
 	h := newHarness()
-	de := mustDomainErr(t, func() error { _, err := h.svc.Register(context.Background(), 1, "", ""); return err }())
+	de := mustDomainErr(t, func() error { _, err := h.svc.Register(context.Background(), 1, "", "", ""); return err }())
 	if de.Code != domain.CodeValidationFailed || len(de.Details) != 2 {
 		t.Fatalf("expected both fields reported at once, got %+v", de.Details)
 	}
@@ -136,7 +137,7 @@ func TestRegister_ChecksConnectivityBeforeStoring(t *testing.T) {
 	h.checker.err = errors.New("provider rejected the credentials")
 
 	de := mustDomainErr(t, func() error {
-		_, err := h.svc.Register(context.Background(), 1, "anthropic", "sk-bogus")
+		_, err := h.svc.Register(context.Background(), 1, "anthropic", "sk-bogus", "")
 		return err
 	}())
 	if de.Kind != domain.KindUnprocessable || de.Code != domain.CodeProviderCredsInvalid {
@@ -154,7 +155,7 @@ func TestRegister_UnknownProviderIsAFieldError(t *testing.T) {
 	h.checker.err = modelcenter.ErrUnknownProvider
 
 	de := mustDomainErr(t, func() error {
-		_, err := h.svc.Register(context.Background(), 1, "wormhole", "sk-x")
+		_, err := h.svc.Register(context.Background(), 1, "wormhole", "sk-x", "")
 		return err
 	}())
 	if de.Kind != domain.KindInvalid || de.Code != domain.CodeValidationFailed {
@@ -168,7 +169,7 @@ func TestRegister_UnknownProviderIsAFieldError(t *testing.T) {
 func TestRegister_StoresCiphertextNotPlaintext(t *testing.T) {
 	h := newHarness()
 
-	created, err := h.svc.Register(context.Background(), 42, "anthropic", "sk-ant-realkey")
+	created, err := h.svc.Register(context.Background(), 42, "anthropic", "sk-ant-realkey", "")
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
@@ -186,12 +187,45 @@ func TestRegister_StoresCiphertextNotPlaintext(t *testing.T) {
 	}
 }
 
+// "custom" has no documented endpoint of its own — the caller must supply
+// one, or registration fails before ever reaching the connectivity check.
+func TestRegister_CustomProviderRequiresBaseURL(t *testing.T) {
+	h := newHarness()
+	de := mustDomainErr(t, func() error {
+		_, err := h.svc.Register(context.Background(), 1, "custom", "sk-x", "")
+		return err
+	}())
+	if de.Code != domain.CodeValidationFailed {
+		t.Fatalf("expected 10001, got %d", de.Code)
+	}
+	if len(de.Details) != 1 || de.Details[0].Field != "base_url" {
+		t.Fatalf("expected a base_url field error, got %+v", de.Details)
+	}
+	if len(h.checker.calls) != 0 {
+		t.Fatal("nothing should be sent to the provider before the request is even well-formed")
+	}
+}
+
+func TestRegister_CustomProviderWithBaseURLSucceeds(t *testing.T) {
+	h := newHarness()
+	created, err := h.svc.Register(context.Background(), 1, "custom", "sk-x", "https://my-proxy.example.com/v1")
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if created.BaseURL != "https://my-proxy.example.com/v1" {
+		t.Fatalf("unexpected base_url: %+v", created)
+	}
+	if len(h.checker.calls) != 1 || h.checker.calls[0].baseURL != "https://my-proxy.example.com/v1" {
+		t.Fatalf("expected the base_url to reach the connectivity checker, got %+v", h.checker.calls)
+	}
+}
+
 func TestRegister_EncryptionFailureDoesNotStore(t *testing.T) {
 	h := newHarness()
 	h.svc = modelcenter.NewService(h.repo, markingCipher{err: errors.New("key unavailable")}, h.checker, h.usage)
 
 	de := mustDomainErr(t, func() error {
-		_, err := h.svc.Register(context.Background(), 1, "anthropic", "sk-x")
+		_, err := h.svc.Register(context.Background(), 1, "anthropic", "sk-x", "")
 		return err
 	}())
 	if de.Kind != domain.KindInternal {
@@ -207,7 +241,7 @@ func TestRegister_EncryptionFailureDoesNotStore(t *testing.T) {
 // each read path has to remember.
 func TestProvider_CarriesNoCredential(t *testing.T) {
 	h := newHarness()
-	if _, err := h.svc.Register(context.Background(), 1, "anthropic", "sk-ant-secret"); err != nil {
+	if _, err := h.svc.Register(context.Background(), 1, "anthropic", "sk-ant-secret", ""); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 
@@ -227,7 +261,7 @@ func TestProvider_CarriesNoCredential(t *testing.T) {
 
 func TestList_ScopedToOwnerAndNeverNil(t *testing.T) {
 	h := newHarness()
-	if _, err := h.svc.Register(context.Background(), 1, "anthropic", "sk-a"); err != nil {
+	if _, err := h.svc.Register(context.Background(), 1, "anthropic", "sk-a", ""); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 

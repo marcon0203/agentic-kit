@@ -147,6 +147,7 @@ type ModelProvider struct {
 	Credentials []byte             `json:"credentials"`
 	Status      int16              `json:"status"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	BaseUrl     pgtype.Text        `json:"base_url"`
 }
 
 type Report struct {

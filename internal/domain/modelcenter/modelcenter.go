@@ -19,14 +19,16 @@ type Provider struct {
 	ID        int64
 	OwnerID   int64
 	Name      string
+	BaseURL   string
 	Status    int16
 	CreatedAt time.Time
 }
 
 // KnownProviders are the provider names the platform can validate against.
-// "custom" is accepted so a self-hosted, OpenAI-compatible endpoint can be
-// registered.
-var KnownProviders = []string{"anthropic", "openai", "google", "custom"}
+// DeepSeek and Qwen (via DashScope's OpenAI-compatible mode) are both
+// OpenAI-wire-compatible, like "custom", which is accepted so a
+// self-hosted, OpenAI-compatible endpoint can be registered too.
+var KnownProviders = []string{"anthropic", "openai", "google", "deepseek", "qwen", "custom"}
 
 // Period is the window a usage report covers.
 type Period string

@@ -14,15 +14,15 @@ import (
 type ConnectivityChecker struct {
 	// newValidator is injectable so tests can point at an httptest server
 	// instead of the vendor.
-	newValidator func(provider string) modelgateway.Validator
+	newValidator func(provider, baseURL string) modelgateway.Validator
 }
 
 func NewConnectivityChecker() *ConnectivityChecker {
 	return &ConnectivityChecker{newValidator: modelgateway.NewValidator}
 }
 
-func (c *ConnectivityChecker) Check(ctx context.Context, provider, apiKey string) error {
-	validator := c.newValidator(provider)
+func (c *ConnectivityChecker) Check(ctx context.Context, provider, apiKey, baseURL string) error {
+	validator := c.newValidator(provider, baseURL)
 	if validator == nil {
 		return modelcenter.ErrUnknownProvider
 	}

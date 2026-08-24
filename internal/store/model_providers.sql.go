@@ -12,32 +12,40 @@ import (
 )
 
 const createModelProvider = `-- name: CreateModelProvider :one
-INSERT INTO model_providers (owner_user_id, provider, credentials)
-VALUES ($1, $2, $3)
-RETURNING id, owner_user_id, provider, status, created_at
+INSERT INTO model_providers (owner_user_id, provider, credentials, base_url)
+VALUES ($1, $2, $3, $4)
+RETURNING id, owner_user_id, provider, base_url, status, created_at
 `
 
 type CreateModelProviderParams struct {
-	OwnerUserID int64  `json:"owner_user_id"`
-	Provider    string `json:"provider"`
-	Credentials []byte `json:"credentials"`
+	OwnerUserID int64       `json:"owner_user_id"`
+	Provider    string      `json:"provider"`
+	Credentials []byte      `json:"credentials"`
+	BaseUrl     pgtype.Text `json:"base_url"`
 }
 
 type CreateModelProviderRow struct {
 	ID          int64              `json:"id"`
 	OwnerUserID int64              `json:"owner_user_id"`
 	Provider    string             `json:"provider"`
+	BaseUrl     pgtype.Text        `json:"base_url"`
 	Status      int16              `json:"status"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) CreateModelProvider(ctx context.Context, arg CreateModelProviderParams) (CreateModelProviderRow, error) {
-	row := q.db.QueryRow(ctx, createModelProvider, arg.OwnerUserID, arg.Provider, arg.Credentials)
+	row := q.db.QueryRow(ctx, createModelProvider,
+		arg.OwnerUserID,
+		arg.Provider,
+		arg.Credentials,
+		arg.BaseUrl,
+	)
 	var i CreateModelProviderRow
 	err := row.Scan(
 		&i.ID,
 		&i.OwnerUserID,
 		&i.Provider,
+		&i.BaseUrl,
 		&i.Status,
 		&i.CreatedAt,
 	)
@@ -61,7 +69,7 @@ func (q *Queries) GetModelProviderCredentials(ctx context.Context, arg GetModelP
 }
 
 const listModelProvidersForOwner = `-- name: ListModelProvidersForOwner :many
-SELECT id, owner_user_id, provider, status, created_at
+SELECT id, owner_user_id, provider, base_url, status, created_at
 FROM model_providers
 WHERE owner_user_id = $1
 ORDER BY created_at DESC
@@ -71,6 +79,7 @@ type ListModelProvidersForOwnerRow struct {
 	ID          int64              `json:"id"`
 	OwnerUserID int64              `json:"owner_user_id"`
 	Provider    string             `json:"provider"`
+	BaseUrl     pgtype.Text        `json:"base_url"`
 	Status      int16              `json:"status"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
@@ -88,6 +97,7 @@ func (q *Queries) ListModelProvidersForOwner(ctx context.Context, ownerUserID in
 			&i.ID,
 			&i.OwnerUserID,
 			&i.Provider,
+			&i.BaseUrl,
 			&i.Status,
 			&i.CreatedAt,
 		); err != nil {

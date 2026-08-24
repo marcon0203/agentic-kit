@@ -28,21 +28,22 @@ func (r *ModelProviderRepository) ListForOwner(ctx context.Context, ownerID int6
 	out := make([]modelcenter.Provider, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, modelcenter.Provider{
-			ID: row.ID, OwnerID: ownerID, Name: row.Provider, Status: row.Status, CreatedAt: row.CreatedAt.Time,
+			ID: row.ID, OwnerID: ownerID, Name: row.Provider, BaseURL: row.BaseUrl.String, Status: row.Status, CreatedAt: row.CreatedAt.Time,
 		})
 	}
 	return out, nil
 }
 
-func (r *ModelProviderRepository) Store(ctx context.Context, ownerID int64, provider, ciphertext string) (modelcenter.Provider, error) {
+func (r *ModelProviderRepository) Store(ctx context.Context, ownerID int64, provider, ciphertext, baseURL string) (modelcenter.Provider, error) {
 	row, err := r.q.CreateModelProvider(ctx, store.CreateModelProviderParams{
 		OwnerUserID: ownerID, Provider: provider, Credentials: []byte(ciphertext),
+		BaseUrl: pgtype.Text{String: baseURL, Valid: baseURL != ""},
 	})
 	if err != nil {
 		return modelcenter.Provider{}, err
 	}
 	return modelcenter.Provider{
-		ID: row.ID, OwnerID: ownerID, Name: row.Provider, Status: row.Status, CreatedAt: row.CreatedAt.Time,
+		ID: row.ID, OwnerID: ownerID, Name: row.Provider, BaseURL: row.BaseUrl.String, Status: row.Status, CreatedAt: row.CreatedAt.Time,
 	}, nil
 }
 

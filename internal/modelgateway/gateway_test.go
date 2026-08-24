@@ -21,7 +21,7 @@ func TestAnthropicValidator_ValidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("anthropic", providerEndpoints{AnthropicBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("anthropic", "", providerEndpoints{AnthropicBaseURL: srv.URL})
 	if err := v.Validate(context.Background(), "good-key"); err != nil {
 		t.Fatalf("expected valid key to pass, got %v", err)
 	}
@@ -33,7 +33,7 @@ func TestAnthropicValidator_InvalidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("anthropic", providerEndpoints{AnthropicBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("anthropic", "", providerEndpoints{AnthropicBaseURL: srv.URL})
 	err := v.Validate(context.Background(), "bad-key")
 	if err != ErrCredentialsInvalid {
 		t.Fatalf("expected ErrCredentialsInvalid, got %v", err)
@@ -49,9 +49,36 @@ func TestOpenAIValidator_ValidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("openai", providerEndpoints{OpenAIBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("openai", "", providerEndpoints{OpenAIBaseURL: srv.URL})
 	if err := v.Validate(context.Background(), "good-key"); err != nil {
 		t.Fatalf("expected valid key to pass, got %v", err)
+	}
+}
+
+func TestDeepSeekValidator_ValidKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer good-key" {
+			t.Fatalf("expected bearer header, got %q", r.Header.Get("Authorization"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	v := newValidatorWithEndpoints("deepseek", "", providerEndpoints{DeepSeekBaseURL: srv.URL})
+	if err := v.Validate(context.Background(), "good-key"); err != nil {
+		t.Fatalf("expected valid key to pass, got %v", err)
+	}
+}
+
+func TestQwenValidator_InvalidKey(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	v := newValidatorWithEndpoints("qwen", "", providerEndpoints{QwenBaseURL: srv.URL})
+	if err := v.Validate(context.Background(), "bad-key"); err != ErrCredentialsInvalid {
+		t.Fatalf("expected ErrCredentialsInvalid, got %v", err)
 	}
 }
 
@@ -61,29 +88,46 @@ func TestGoogleValidator_InvalidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("google", providerEndpoints{GoogleBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("google", "", providerEndpoints{GoogleBaseURL: srv.URL})
 	if err := v.Validate(context.Background(), "bad-key"); err != ErrCredentialsInvalid {
 		t.Fatalf("expected ErrCredentialsInvalid, got %v", err)
 	}
 }
 
 func TestValidator_Unreachable(t *testing.T) {
-	v := newValidatorWithEndpoints("anthropic", providerEndpoints{AnthropicBaseURL: "http://127.0.0.1:1"})
+	v := newValidatorWithEndpoints("anthropic", "", providerEndpoints{AnthropicBaseURL: "http://127.0.0.1:1"})
 	err := v.Validate(context.Background(), "any-key")
 	if err == nil || err == ErrCredentialsInvalid {
 		t.Fatalf("expected a network error distinct from ErrCredentialsInvalid, got %v", err)
 	}
 }
 
-func TestNewValidator_CustomAlwaysAccepts(t *testing.T) {
-	v := NewValidator("custom")
-	if err := v.Validate(context.Background(), "anything"); err != nil {
-		t.Fatalf("custom provider should accept on trust, got %v", err)
+// "custom" has no documented endpoint of its own, so a Validator built for
+// it without a base_url must fail rather than silently accept.
+func TestNewValidator_CustomWithoutBaseURLFails(t *testing.T) {
+	v := NewValidator("custom", "")
+	if err := v.Validate(context.Background(), "anything"); err == nil {
+		t.Fatal("expected custom provider without a base_url to fail validation")
+	}
+}
+
+func TestNewValidator_CustomWithBaseURLValidates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer good-key" {
+			t.Fatalf("expected bearer header, got %q", r.Header.Get("Authorization"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	v := NewValidator("custom", srv.URL)
+	if err := v.Validate(context.Background(), "good-key"); err != nil {
+		t.Fatalf("expected valid key to pass, got %v", err)
 	}
 }
 
 func TestNewValidator_UnknownProvider(t *testing.T) {
-	if NewValidator("bogus") != nil {
+	if NewValidator("bogus", "") != nil {
 		t.Fatalf("expected nil Validator for unknown provider")
 	}
 }
@@ -120,7 +164,7 @@ func TestAnthropicClient_Complete(t *testing.T) {
 	defer srv.Close()
 
 	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
-	result, err := c.Complete(context.Background(), "key", "claude-sonnet-5", CompletionRequest{
+	result, err := c.Complete(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}}, MaxTokens: 100,
 	})
 	if err != nil {
@@ -139,20 +183,23 @@ func TestAnthropicClient_ErrorResponse(t *testing.T) {
 	defer srv.Close()
 
 	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
-	_, err := c.Complete(context.Background(), "key", "claude-sonnet-5", CompletionRequest{})
+	_, err := c.Complete(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{})
 	if err == nil || !strings.Contains(err.Error(), "rate limited") {
 		t.Fatalf("expected rate limited error, got %v", err)
 	}
 }
 
-func TestOpenAIClient_Complete(t *testing.T) {
+func TestOpenAICompatibleClient_Complete(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"hi from openai"}}],"usage":{"prompt_tokens":8,"completion_tokens":4}}`))
+		if r.Header.Get("Authorization") != "Bearer key" {
+			t.Fatalf("expected bearer header, got %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"hi from openai"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`))
 	}))
 	defer srv.Close()
 
-	c := &openaiClient{client: srv.Client(), baseURL: srv.URL}
-	result, err := c.Complete(context.Background(), "key", "gpt-4o", CompletionRequest{
+	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
+	result, err := c.Complete(context.Background(), "key", "", "gpt-4o", CompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	if err != nil {
@@ -163,6 +210,36 @@ func TestOpenAIClient_Complete(t *testing.T) {
 	}
 }
 
+// DeepSeek and Qwen speak the identical OpenAI-compatible wire format, so
+// the same client type serves them — this test exercises it under the
+// deepseek label with a per-call baseURL override, the same path a
+// "custom" Credential takes.
+func TestOpenAICompatibleClient_DeepSeekViaBaseURLOverride(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"deepseek-chat","choices":[{"index":0,"message":{"role":"assistant","content":"hi from deepseek"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`))
+	}))
+	defer srv.Close()
+
+	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: "", label: "deepseek"}
+	result, err := c.Complete(context.Background(), "key", srv.URL, "deepseek-chat", CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Content != "hi from deepseek" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestOpenAICompatibleClient_NoBaseURLConfigured(t *testing.T) {
+	c := &openAICompatibleClient{httpClient: http.DefaultClient, defaultBaseURL: "", label: "custom"}
+	_, err := c.Complete(context.Background(), "key", "", "some-model", CompletionRequest{})
+	if err == nil || !strings.Contains(err.Error(), "no base_url configured") {
+		t.Fatalf("expected a clear no-base_url error, got %v", err)
+	}
+}
+
 func TestGoogleClient_Complete(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"hi from gemini"}]}}],"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":3}}`))
@@ -170,7 +247,7 @@ func TestGoogleClient_Complete(t *testing.T) {
 	defer srv.Close()
 
 	c := &googleClient{client: srv.Client(), baseURL: srv.URL}
-	result, err := c.Complete(context.Background(), "key", "gemini-1.5-pro", CompletionRequest{
+	result, err := c.Complete(context.Background(), "key", "", "gemini-1.5-pro", CompletionRequest{
 		Messages: []Message{{Role: "user", Content: "hi"}},
 	})
 	if err != nil {
@@ -189,7 +266,7 @@ type fakeClient struct {
 	in, out int64
 }
 
-func (c *fakeClient) Complete(context.Context, string, string, CompletionRequest) (CompletionResult, error) {
+func (c *fakeClient) Complete(context.Context, string, string, string, CompletionRequest) (CompletionResult, error) {
 	if c.fail {
 		return CompletionResult{}, &validationError{"simulated failure"}
 	}
@@ -212,7 +289,7 @@ func TestGateway_Complete_PrimarySucceeds_NoFallback(t *testing.T) {
 
 	result, err := gw.Complete(context.Background(),
 		ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil,
-		map[string]string{"anthropic": "key"}, CompletionRequest{})
+		map[string]Credential{"anthropic": {APIKey: "key"}}, CompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -237,7 +314,7 @@ func TestGateway_Complete_FallsBackOnPrimaryFailure(t *testing.T) {
 	result, err := gw.Complete(context.Background(),
 		ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"},
 		[]ModelSpec{{Provider: "openai", Name: "gpt-4o"}},
-		map[string]string{"anthropic": "key1", "openai": "key2"}, CompletionRequest{})
+		map[string]Credential{"anthropic": {APIKey: "key1"}, "openai": {APIKey: "key2"}}, CompletionRequest{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -262,7 +339,7 @@ func TestGateway_Complete_AllFail_Returns60003Sentinel(t *testing.T) {
 	_, err := gw.Complete(context.Background(),
 		ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"},
 		[]ModelSpec{{Provider: "openai", Name: "gpt-4o"}},
-		map[string]string{"anthropic": "key1", "openai": "key2"}, CompletionRequest{})
+		map[string]Credential{"anthropic": {APIKey: "key1"}, "openai": {APIKey: "key2"}}, CompletionRequest{})
 	if err == nil {
 		t.Fatal("expected an error when every provider fails")
 	}
@@ -292,10 +369,39 @@ func TestGateway_Complete_MissingCredentials_TreatedAsFailure(t *testing.T) {
 
 	_, err := gw.Complete(context.Background(),
 		ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil,
-		map[string]string{}, CompletionRequest{})
+		map[string]Credential{}, CompletionRequest{})
 	if err == nil {
 		t.Fatal("expected an error when no credentials are configured for the provider")
 	}
+}
+
+// The Gateway forwards a Credential's BaseURL through to the Client's per-
+// call parameter — this is what lets a "custom" or overridden endpoint
+// reach the wire without being baked into the Client at construction.
+func TestGateway_Complete_ForwardsCredentialBaseURL(t *testing.T) {
+	var gotBaseURL string
+	gw := NewGatewayWithClients(map[string]Client{
+		"custom": Client(baseURLCapturingClient(func(_ context.Context, _, baseURL, _ string, _ CompletionRequest) (CompletionResult, error) {
+			gotBaseURL = baseURL
+			return CompletionResult{Content: "ok"}, nil
+		})),
+	}, nil)
+
+	_, err := gw.Complete(context.Background(),
+		ModelSpec{Provider: "custom", Name: "some-model"}, nil,
+		map[string]Credential{"custom": {APIKey: "key", BaseURL: "https://my-proxy.example.com/v1"}}, CompletionRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotBaseURL != "https://my-proxy.example.com/v1" {
+		t.Fatalf("expected the credential's base_url to reach the client, got %q", gotBaseURL)
+	}
+}
+
+type baseURLCapturingClient func(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error)
+
+func (f baseURLCapturingClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
+	return f(ctx, apiKey, baseURL, model, req)
 }
 
 // ── pricing ──────────────────────────────────────────────────────────

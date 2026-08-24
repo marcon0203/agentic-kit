@@ -13,7 +13,7 @@ import (
 // so no implementation is ever handed a secret in the clear.
 type Repository interface {
 	ListForOwner(ctx context.Context, ownerID int64) ([]Provider, error)
-	Store(ctx context.Context, ownerID int64, provider string, ciphertext string) (Provider, error)
+	Store(ctx context.Context, ownerID int64, provider, ciphertext, baseURL string) (Provider, error)
 }
 
 // CredentialCipher encrypts a credential for storage.
@@ -25,7 +25,7 @@ type CredentialCipher interface {
 // the provider it claims. ErrUnknownProvider means the name isn't one this
 // platform can reach at all.
 type ConnectivityChecker interface {
-	Check(ctx context.Context, provider, apiKey string) error
+	Check(ctx context.Context, provider, apiKey, baseURL string) error
 }
 
 // ErrUnknownProvider is the port contract for an unrecognised provider
@@ -73,7 +73,7 @@ func (s *Service) List(ctx context.Context, ownerID int64) ([]Provider, error) {
 // only surfaces later as a failed run, where the cause is much harder to
 // see. The plaintext lives no longer than this call — it is never logged
 // and never returned.
-func (s *Service) Register(ctx context.Context, ownerID int64, provider, apiKey string) (Provider, error) {
+func (s *Service) Register(ctx context.Context, ownerID int64, provider, apiKey, baseURL string) (Provider, error) {
 	var errs []domain.FieldError
 	if provider == "" {
 		errs = append(errs, domain.FieldError{Field: "provider", Reason: "required"})
@@ -81,14 +81,20 @@ func (s *Service) Register(ctx context.Context, ownerID int64, provider, apiKey 
 	if apiKey == "" {
 		errs = append(errs, domain.FieldError{Field: "api_key", Reason: "required"})
 	}
+	// "custom" has no documented endpoint of its own — unlike every named
+	// provider, there is nothing to default to, so the caller must supply
+	// one.
+	if provider == "custom" && baseURL == "" {
+		errs = append(errs, domain.FieldError{Field: "base_url", Reason: "required for custom provider"})
+	}
 	if len(errs) > 0 {
 		return Provider{}, domain.Invalid(domain.CodeValidationFailed, "invalid request").WithDetails(errs...)
 	}
 
-	if err := s.check.Check(ctx, provider, apiKey); err != nil {
+	if err := s.check.Check(ctx, provider, apiKey, baseURL); err != nil {
 		if errors.Is(err, ErrUnknownProvider) {
 			return Provider{}, domain.Invalid(domain.CodeValidationFailed, "invalid request").
-				WithDetails(domain.FieldError{Field: "provider", Reason: "must be one of anthropic, openai, google, custom"})
+				WithDetails(domain.FieldError{Field: "provider", Reason: "must be one of anthropic, openai, google, deepseek, qwen, custom"})
 		}
 		// The checker's message describes the rejection, not the key —
 		// it is written to be safe to show.
@@ -100,7 +106,7 @@ func (s *Service) Register(ctx context.Context, ownerID int64, provider, apiKey 
 		return Provider{}, domain.Internal(err)
 	}
 
-	stored, err := s.repo.Store(ctx, ownerID, provider, ciphertext)
+	stored, err := s.repo.Store(ctx, ownerID, provider, ciphertext, baseURL)
 	if err != nil {
 		return Provider{}, domain.Internal(err)
 	}

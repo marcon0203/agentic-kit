@@ -24,9 +24,9 @@ type CompiledAgent = agent.Agent
 // through, decrypted provider credentials, and the authorizer that decides
 // which capabilities.tools/skills refs actually become ADK tools.
 type AgentCompileOptions struct {
-	Gateway    *modelgateway.Gateway
-	APIKeys    map[string]string // provider -> decrypted credential
-	Authorizer ResourceAuthorizer
+	Gateway     *modelgateway.Gateway
+	Credentials map[string]modelgateway.Credential // provider -> decrypted credential
+	Authorizer  ResourceAuthorizer
 }
 
 // CompileAgent turns one validated Agent DSL document (schemas/agent.schema.json)
@@ -46,8 +46,8 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 	if err != nil {
 		return nil, fmt.Errorf("adk: agent %q: %w", ref, err)
 	}
-	if _, ok := opts.APIKeys[primary.Provider]; !ok {
-		if _, ok := anyFallbackHasKey(fallbacks, opts.APIKeys); !ok {
+	if cred, ok := opts.Credentials[primary.Provider]; !ok || cred.APIKey == "" {
+		if _, ok := anyFallbackHasKey(fallbacks, opts.Credentials); !ok {
 			return nil, fmt.Errorf("adk: agent %q: %w (%s)", ref, ErrNoAPIKey, primary.Provider)
 		}
 	}
@@ -57,7 +57,7 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		return nil, fmt.Errorf("adk: agent %q: %w", ref, err)
 	}
 
-	llm := NewGatewayLLM(opts.Gateway, primary, fallbacks, opts.APIKeys)
+	llm := NewGatewayLLM(opts.Gateway, primary, fallbacks, opts.Credentials)
 
 	a, err := llmagent.New(llmagent.Config{
 		Name:        ref,
@@ -94,9 +94,9 @@ func parseModelSpecs(def map[string]any) (primary modelgateway.ModelSpec, fallba
 	return primary, fallbacks, nil
 }
 
-func anyFallbackHasKey(fallbacks []modelgateway.ModelSpec, apiKeys map[string]string) (modelgateway.ModelSpec, bool) {
+func anyFallbackHasKey(fallbacks []modelgateway.ModelSpec, creds map[string]modelgateway.Credential) (modelgateway.ModelSpec, bool) {
 	for _, f := range fallbacks {
-		if _, ok := apiKeys[f.Provider]; ok {
+		if cred, ok := creds[f.Provider]; ok && cred.APIKey != "" {
 			return f, true
 		}
 	}

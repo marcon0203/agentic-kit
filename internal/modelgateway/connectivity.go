@@ -32,6 +32,8 @@ type providerEndpoints struct {
 	AnthropicBaseURL string
 	OpenAIBaseURL    string
 	GoogleBaseURL    string
+	DeepSeekBaseURL  string
+	QwenBaseURL      string
 }
 
 func (e providerEndpoints) anthropicBase() string {
@@ -55,36 +57,71 @@ func (e providerEndpoints) googleBase() string {
 	return "https://generativelanguage.googleapis.com"
 }
 
-// NewValidator returns the Validator for a components.schemas.ProviderName
-// value ("anthropic", "openai", "google", "custom"), or nil if the name is
-// unrecognized.
-func NewValidator(provider string) Validator {
-	return newValidatorWithEndpoints(provider, providerEndpoints{})
+func (e providerEndpoints) deepseekBase() string {
+	if e.DeepSeekBaseURL != "" {
+		return e.DeepSeekBaseURL
+	}
+	return "https://api.deepseek.com/v1"
 }
 
-func newValidatorWithEndpoints(provider string, ep providerEndpoints) Validator {
+func (e providerEndpoints) qwenBase() string {
+	if e.QwenBaseURL != "" {
+		return e.QwenBaseURL
+	}
+	return "https://dashscope.aliyuncs.com/compatible-mode/v1"
+}
+
+// NewValidator returns the Validator for a components.schemas.ProviderName
+// value ("anthropic", "openai", "google", "deepseek", "qwen", "custom"), or
+// nil if the name is unrecognized. baseURL overrides the provider's
+// documented default endpoint; for "custom" there is no default, so an
+// empty baseURL there yields a Validator whose Validate call always fails
+// (the domain Service is expected to reject a base_url-less "custom"
+// registration before ever reaching here, but the Validator stays safe on
+// its own).
+func NewValidator(provider, baseURL string) Validator {
+	return newValidatorWithEndpoints(provider, baseURL, providerEndpoints{})
+}
+
+func newValidatorWithEndpoints(provider, baseURL string, ep providerEndpoints) Validator {
 	client := &http.Client{Timeout: connectivityTimeout}
 	switch provider {
 	case "anthropic":
-		return &anthropicValidator{client: client, baseURL: ep.anthropicBase()}
+		base := ep.anthropicBase()
+		if baseURL != "" {
+			base = baseURL
+		}
+		return &anthropicValidator{client: client, baseURL: base}
 	case "openai":
-		return &openaiValidator{client: client, baseURL: ep.openaiBase()}
+		return &openAICompatibleValidator{client: client, baseURL: firstNonEmpty(baseURL, ep.openaiBase())}
+	case "deepseek":
+		return &openAICompatibleValidator{client: client, baseURL: firstNonEmpty(baseURL, ep.deepseekBase())}
+	case "qwen":
+		return &openAICompatibleValidator{client: client, baseURL: firstNonEmpty(baseURL, ep.qwenBase())}
 	case "google":
-		return &googleValidator{client: client, baseURL: ep.googleBase()}
+		base := ep.googleBase()
+		if baseURL != "" {
+			base = baseURL
+		}
+		return &googleValidator{client: client, baseURL: base}
 	case "custom":
-		// A custom provider has no known endpoint shape to probe — the
-		// platform can't validate what it doesn't understand, so
-		// onboarding accepts it on trust (spec-09 only requires the
-		// three named providers to be connectivity-checked).
-		return acceptAllValidator{}
+		// "custom" has no documented default endpoint — the caller must
+		// supply one. If it didn't, Validate deliberately fails rather than
+		// silently probing nothing.
+		return &openAICompatibleValidator{client: client, baseURL: baseURL}
 	default:
 		return nil
 	}
 }
 
-type acceptAllValidator struct{}
-
-func (acceptAllValidator) Validate(context.Context, string) error { return nil }
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
 
 // anthropicValidator probes GET /v1/models, which Anthropic's API accepts
 // with just an x-api-key header and costs no completion tokens.
@@ -103,19 +140,32 @@ func (v *anthropicValidator) Validate(ctx context.Context, apiKey string) error 
 	return doAuthProbe(v.client, req)
 }
 
-// openaiValidator probes GET /v1/models with a bearer token.
-type openaiValidator struct {
+// openAICompatibleValidator probes GET {baseURL}/models with a bearer
+// token, the auth scheme shared by OpenAI, DeepSeek, Qwen's DashScope
+// compatible-mode endpoint, and any "custom" OpenAI-wire-compatible
+// endpoint.
+type openAICompatibleValidator struct {
 	client  *http.Client
 	baseURL string
 }
 
-func (v *openaiValidator) Validate(ctx context.Context, apiKey string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.baseURL+"/v1/models", nil)
+func (v *openAICompatibleValidator) Validate(ctx context.Context, apiKey string) error {
+	if v.baseURL == "" {
+		return &validationError{"no base_url configured for this provider"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trimTrailingSlash(v.baseURL)+"/models", nil)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	return doAuthProbe(v.client, req)
+}
+
+func trimTrailingSlash(s string) string {
+	if len(s) > 0 && s[len(s)-1] == '/' {
+		return s[:len(s)-1]
+	}
+	return s
 }
 
 // googleValidator probes GET /v1beta/models with the key as a query

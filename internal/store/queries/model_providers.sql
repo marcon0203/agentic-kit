@@ -1,10 +1,10 @@
 -- name: CreateModelProvider :one
-INSERT INTO model_providers (owner_user_id, provider, credentials)
-VALUES ($1, $2, $3)
-RETURNING id, owner_user_id, provider, status, created_at;
+INSERT INTO model_providers (owner_user_id, provider, credentials, base_url)
+VALUES ($1, $2, $3, $4)
+RETURNING id, owner_user_id, provider, base_url, status, created_at;
 
 -- name: ListModelProvidersForOwner :many
-SELECT id, owner_user_id, provider, status, created_at
+SELECT id, owner_user_id, provider, base_url, status, created_at
 FROM model_providers
 WHERE owner_user_id = $1
 ORDER BY created_at DESC;

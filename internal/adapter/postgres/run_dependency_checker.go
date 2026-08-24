@@ -102,13 +102,13 @@ func usable(st agent.RefStatus) bool { return st.Found && st.Enabled }
 // checkProvider accepts a Bundle whose primary provider is unconfigured as
 // long as one of the Agent's declared fallbacks is: the run would succeed,
 // so refusing to start it would be wrong.
-func checkProvider(agentDef map[string]any, apiKeys map[string]string) run.DependencyStatus {
+func checkProvider(agentDef map[string]any, creds map[string]modelgateway.Credential) run.DependencyStatus {
 	model, _ := agentDef["model"].(map[string]any)
 	provider, _ := model["provider"].(string)
 	if provider == "" {
 		return run.DependenciesOK
 	}
-	if _, ok := apiKeys[provider]; ok {
+	if _, ok := creds[provider]; ok {
 		return run.DependenciesOK
 	}
 	for _, f := range stringSlice(model["fallback"]) {
@@ -116,7 +116,7 @@ func checkProvider(agentDef map[string]any, apiKeys map[string]string) run.Depen
 		if err != nil {
 			continue
 		}
-		if _, ok := apiKeys[spec.Provider]; ok {
+		if _, ok := creds[spec.Provider]; ok {
 			return run.DependenciesOK
 		}
 	}

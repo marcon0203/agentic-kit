@@ -15,7 +15,7 @@ type fakeGWClient struct {
 	in, out int64
 }
 
-func (c *fakeGWClient) Complete(context.Context, string, string, modelgateway.CompletionRequest) (modelgateway.CompletionResult, error) {
+func (c *fakeGWClient) Complete(context.Context, string, string, string, modelgateway.CompletionRequest) (modelgateway.CompletionResult, error) {
 	return modelgateway.CompletionResult{Content: c.content, InputTokens: c.in, OutputTokens: c.out}, nil
 }
 
@@ -24,7 +24,7 @@ func TestGatewayLLM_GenerateContent(t *testing.T) {
 		"anthropic": &fakeGWClient{content: "hello from the model", in: 12, out: 6},
 	}, nil)
 	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil,
-		map[string]string{"anthropic": "sk-test"})
+		map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}})
 
 	if llm.Name() != "anthropic/claude-sonnet-5" {
 		t.Fatalf("unexpected Name(): %q", llm.Name())
@@ -56,7 +56,7 @@ func TestGatewayLLM_GenerateContent(t *testing.T) {
 
 func TestGatewayLLM_GenerateContent_PropagatesError(t *testing.T) {
 	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{}, nil) // no client registered
-	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil, map[string]string{"anthropic": "sk-test"})
+	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil, map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}})
 
 	req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hi", genai.RoleUser)}}
 	var gotErr error

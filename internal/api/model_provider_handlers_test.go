@@ -35,10 +35,10 @@ func (s *stubProviderRepo) ListForOwner(_ context.Context, ownerID int64) ([]mod
 	return out, nil
 }
 
-func (s *stubProviderRepo) Store(_ context.Context, ownerID int64, provider, ciphertext string) (modelcenter.Provider, error) {
+func (s *stubProviderRepo) Store(_ context.Context, ownerID int64, provider, ciphertext, baseURL string) (modelcenter.Provider, error) {
 	s.stored = append(s.stored, ciphertext)
 	s.nextID++
-	p := modelcenter.Provider{ID: s.nextID, OwnerID: ownerID, Name: provider, Status: 1, CreatedAt: time.Now()}
+	p := modelcenter.Provider{ID: s.nextID, OwnerID: ownerID, Name: provider, BaseURL: baseURL, Status: 1, CreatedAt: time.Now()}
 	s.providers = append(s.providers, p)
 	return p, nil
 }
@@ -49,7 +49,7 @@ func (stubCipher) Encrypt(plaintext string) (string, error) { return "enc(" + pl
 
 type stubChecker struct{ err error }
 
-func (s stubChecker) Check(context.Context, string, string) error { return s.err }
+func (s stubChecker) Check(context.Context, string, string, string) error { return s.err }
 
 type stubUsageReader struct {
 	tokens   int64

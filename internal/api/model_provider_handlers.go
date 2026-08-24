@@ -23,14 +23,19 @@ func NewModelProviderHandlers(svc *modelcenter.Service) *ModelProviderHandlers {
 type modelProviderDTO struct {
 	ID        string    `json:"id"`
 	Provider  string    `json:"provider"`
+	BaseURL   *string   `json:"base_url,omitempty"`
 	Status    int16     `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 func toModelProviderDTO(p modelcenter.Provider) modelProviderDTO {
-	return modelProviderDTO{
+	dto := modelProviderDTO{
 		ID: strconv.FormatInt(p.ID, 10), Provider: p.Name, Status: p.Status, CreatedAt: p.CreatedAt,
 	}
+	if p.BaseURL != "" {
+		dto.BaseURL = &p.BaseURL
+	}
+	return dto
 }
 
 // List handles GET /model-providers.
@@ -56,6 +61,7 @@ func (h *ModelProviderHandlers) List(w http.ResponseWriter, r *http.Request) {
 type createModelProviderRequest struct {
 	Provider string `json:"provider"`
 	APIKey   string `json:"api_key"`
+	BaseURL  string `json:"base_url"`
 }
 
 // Create handles POST /model-providers.
@@ -72,7 +78,7 @@ func (h *ModelProviderHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.svc.Register(r.Context(), userID, req.Provider, req.APIKey)
+	created, err := h.svc.Register(r.Context(), userID, req.Provider, req.APIKey, req.BaseURL)
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return
