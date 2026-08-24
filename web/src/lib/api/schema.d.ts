@@ -648,7 +648,7 @@ export interface components {
         /** @enum {string} */
         ResourceType: "tool" | "skill" | "mcp" | "knowledge_base";
         /** @enum {string} */
-        ProviderName: "anthropic" | "openai" | "google" | "custom";
+        ProviderName: "anthropic" | "openai" | "google" | "deepseek" | "qwen" | "custom";
         /** @enum {string} */
         RunStatus: "running" | "finished" | "failed";
         Resource: {
@@ -974,6 +974,7 @@ export interface components {
         ModelProvider: {
             id: string;
             provider: components["schemas"]["ProviderName"];
+            base_url?: string;
             status: components["schemas"]["Status"];
             /** Format: date-time */
             created_at: string;
@@ -2237,6 +2238,8 @@ export interface operations {
                     provider: components["schemas"]["ProviderName"];
                     /** @description 加密存储，任何接口都不回显 */
                     api_key: string;
+                    /** @description 自定义调用地址；provider 为 custom 时必填，其余 provider 缺省时使用官方地址 */
+                    base_url?: string;
                 };
             };
         };

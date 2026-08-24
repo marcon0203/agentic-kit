@@ -316,6 +316,8 @@ export function AgentForm({
               <SelectItem value="anthropic">anthropic</SelectItem>
               <SelectItem value="openai">openai</SelectItem>
               <SelectItem value="google">google</SelectItem>
+              <SelectItem value="deepseek">deepseek</SelectItem>
+              <SelectItem value="qwen">qwen</SelectItem>
               <SelectItem value="custom">custom</SelectItem>
             </SelectContent>
           </Select>

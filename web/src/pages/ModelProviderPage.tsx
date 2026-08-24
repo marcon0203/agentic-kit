@@ -24,6 +24,8 @@ const PROVIDERS: { value: ProviderName; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'google', label: 'Google' },
+  { value: 'deepseek', label: 'DeepSeek' },
+  { value: 'qwen', label: '通义千问' },
   { value: 'custom', label: '自定义' },
 ]
 
@@ -116,15 +118,23 @@ function ConnectProviderDialog({
   onConnected: () => void
 }) {
   const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+
+  const requiresBaseUrl = provider === 'custom'
 
   async function submit() {
     setPending(true)
     setError(null)
     try {
-      unwrap(await apiClient.POST('/model-providers', { body: { provider, api_key: apiKey } }))
+      unwrap(
+        await apiClient.POST('/model-providers', {
+          body: { provider, api_key: apiKey, base_url: baseUrl || undefined },
+        }),
+      )
       setApiKey('')
+      setBaseUrl('')
       onConnected()
     } catch (err) {
       // Backend does a live connectivity probe before saving — surfaces
@@ -153,6 +163,17 @@ function ConnectProviderDialog({
             onChange={(e) => setApiKey(e.target.value)}
             className="h-12 rounded-sm"
           />
+          <label htmlFor="provider-base-url" className="text-label-md text-ink-700">
+            Base URL{requiresBaseUrl ? '' : '（可选，留空使用官方地址）'}
+          </label>
+          <Input
+            id="provider-base-url"
+            type="text"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={requiresBaseUrl ? 'https://your-endpoint.example.com/v1' : ''}
+            className="h-12 rounded-sm"
+          />
           {error && (
             <p role="alert" className="text-caption text-rust">
               {error}
@@ -163,7 +184,10 @@ function ConnectProviderDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             取消
           </Button>
-          <Button disabled={pending || !apiKey} onClick={submit}>
+          <Button
+            disabled={pending || !apiKey || (requiresBaseUrl && !baseUrl)}
+            onClick={submit}
+          >
             {pending ? '连接测试中…' : '保存'}
           </Button>
         </DialogFooter>
