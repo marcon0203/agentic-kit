@@ -71,7 +71,7 @@ const CENTRES = [
   },
   {
     to: '/models',
-    name: '模型中心',
+    name: '模型广场',
     holds: 'Provider 凭证',
     line: '接入 Anthropic / OpenAI / Google。凭证先验证再保存，存不进去的 key 不会等到运行时才报错。',
     icon: Cpu,
@@ -125,7 +125,7 @@ const FAQS = [
   },
   {
     q: '四个中心分别做什么？',
-    a: '应用中心负责 Agent 与 Bundle；资源中心管理 Tool、Skill、MCP 与知识库；模型中心管理 LLM Provider 与凭证；应用广场让你订阅别人发布的能力。',
+    a: '应用中心负责 Agent 与 Bundle；资源中心管理 Tool、Skill、MCP 与知识库；模型广场管理 LLM Provider 与凭证；应用广场让你订阅别人发布的能力。',
   },
   {
     q: '运行出错了怎么定位？',

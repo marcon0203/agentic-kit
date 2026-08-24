@@ -41,7 +41,7 @@ tags:
   - name: Usage
     description: 用量与成本 — 用户自己的消耗
   - name: ModelProviders
-    description: 模型中心 — Provider 接入
+    description: 模型广场 — Provider 接入
   - name: Operations
     description: 运营中心 — 审计日志、举报处理
 
@@ -1195,7 +1195,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
 
-  # ────────────────────────── 模型中心 ──────────────────────────
+  # ────────────────────────── 模型广场 ──────────────────────────
   /model-providers:
     get:
       tags: [ModelProviders]

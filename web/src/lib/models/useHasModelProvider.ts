@@ -8,7 +8,7 @@ type ModelProvider = components['schemas']['ModelProvider']
 /**
  * spec-15: every run entry point (workbench quick-create, Bundle list's
  * "运行", marketplace's "进入使用") must be disabled up front when no
- * Provider is connected yet, with a tooltip pointing at 模型中心 — never
+ * Provider is connected yet, with a tooltip pointing at 模型广场 — never
  * "let them click and then show an error".
  */
 export function useHasModelProvider() {

@@ -57,7 +57,7 @@ export function StartRunCard() {
           <p className="text-body-sm rounded-sm border border-signal bg-signal-tint px-space-4 py-space-3 text-ink-700">
             尚未接入任何模型 Provider，
             <Link to="/models" className="text-blueprint hover:underline">
-              前往模型中心接入
+              前往模型广场接入
             </Link>
             后才能运行。
           </p>
@@ -92,7 +92,7 @@ export function StartRunCard() {
         )}
         <Button
           disabled={pending || !bundleRef || !input || blocked}
-          title={blocked ? '请先在模型中心接入模型 Provider' : undefined}
+          title={blocked ? '请先在模型广场接入模型 Provider' : undefined}
           onClick={submit}
           className="self-start"
         >

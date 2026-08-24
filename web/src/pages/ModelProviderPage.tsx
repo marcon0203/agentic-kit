@@ -42,7 +42,7 @@ export function ModelProviderPage() {
     <div className="flex flex-col gap-space-6">
       <PageHeader
         eyebrow="MODEL PROVIDERS"
-        title="模型中心"
+        title="模型广场"
         description="Bundle 要跑起来，至少得接入一个 Provider。密钥先拿去真实验证一次再保存，所以存进来的 key 一定是能用的。"
       />
 

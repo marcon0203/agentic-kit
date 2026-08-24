@@ -14,7 +14,7 @@ const NAV_ITEMS = [
   { to: '/', label: '首页', icon: Home, end: true },
   { to: '/apps', label: '应用中心', icon: LayoutGrid },
   { to: '/resources', label: '资源中心', icon: Puzzle },
-  { to: '/models', label: '模型中心', icon: Cpu },
+  { to: '/models', label: '模型广场', icon: Cpu },
   { to: '/ops', label: '运营中心', icon: BarChart3 },
   { to: '/marketplace', label: '应用广场', icon: Store },
   { to: '/settings', label: '系统设置', icon: Settings },
