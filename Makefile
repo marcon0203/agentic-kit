@@ -1,7 +1,26 @@
-.PHONY: dev build test lint migrate-up migrate-down sqlc-gen openapi-lint fmt
+.PHONY: dev dev-local dev-backend dev-frontend build test lint migrate-up migrate-down sqlc-gen openapi-lint fmt
 
 dev:
 	docker compose up --build
+
+# Non-Docker local dev: runs the Go server and the Vite dev server directly
+# on the host, in parallel, and tears both down together on Ctrl-C.
+#
+# Assumes a local PostgreSQL is already running and reachable at the
+# DATABASE_URL in .env (see .env.example — `createdb agentic_kit` after
+# creating the agentic_kit role is enough), and that migrations are applied
+# (`make migrate-up`). This target does not manage Postgres itself.
+dev-local:
+	@trap 'kill 0' EXIT INT TERM; ( set -a; . ./.env; set +a; go run ./cmd/server ) & ( cd web && npm run dev ) & wait
+
+# Run just the backend, reading config from .env (mirrors dev-local's half).
+dev-backend:
+	set -a; . ./.env; set +a; go run ./cmd/server
+
+# Run just the frontend dev server (Vite proxies /api to localhost:8080 —
+# see web/vite.config.ts).
+dev-frontend:
+	cd web && npm run dev
 
 build:
 	go build ./...
