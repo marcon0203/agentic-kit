@@ -46,10 +46,13 @@ const (
 	CodeRunTimeout            = 50005
 
 	// 60xxx — 模型中心
-	CodeProviderNotConfigured  = 60001
-	CodeProviderCredsInvalid   = 60002
-	CodeProviderAllUnavailable = 60003
-	CodeTokenQuotaExceeded     = 60004
+	CodeProviderNotConfigured   = 60001
+	CodeProviderCredsInvalid    = 60002
+	CodeProviderAllUnavailable  = 60003
+	CodeTokenQuotaExceeded      = 60004
+	CodeCatalogProviderNotFound = 60005
+	CodeCatalogModelNotFound    = 60006
+	CodeCatalogProviderKeyDup   = 60007
 
 	// 70xxx — 广场与订阅
 	CodePublishUnpublishedDeps    = 70001

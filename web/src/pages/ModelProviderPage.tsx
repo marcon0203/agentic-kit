@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Blend, Eye, Sparkles, Type } from 'lucide-react'
+import { Blend, Clapperboard, Eye, Image as ImageIcon, Sparkles, Type } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,8 +24,8 @@ type ModelProvider = components['schemas']['ModelProvider']
 type ModelCatalogEntry = components['schemas']['ModelCatalogEntry']
 type ProviderName = components['schemas']['ProviderName']
 type Modality = ModelCatalogEntry['modality']
-type Category = ModelCatalogEntry['category']
 
+const KNOWN_PROVIDER_NAMES: ProviderName[] = ['anthropic', 'openai', 'google', 'deepseek', 'qwen', 'custom']
 const PROVIDER_LABEL: Record<ProviderName, string> = {
   anthropic: 'Anthropic',
   openai: 'OpenAI',
@@ -35,24 +35,28 @@ const PROVIDER_LABEL: Record<ProviderName, string> = {
   custom: '自定义',
 }
 
+// A catalog entry's provider is now a free-text key from 系统配置 → 模型
+// 提供商 — an admin can register one that isn't among the 6 credentials
+// modelcenter's connectivity probe knows how to validate. Falling back to
+// 'custom' lets the connect dialog still open (with its base-url field)
+// instead of crashing on an unrecognized key.
+function toProviderName(key: string): ProviderName {
+  return (KNOWN_PROVIDER_NAMES as string[]).includes(key) ? (key as ProviderName) : 'custom'
+}
+
 const MODALITIES: SectionSidebarItem[] = [
-  { value: 'all', label: '全部模态', icon: Sparkles },
+  { value: 'all', label: '全部类型', icon: Sparkles },
   { value: 'text', label: '文本模型', icon: Type },
-  { value: 'vision', label: '视觉模型', icon: Eye },
+  { value: 'image', label: '图片模型', icon: ImageIcon },
+  { value: 'video', label: '视频模型', icon: Clapperboard },
+  { value: 'vision', label: '图文理解', icon: Eye },
   { value: 'embedding', label: '向量模型', icon: Blend },
 ]
 
-const CATEGORY_LABEL: Record<Category, string> = {
-  reasoning: '深度思考',
-  text: '文本生成',
-  vision: '视觉理解',
-  embedding: '向量模型',
-}
-const CATEGORY_ORDER: Category[] = ['reasoning', 'text', 'vision', 'embedding']
-
 /**
- * 模型广场：左侧按模态筛选（文本/视觉/向量），顶部精选/全部两个 Tab，内容区
- * 按用途分组展示目录里的模型卡片。目录（GET /model-catalog）只是展示数据——
+ * 模型广场：左侧按模型类型筛选，顶部再按供应商筛选、精选/全部切换，内容区
+ * 按供应商分组展示目录里的模型卡片。目录（GET /model-catalog）读取的是
+ * 系统配置 → 模型提供商里管理员登记的 Provider + Model，是展示数据——
  * Agent 的 model.name 仍然是自由文本，这里不是在绑定一个可选值列表，是在
  * 帮用户挑一个起点。真正决定"能不能用"的还是右上角"新增模型"接入的
  * Provider 凭证。
@@ -60,6 +64,7 @@ const CATEGORY_ORDER: Category[] = ['reasoning', 'text', 'vision', 'embedding']
 export function ModelProviderPage() {
   const queryClient = useQueryClient()
   const [modality, setModality] = useState('all')
+  const [providerFilter, setProviderFilter] = useState('all')
   const [tab, setTab] = useState<'featured' | 'all'>('featured')
   const [connecting, setConnecting] = useState<ProviderName | null>(null)
 
@@ -74,27 +79,32 @@ export function ModelProviderPage() {
 
   const connected = new Set((providersQuery.data ?? []).map((p) => p.provider))
 
+  const providerOptions = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const e of catalogQuery.data ?? []) seen.set(e.provider, e.provider_display_name)
+    return Array.from(seen.entries())
+  }, [catalogQuery.data])
+
   const grouped = useMemo(() => {
     const items = (catalogQuery.data ?? [])
       .filter((e) => tab === 'all' || e.featured)
       .filter((e) => modality === 'all' || e.modality === (modality as Modality))
-    const byCategory = new Map<Category, ModelCatalogEntry[]>()
+      .filter((e) => providerFilter === 'all' || e.provider === providerFilter)
+    const byProvider = new Map<string, { displayName: string; icon?: string; items: ModelCatalogEntry[] }>()
     for (const e of items) {
-      const list = byCategory.get(e.category) ?? []
-      list.push(e)
-      byCategory.set(e.category, list)
+      const bucket = byProvider.get(e.provider) ?? { displayName: e.provider_display_name, icon: e.provider_icon, items: [] }
+      bucket.items.push(e)
+      byProvider.set(e.provider, bucket)
     }
-    return CATEGORY_ORDER.map((c) => ({ category: c, items: byCategory.get(c) ?? [] })).filter(
-      (g) => g.items.length > 0,
-    )
-  }, [catalogQuery.data, tab, modality])
+    return Array.from(byProvider.entries())
+  }, [catalogQuery.data, tab, modality, providerFilter])
 
   return (
     <div className="flex flex-col gap-space-6">
       <PageHeader
         eyebrow="MODEL PROVIDERS"
         title="模型广场"
-        description="按模态挑一个模型作为起点；真正能不能用取决于右边接入的 Provider 凭证——密钥先拿去真实验证一次再保存。"
+        description="按类型或供应商挑一个模型作为起点；真正能不能用取决于右边接入的 Provider 凭证——密钥先拿去真实验证一次再保存。"
         actions={
           <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setConnecting('anthropic')}>
             新增模型
@@ -106,25 +116,40 @@ export function ModelProviderPage() {
         <SectionSidebar items={MODALITIES} active={modality} onChange={setModality} />
 
         <div className="min-w-0 flex-1">
-          <div
-            role="tablist"
-            className="mb-space-5 flex w-fit items-center gap-space-1 rounded-full border border-border bg-surface-muted p-1"
-          >
-            {(['featured', 'all'] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                role="tab"
-                aria-selected={tab === t}
-                onClick={() => setTab(t)}
-                className={cn(
-                  'text-body-sm rounded-full px-space-4 py-1.5 transition-colors',
-                  tab === t ? 'bg-surface text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-900',
-                )}
-              >
-                {t === 'featured' ? '精选模型' : '全部模型'}
-              </button>
-            ))}
+          <div className="mb-space-5 flex flex-wrap items-center justify-between gap-space-3">
+            <div role="tablist" className="flex w-fit items-center gap-space-1 rounded-full border border-border bg-surface-muted p-1">
+              {(['featured', 'all'] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === t}
+                  onClick={() => setTab(t)}
+                  className={cn(
+                    'text-body-sm rounded-full px-space-4 py-1.5 transition-colors',
+                    tab === t ? 'bg-surface text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-900',
+                  )}
+                >
+                  {t === 'featured' ? '精选模型' : '全部模型'}
+                </button>
+              ))}
+            </div>
+
+            {providerOptions.length > 0 && (
+              <Select value={providerFilter} onValueChange={setProviderFilter}>
+                <SelectTrigger className="h-9 w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部供应商</SelectItem>
+                  {providerOptions.map(([key, label]) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {(catalogQuery.isLoading || providersQuery.isLoading) && <ListSkeleton rows={4} />}
@@ -132,19 +157,27 @@ export function ModelProviderPage() {
             <ErrorPanel message="模型广场没能加载出来" onRetry={() => { catalogQuery.refetch(); providersQuery.refetch() }} />
           )}
 
+          {catalogQuery.isSuccess && grouped.length === 0 && (
+            <p className="text-body-sm text-ink-500">没有匹配当前筛选条件的模型。</p>
+          )}
+
           {catalogQuery.isSuccess && (
             <div className="flex flex-col gap-space-7">
-              {grouped.map((group) => (
-                <div key={group.category} className="flex flex-col gap-space-3">
-                  <h3 className="text-label-md text-ink-900">{CATEGORY_LABEL[group.category]}</h3>
+              {grouped.map(([providerKey, group]) => (
+                <div key={providerKey} className="flex flex-col gap-space-3">
+                  <h3 className="text-label-md flex items-center gap-space-2 text-ink-900">
+                    {group.icon && <img src={group.icon} alt="" className="size-5 rounded-sm object-cover" />}
+                    {group.displayName}
+                  </h3>
                   <div className="grid grid-cols-1 gap-space-3 md:grid-cols-2 xl:grid-cols-3">
                     {group.items.map((entry) => {
-                      const isConnected = connected.has(entry.provider)
+                      const providerName = toProviderName(entry.provider)
+                      const isConnected = connected.has(providerName)
                       return (
                         <button
                           key={`${entry.provider}/${entry.model}`}
                           type="button"
-                          onClick={() => !isConnected && setConnecting(entry.provider)}
+                          onClick={() => !isConnected && setConnecting(providerName)}
                           className="flex flex-col gap-space-2 rounded-lg border border-border bg-surface p-space-4 text-left transition-colors hover:border-border-strong"
                         >
                           <div className="flex items-center justify-between gap-space-2">
@@ -159,7 +192,7 @@ export function ModelProviderPage() {
                             )}
                           </div>
                           <span className="text-caption text-ink-500">
-                            {PROVIDER_LABEL[entry.provider]} · {entry.model}
+                            {group.displayName} · {entry.model}
                           </span>
                           <span className="text-body-sm text-ink-700">{entry.description}</span>
                         </button>

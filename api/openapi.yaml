@@ -1393,6 +1393,233 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
 
+  # ─────────────────── 系统配置 → 模型提供商（管理员）───────────────────
+  /model-catalog/providers:
+    get:
+      tags: [ModelCatalogAdmin]
+      summary: 目录 Provider 列表（含禁用），管理员
+      operationId: listCatalogProviders
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/CatalogProvider' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [ModelCatalogAdmin]
+      summary: 新增目录 Provider，管理员
+      operationId: createCatalogProvider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, display_name]
+              properties:
+                key: { type: string, examples: ['deepseek'] }
+                display_name: { type: string, examples: ['DeepSeek'] }
+                icon: { type: string, description: 'URL 或 data: URI' }
+                base_url: { type: string }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CatalogProvider' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: provider key 已存在（60007）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /model-catalog/providers/{id}:
+    patch:
+      tags: [ModelCatalogAdmin]
+      summary: 启用/禁用 Provider，管理员
+      operationId: updateCatalogProviderStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/Status' }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: provider 不存在（60005）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+    delete:
+      tags: [ModelCatalogAdmin]
+      summary: 删除 Provider（级联删除其下所有 Model），管理员
+      operationId: deleteCatalogProvider
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: provider 不存在（60005）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /model-catalog/providers/{id}/models:
+    get:
+      tags: [ModelCatalogAdmin]
+      summary: 某 Provider 下的 Model 列表（含禁用），管理员
+      operationId: listCatalogModels
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/CatalogModel' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [ModelCatalogAdmin]
+      summary: 在 Provider 下新增 Model（如 deepseek-v3），管理员
+      operationId: createCatalogModel
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [model, display_name, modality]
+              properties:
+                model: { type: string, examples: ['deepseek-v3'] }
+                display_name: { type: string }
+                description: { type: string }
+                modality: { $ref: '#/components/schemas/CatalogModality' }
+                featured: { type: boolean }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CatalogModel' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: provider 不存在（60005）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '409':
+          description: 该 provider 下已存在同名模型（60007）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /model-catalog/providers/{id}/models/{model_id}:
+    patch:
+      tags: [ModelCatalogAdmin]
+      summary: 启用/禁用 Model，管理员
+      operationId: updateCatalogModelStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: model_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/Status' }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [ModelCatalogAdmin]
+      summary: 删除 Model，管理员
+      operationId: deleteCatalogModel
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: model_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -1924,19 +2151,52 @@ components:
 
     ModelCatalogEntry:
       type: object
-      required: [provider, model, display_name, description, modality, category, featured]
+      description: >-
+        一条模型广场展示行，来自系统配置 → 模型提供商里管理员登记的 Provider + Model
+        联合读取；provider 是该 Provider 的 key（自由文本），不是 ProviderName 那个
+        为已接入凭证准备的封闭枚举。
+      required: [provider, provider_display_name, model, display_name, description, modality, featured]
       properties:
-        provider: { $ref: '#/components/schemas/ProviderName' }
-        model: { type: string, examples: ['claude-sonnet-5'] }
+        provider: { type: string, examples: ['deepseek'] }
+        provider_display_name: { type: string, examples: ['DeepSeek'] }
+        provider_icon: { type: string, description: 'URL 或 data: URI' }
+        model: { type: string, examples: ['deepseek-v3'] }
         display_name: { type: string }
         description: { type: string }
-        modality:
-          type: string
-          enum: [text, vision, embedding]
-        category:
-          type: string
-          enum: [reasoning, text, vision, embedding]
+        modality: { $ref: '#/components/schemas/CatalogModality' }
         featured: { type: boolean }
+
+    CatalogModality:
+      type: string
+      description: 模型广场按此筛选的"模型类型"标签
+      enum: [text, image, video, vision, embedding]
+
+    CatalogProvider:
+      type: object
+      description: 系统配置 → 模型提供商登记的一个 Provider（不是已接入的凭证）
+      required: [id, key, display_name, status, created_at]
+      properties:
+        id: { type: string }
+        key: { type: string, examples: ['deepseek'] }
+        display_name: { type: string, examples: ['DeepSeek'] }
+        icon: { type: string, description: 'URL 或 data: URI' }
+        base_url: { type: string }
+        status: { $ref: '#/components/schemas/Status' }
+        created_at: { type: string, format: date-time }
+
+    CatalogModel:
+      type: object
+      required: [id, provider_id, model, display_name, modality, featured, status, created_at]
+      properties:
+        id: { type: string }
+        provider_id: { type: string }
+        model: { type: string, examples: ['deepseek-v3'] }
+        display_name: { type: string }
+        description: { type: string }
+        modality: { $ref: '#/components/schemas/CatalogModality' }
+        featured: { type: boolean }
+        status: { $ref: '#/components/schemas/Status' }
+        created_at: { type: string, format: date-time }
 
     KnowledgeBaseDocument:
       type: object

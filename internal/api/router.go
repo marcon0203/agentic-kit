@@ -28,21 +28,22 @@ type RouterConfig struct {
 	AllowedOrigins []string
 	// DB backs the /ready probe's dependency check. Nil is allowed (tests
 	// that don't need it) — /ready then reports ready without checking.
-	DB               Pinger
-	IdempotencyStore IdempotencyStore
-	Auth             *AuthHandlers
-	Tokens           *auth.TokenIssuer
-	APIKeys          APIKeyLookup
-	Resources        *ResourceHandlers
-	KnowledgeBases   *KnowledgeBaseHandlers
-	Agents           *AgentHandlers
-	Bundles          *BundleHandlers
-	Marketplace      *MarketplaceHandlers
-	ModelProviders   *ModelProviderHandlers
-	ModelCatalog     *ModelCatalogHandlers
-	Usage            *UsageHandlers
-	Runs             *RunHandlers
-	Operations       *OperationHandlers
+	DB                Pinger
+	IdempotencyStore  IdempotencyStore
+	Auth              *AuthHandlers
+	Tokens            *auth.TokenIssuer
+	APIKeys           APIKeyLookup
+	Resources         *ResourceHandlers
+	KnowledgeBases    *KnowledgeBaseHandlers
+	Agents            *AgentHandlers
+	Bundles           *BundleHandlers
+	Marketplace       *MarketplaceHandlers
+	ModelProviders    *ModelProviderHandlers
+	ModelCatalog      *ModelCatalogHandlers
+	ModelCatalogAdmin *ModelCatalogAdminHandlers
+	Usage             *UsageHandlers
+	Runs              *RunHandlers
+	Operations        *OperationHandlers
 }
 
 // NewRouter assembles the top-level chi router with the shared middleware
@@ -142,6 +143,16 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 			}
 			if cfg.ModelCatalog != nil {
 				r.Get("/model-catalog", cfg.ModelCatalog.List)
+			}
+			if cfg.ModelCatalogAdmin != nil {
+				r.Get("/model-catalog/providers", cfg.ModelCatalogAdmin.ListProviders)
+				r.Post("/model-catalog/providers", cfg.ModelCatalogAdmin.CreateProvider)
+				r.Patch("/model-catalog/providers/{id}", cfg.ModelCatalogAdmin.UpdateProviderStatus)
+				r.Delete("/model-catalog/providers/{id}", cfg.ModelCatalogAdmin.DeleteProvider)
+				r.Get("/model-catalog/providers/{id}/models", cfg.ModelCatalogAdmin.ListModels)
+				r.Post("/model-catalog/providers/{id}/models", cfg.ModelCatalogAdmin.CreateModel)
+				r.Patch("/model-catalog/providers/{id}/models/{model_id}", cfg.ModelCatalogAdmin.UpdateModelStatus)
+				r.Delete("/model-catalog/providers/{id}/models/{model_id}", cfg.ModelCatalogAdmin.DeleteModel)
 			}
 			if cfg.Usage != nil {
 				r.Get("/usage/me", cfg.Usage.GetMyUsage)

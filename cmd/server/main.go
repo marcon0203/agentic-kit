@@ -34,6 +34,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/iam"
 	"github.com/marcon0203/agentic-kit/internal/domain/knowledgebase"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
+	"github.com/marcon0203/agentic-kit/internal/domain/modelcatalog"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 	"github.com/marcon0203/agentic-kit/internal/domain/operation"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
@@ -183,6 +184,11 @@ func run() error {
 		postgres.NewUsageRepository(queries),
 	)
 
+	// 系统配置 → 模型提供商: admin-managed catalog (Provider + its Models),
+	// distinct from modelCenter's per-user connected credentials above.
+	adminDirectory := postgres.NewAdminDirectory(queries)
+	modelCatalog := modelcatalog.NewService(postgres.NewModelCatalogRepository(queries), adminDirectory)
+
 	passwordHasher, err := password.NewHasher()
 	if err != nil {
 		return fmt.Errorf("initialise password hasher: %w", err)
@@ -194,28 +200,29 @@ func run() error {
 	)
 
 	routerCfg := api.RouterConfig{
-		AllowedOrigins:   splitAndTrim(cfg.CORSAllowedOrigins),
-		DB:               pool,
-		IdempotencyStore: api.NewPostgresIdempotencyStore(queries),
-		Auth:             api.NewAuthHandlers(iamService),
-		Tokens:           auth.NewTokenIssuer(cfg.JWTSecret),
-		APIKeys:          api.NewPostgresAPIKeyLookup(queries),
-		Resources:        api.NewResourceHandlers(resourceService),
-		KnowledgeBases:   api.NewKnowledgeBaseHandlers(knowledgeBaseService),
-		Agents:           api.NewAgentHandlers(agentService),
-		Bundles:          api.NewBundleHandlers(bundleService),
-		Marketplace:      api.NewMarketplaceHandlers(marketplaceService),
-		ModelProviders:   api.NewModelProviderHandlers(modelCenter),
-		ModelCatalog:     api.NewModelCatalogHandlers(),
-		Usage:            api.NewUsageHandlers(modelCenter),
-		Runs:             api.NewRunHandlers(runService),
+		AllowedOrigins:    splitAndTrim(cfg.CORSAllowedOrigins),
+		DB:                pool,
+		IdempotencyStore:  api.NewPostgresIdempotencyStore(queries),
+		Auth:              api.NewAuthHandlers(iamService),
+		Tokens:            auth.NewTokenIssuer(cfg.JWTSecret),
+		APIKeys:           api.NewPostgresAPIKeyLookup(queries),
+		Resources:         api.NewResourceHandlers(resourceService),
+		KnowledgeBases:    api.NewKnowledgeBaseHandlers(knowledgeBaseService),
+		Agents:            api.NewAgentHandlers(agentService),
+		Bundles:           api.NewBundleHandlers(bundleService),
+		Marketplace:       api.NewMarketplaceHandlers(marketplaceService),
+		ModelProviders:    api.NewModelProviderHandlers(modelCenter),
+		ModelCatalog:      api.NewModelCatalogHandlers(modelCatalog),
+		ModelCatalogAdmin: api.NewModelCatalogAdminHandlers(modelCatalog),
+		Usage:             api.NewUsageHandlers(modelCenter),
+		Runs:              api.NewRunHandlers(runService),
 		Operations: api.NewOperationHandlers(operation.NewService(
 			postgres.NewReportRepository(queries),
 			postgres.NewAuditLogReader(queries),
 			postgres.NewAuditLogWriter(queries),
 			postgres.NewModerationListings(queries),
 			postgres.NewResourceDisabler(queries),
-			postgres.NewAdminDirectory(queries),
+			adminDirectory,
 		)),
 	}
 

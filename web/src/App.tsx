@@ -6,9 +6,10 @@ import { AppShell } from '@/components/layout/AppShell'
 import { AuthModal } from '@/components/auth/AuthModal'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { HomePage } from '@/pages/HomePage'
-import { PagePlaceholder } from '@/pages/PagePlaceholder'
 import { RunPage } from '@/pages/RunPage'
 import { AppsLayout } from '@/pages/AppsLayout'
+import { SettingsLayout } from '@/pages/SettingsLayout'
+import { ModelCatalogAdminPage } from '@/pages/ModelCatalogAdminPage'
 import { MarketplaceBrowsePage } from '@/pages/MarketplaceBrowsePage'
 import { BundleListPage } from '@/pages/BundleListPage'
 import { AgentDefinitionPage } from '@/pages/AgentDefinitionPage'
@@ -127,10 +128,13 @@ export default function App() {
               path="/settings"
               element={
                 <ProtectedRoute>
-                  <PagePlaceholder title="系统设置" note="账号与平台设置由后续任务实现。" />
+                  <SettingsLayout />
                 </ProtectedRoute>
               }
-            />
+            >
+              <Route index element={<Navigate to="providers" replace />} />
+              <Route path="providers" element={<ModelCatalogAdminPage />} />
+            </Route>
           </Route>
         </Routes>
       </BrowserRouter>

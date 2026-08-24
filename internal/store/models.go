@@ -78,6 +78,28 @@ type BundleRunEvent struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type CatalogModel struct {
+	ID          int64              `json:"id"`
+	ProviderID  int64              `json:"provider_id"`
+	Model       string             `json:"model"`
+	DisplayName string             `json:"display_name"`
+	Description string             `json:"description"`
+	Modality    string             `json:"modality"`
+	Featured    bool               `json:"featured"`
+	Status      int16              `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type CatalogProvider struct {
+	ID          int64              `json:"id"`
+	ProviderKey string             `json:"provider_key"`
+	DisplayName string             `json:"display_name"`
+	Icon        pgtype.Text        `json:"icon"`
+	BaseUrl     pgtype.Text        `json:"base_url"`
+	Status      int16              `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type HumanGate struct {
 	ID             int64              `json:"id"`
 	RunID          string             `json:"run_id"`

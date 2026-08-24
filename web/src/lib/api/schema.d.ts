@@ -693,6 +693,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/model-catalog/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 目录 Provider 列表（含禁用），管理员 */
+        get: operations["listCatalogProviders"];
+        put?: never;
+        /** 新增目录 Provider，管理员 */
+        post: operations["createCatalogProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-catalog/providers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除 Provider（级联删除其下所有 Model），管理员 */
+        delete: operations["deleteCatalogProvider"];
+        options?: never;
+        head?: never;
+        /** 启用/禁用 Provider，管理员 */
+        patch: operations["updateCatalogProviderStatus"];
+        trace?: never;
+    };
+    "/model-catalog/providers/{id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 某 Provider 下的 Model 列表（含禁用），管理员 */
+        get: operations["listCatalogModels"];
+        put?: never;
+        /** 在 Provider 下新增 Model（如 deepseek-v3），管理员 */
+        post: operations["createCatalogModel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/model-catalog/providers/{id}/models/{model_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除 Model，管理员 */
+        delete: operations["deleteCatalogModel"];
+        options?: never;
+        head?: never;
+        /** 启用/禁用 Model，管理员 */
+        patch: operations["updateCatalogModelStatus"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1059,17 +1131,52 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        /** @description 一条模型广场展示行，来自系统配置 → 模型提供商里管理员登记的 Provider + Model 联合读取；provider 是该 Provider 的 key（自由文本），不是 ProviderName 那个 为已接入凭证准备的封闭枚举。 */
         ModelCatalogEntry: {
-            provider: components["schemas"]["ProviderName"];
-            /** @example claude-sonnet-5 */
+            /** @example deepseek */
+            provider: string;
+            /** @example DeepSeek */
+            provider_display_name: string;
+            /** @description URL 或 data: URI */
+            provider_icon?: string;
+            /** @example deepseek-v3 */
             model: string;
             display_name: string;
             description: string;
-            /** @enum {string} */
-            modality: "text" | "vision" | "embedding";
-            /** @enum {string} */
-            category: "reasoning" | "text" | "vision" | "embedding";
+            modality: components["schemas"]["CatalogModality"];
             featured: boolean;
+        };
+        /**
+         * @description 模型广场按此筛选的"模型类型"标签
+         * @enum {string}
+         */
+        CatalogModality: "text" | "image" | "video" | "vision" | "embedding";
+        /** @description 系统配置 → 模型提供商登记的一个 Provider（不是已接入的凭证） */
+        CatalogProvider: {
+            id: string;
+            /** @example deepseek */
+            key: string;
+            /** @example DeepSeek */
+            display_name: string;
+            /** @description URL 或 data: URI */
+            icon?: string;
+            base_url?: string;
+            status: components["schemas"]["Status"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        CatalogModel: {
+            id: string;
+            provider_id: string;
+            /** @example deepseek-v3 */
+            model: string;
+            display_name: string;
+            description?: string;
+            modality: components["schemas"]["CatalogModality"];
+            featured: boolean;
+            status: components["schemas"]["Status"];
+            /** Format: date-time */
+            created_at: string;
         };
         KnowledgeBaseDocument: {
             source_ref: string;
@@ -2521,6 +2628,276 @@ export interface operations {
                     "application/json": components["schemas"]["Envelope"];
                 };
             };
+        };
+    };
+    listCatalogProviders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["CatalogProvider"][];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createCatalogProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example deepseek */
+                    key: string;
+                    /** @example DeepSeek */
+                    display_name: string;
+                    /** @description URL 或 data: URI */
+                    icon?: string;
+                    base_url?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["CatalogProvider"];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description provider key 已存在（60007） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    deleteCatalogProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description provider 不存在（60005） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    updateCatalogProviderStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    status: components["schemas"]["Status"];
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description provider 不存在（60005） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    listCatalogModels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["CatalogModel"][];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createCatalogModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example deepseek-v3 */
+                    model: string;
+                    display_name: string;
+                    description?: string;
+                    modality: components["schemas"]["CatalogModality"];
+                    featured?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description 创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["CatalogModel"];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description provider 不存在（60005） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description 该 provider 下已存在同名模型（60007） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    deleteCatalogModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    updateCatalogModelStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                model_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    status: components["schemas"]["Status"];
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
         };
     };
 }

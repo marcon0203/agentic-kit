@@ -19,6 +19,8 @@ type Querier interface {
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) (AuditLog, error)
 	CreateBundle(ctx context.Context, arg CreateBundleParams) (Bundle, error)
 	CreateBundleRun(ctx context.Context, arg CreateBundleRunParams) (BundleRun, error)
+	CreateCatalogModel(ctx context.Context, arg CreateCatalogModelParams) (CatalogModel, error)
+	CreateCatalogProvider(ctx context.Context, arg CreateCatalogProviderParams) (CatalogProvider, error)
 	CreateHumanGate(ctx context.Context, arg CreateHumanGateParams) (HumanGate, error)
 	CreateKnowledgeBase(ctx context.Context, arg CreateKnowledgeBaseParams) (KnowledgeBasis, error)
 	// Dependency closure (spec-08) is always owner-scoped: a Bundle/Agent only
@@ -47,6 +49,8 @@ type Querier interface {
 	DeleteAgentsByRef(ctx context.Context, arg DeleteAgentsByRefParams) error
 	DeleteBundle(ctx context.Context, id int64) error
 	DeleteBundlesByRef(ctx context.Context, arg DeleteBundlesByRefParams) error
+	DeleteCatalogModel(ctx context.Context, id int64) error
+	DeleteCatalogProvider(ctx context.Context, id int64) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
 	DeleteKBChunksBySource(ctx context.Context, arg DeleteKBChunksBySourceParams) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
@@ -99,6 +103,7 @@ type Querier interface {
 	GetBundleListingDisplayByListingID(ctx context.Context, id int64) (GetBundleListingDisplayByListingIDRow, error)
 	GetBundleListingForOwnerByRefVersion(ctx context.Context, arg GetBundleListingForOwnerByRefVersionParams) (MarketplaceListing, error)
 	GetBundleRun(ctx context.Context, id string) (BundleRun, error)
+	GetCatalogProvider(ctx context.Context, id int64) (CatalogProvider, error)
 	GetHumanGateByID(ctx context.Context, id int64) (HumanGate, error)
 	GetIdempotencyKey(ctx context.Context, key string) (IdempotencyKey, error)
 	GetKnowledgeBaseByIDForOwner(ctx context.Context, arg GetKnowledgeBaseByIDForOwnerParams) (KnowledgeBasis, error)
@@ -182,6 +187,12 @@ type Querier interface {
 	ListBundlesForOwner(ctx context.Context, ownerUserID int64) ([]Bundle, error)
 	// One row per bundle_ref (its most recently created version).
 	ListBundlesForOwnerLatestPage(ctx context.Context, arg ListBundlesForOwnerLatestPageParams) ([]Bundle, error)
+	ListCatalogModelsForProvider(ctx context.Context, providerID int64) ([]CatalogModel, error)
+	// Joined read for 模型广场 (GET /model-catalog): only enabled models under
+	// enabled providers, newest provider first so a freshly configured provider
+	// surfaces near the top instead of at the bottom of an ORDER BY id.
+	ListCatalogModelsPublic(ctx context.Context) ([]ListCatalogModelsPublicRow, error)
+	ListCatalogProviders(ctx context.Context) ([]CatalogProvider, error)
 	ListHumanGatesForRun(ctx context.Context, runID string) ([]HumanGate, error)
 	ListKBSources(ctx context.Context, arg ListKBSourcesParams) ([]ListKBSourcesRow, error)
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
@@ -218,6 +229,8 @@ type Querier interface {
 	SetAgentStatusByID(ctx context.Context, arg SetAgentStatusByIDParams) error
 	SetBundleDisplayMeta(ctx context.Context, arg SetBundleDisplayMetaParams) error
 	SetBundleStatusByID(ctx context.Context, arg SetBundleStatusByIDParams) error
+	SetCatalogModelStatus(ctx context.Context, arg SetCatalogModelStatusParams) error
+	SetCatalogProviderStatus(ctx context.Context, arg SetCatalogProviderStatusParams) error
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
 	SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerDisplayMetaParams) error
 	SetMCPServerStatusByID(ctx context.Context, arg SetMCPServerStatusByIDParams) error
