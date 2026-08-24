@@ -25,6 +25,7 @@ interface FormState {
   persona: string
   tools: string[]
   skills: string[]
+  builtinTools: string[]
   hookBeforeToolCall: string
   hookAfterToolCall: string
   hookBeforeResponse: string
@@ -52,6 +53,7 @@ const EMPTY_FORM: FormState = {
   persona: '',
   tools: [],
   skills: [],
+  builtinTools: [],
   hookBeforeToolCall: '',
   hookAfterToolCall: '',
   hookBeforeResponse: '',
@@ -67,6 +69,14 @@ const EMPTY_FORM: FormState = {
   producesOutputTo: '',
   requiresReview: false,
 }
+
+const BUILTIN_TOOLS: { value: string; label: string; hint: string }[] = [
+  { value: 'google_search', label: 'google_search', hint: '模型原生联网搜索（仅部分模型支持）' },
+  { value: 'load_memory', label: 'load_memory', hint: '按需检索历史对话记忆' },
+  { value: 'preload_memory', label: 'preload_memory', hint: '每轮自动注入相关历史记忆' },
+  { value: 'load_artifacts', label: 'load_artifacts', hint: '读取本次会话已产出的附件' },
+  { value: 'exit_loop', label: 'exit_loop', hint: '在循环编排中主动退出' },
+]
 
 function csv(s: string): string[] {
   return s
@@ -87,6 +97,7 @@ export function definitionToFormState(def: AgentDefinition, copySuffix = false):
     persona: def.persona,
     tools: def.capabilities?.tools ?? [],
     skills: def.capabilities?.skills ?? [],
+    builtinTools: def.capabilities?.builtin_tools ?? [],
     hookBeforeToolCall: (def.capabilities?.hooks?.before_tool_call ?? []).join(', '),
     hookAfterToolCall: (def.capabilities?.hooks?.after_tool_call ?? []).join(', '),
     hookBeforeResponse: (def.capabilities?.hooks?.before_response ?? []).join(', '),
@@ -119,6 +130,7 @@ function formStateToDefinition(f: FormState): AgentDefinition {
     capabilities: {
       tools: f.tools,
       skills: f.skills,
+      builtin_tools: f.builtinTools as NonNullable<AgentDefinition['capabilities']>['builtin_tools'],
       hooks: {
         before_tool_call: csv(f.hookBeforeToolCall),
         after_tool_call: csv(f.hookAfterToolCall),
@@ -377,6 +389,29 @@ export function AgentForm({
         </Field>
         <Field label="skills" htmlFor="agent-skills">
           <ResourceMultiSelect types={['skill']} selected={form.skills} onChange={(v) => set('skills', v)} />
+        </Field>
+        <Field label="内置工具" htmlFor="agent-builtin-tools" helper="ADK 自带工具，不经过资源中心登记">
+          <div id="agent-builtin-tools" className="flex flex-col gap-space-2">
+            {BUILTIN_TOOLS.map((t) => (
+              <label key={t.value} className="flex items-center gap-space-2 text-body-sm text-ink-900">
+                <Checkbox
+                  checked={form.builtinTools.includes(t.value)}
+                  onCheckedChange={(checked) =>
+                    set(
+                      'builtinTools',
+                      checked === true
+                        ? [...form.builtinTools, t.value]
+                        : form.builtinTools.filter((v) => v !== t.value),
+                    )
+                  }
+                />
+                <span>
+                  {t.label}
+                  <span className="text-caption ml-space-2 text-ink-500">{t.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
         </Field>
         <Field label="hooks.before_tool_call" htmlFor="agent-hook-before-tool">
           <Input id="agent-hook-before-tool" value={form.hookBeforeToolCall} onChange={(e) => set('hookBeforeToolCall', e.target.value)} className="h-12 rounded-sm" placeholder="cost_guard, permission_check" />

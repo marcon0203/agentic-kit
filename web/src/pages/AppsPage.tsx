@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Store, LayoutGrid, Upload, Heart } from 'lucide-react'
+import { Store, LayoutGrid, Upload, Heart, Puzzle } from 'lucide-react'
 
 import { PageHeader, TabRail, TabRailItem } from '@/components/common/Page'
 import { SectionSidebar, type SectionSidebarItem } from '@/components/layout/SectionSidebar'
@@ -9,13 +9,15 @@ import { BundleListPage } from '@/pages/BundleListPage'
 import { AgentDefinitionPage } from '@/pages/AgentDefinitionPage'
 import { MyListingsPage } from '@/pages/MyListingsPage'
 import { MySubscriptionsPage } from '@/pages/MySubscriptionsPage'
+import { ResourceCenterPage } from '@/pages/ResourceCenterPage'
 import { useAuthStore } from '@/lib/auth/store'
 
-type Section = 'browse' | 'manage' | 'publish' | 'subscriptions'
+type Section = 'browse' | 'manage' | 'resources' | 'publish' | 'subscriptions'
 
 const SECTIONS: SectionSidebarItem[] = [
   { value: 'browse', label: '应用广场', icon: Store },
   { value: 'manage', label: '应用管理', icon: LayoutGrid },
+  { value: 'resources', label: '资源中心', icon: Puzzle },
   { value: 'publish', label: '我的发布', icon: Upload },
   { value: 'subscriptions', label: '我的订阅', icon: Heart },
 ]
@@ -29,6 +31,10 @@ const SECTION_COPY: Record<Section, { title: string; description: string }> = {
     title: '应用管理',
     description: '这里只看得到你自己创建的 Agent 与 Bundle。Agent 是单个角色的定义，Bundle 把多个 Agent 编排成一次协作，运行从这里发起。',
   },
+  resources: {
+    title: '资源中心',
+    description: 'Agent 能引用的一切都先在这里登记：Tool、Skill、MCP Server、知识库、记忆库。凭证加密落库，注册之后任何接口都不会再把它读出来。',
+  },
   publish: {
     title: '我的发布',
     description: '把自己的 Bundle 或 Agent 发布到广场，让其他人可以订阅使用；广场上看到的仍然是黑盒，编排图与提示词不会带出去。',
@@ -40,9 +46,10 @@ const SECTION_COPY: Record<Section, { title: string; description: string }> = {
 }
 
 /**
- * 应用广场（发布市场）与应用中心（自己的 Bundle/Agent 编排）合并成一个中心：
- * 顶部横向导航是一级菜单，这里的左侧栏是二级菜单——同一个"应用"概念下，
- * 广场看别人发的，管理看自己建的，互为镜像，拆成两个顶级中心反而让人来回切。
+ * 应用广场（发布市场）、应用管理（自己的 Bundle/Agent 编排）与资源中心
+ * （Tool/Skill/MCP/知识库/记忆库登记）合并成一个中心：顶部横向导航是一级
+ * 菜单，这里的左侧栏是二级菜单——都是"做一个能运行的应用"这条主线上的
+ * 环节，拆成几个顶级中心反而让人来回切。
  */
 export function AppsPage() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated())
@@ -79,6 +86,8 @@ export function AppsPage() {
               {manageTab === 'bundle' ? <BundleListPage /> : <AgentDefinitionPage />}
             </div>
           )}
+
+          {section === 'resources' && <ResourceCenterPage />}
 
           {section === 'publish' && isAuthenticated && <MyListingsPage />}
           {section === 'subscriptions' && isAuthenticated && <MySubscriptionsPage />}

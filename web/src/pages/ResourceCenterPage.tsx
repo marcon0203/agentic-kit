@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { PageHeader, Ref, TabRail, TabRailItem } from '@/components/common/Page'
+import { Ref, TabRail, TabRailItem } from '@/components/common/Page'
 import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { RegisterResourceDialog } from '@/components/resources/RegisterResourceDialog'
@@ -60,6 +60,16 @@ const KINDS: {
       cta: '注册知识库',
     },
   },
+  {
+    value: 'memory',
+    label: '记忆库',
+    blank: {
+      title: '让对话记住上一次',
+      description:
+        '记忆库登记后，同一个账号下的运行会把对话写进这里；Agent 勾选 load_memory / preload_memory 内置工具即可检索，重启进程也不会丢。',
+      cta: '注册记忆库',
+    },
+  },
 ]
 
 export function ResourceCenterPage() {
@@ -101,12 +111,11 @@ export function ResourceCenterPage() {
 
   return (
     <div className="flex flex-col gap-space-6">
-      <PageHeader
-        eyebrow="RESOURCES"
-        title="资源中心"
-        description="Agent 能引用的一切都先在这里登记。凭证加密落库，注册之后任何接口都不会再把它读出来。"
-        actions={<Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setRegisterOpen(true)}>{kind.blank.cta}</Button>}
-      />
+      <div className="flex items-center justify-end">
+        <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setRegisterOpen(true)}>
+          {kind.blank.cta}
+        </Button>
+      </div>
 
       <TabRail>
         {KINDS.map((k) => (

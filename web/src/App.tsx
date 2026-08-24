@@ -9,7 +9,6 @@ import { HomePage } from '@/pages/HomePage'
 import { PagePlaceholder } from '@/pages/PagePlaceholder'
 import { RunPage } from '@/pages/RunPage'
 import { AppsPage } from '@/pages/AppsPage'
-import { ResourceCenterPage } from '@/pages/ResourceCenterPage'
 import { ModelProviderPage } from '@/pages/ModelProviderPage'
 import { ListingDetailPage } from '@/pages/ListingDetailPage'
 import { BundleEditorPage } from '@/pages/BundleEditorPage'
@@ -24,6 +23,11 @@ function MarketplaceRedirect() {
   const [searchParams] = useSearchParams()
   const tab = searchParams.get('tab')
   return <Navigate to={tab ? `/apps?tab=${tab}` : '/apps'} replace />
+}
+
+// 资源中心同样并入 /apps（二级菜单的 tab=resources），旧链接原样跳转。
+function ResourcesRedirect() {
+  return <Navigate to="/apps?tab=resources" replace />
 }
 
 const queryClient = new QueryClient({
@@ -84,14 +88,7 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="/resources"
-              element={
-                <ProtectedRoute>
-                  <ResourceCenterPage />
-                </ProtectedRoute>
-              }
-            />
+            <Route path="/resources" element={<ResourcesRedirect />} />
             <Route
               path="/models"
               element={

@@ -22,6 +22,7 @@ const TYPE_LABEL: Record<ResourceType, string> = {
   skill: 'Skill',
   mcp: 'MCP Server',
   knowledge_base: '知识库',
+  memory: '记忆库',
 }
 
 export function RegisterResourceDialog({

@@ -8,7 +8,6 @@ import {
   Cpu,
   Database,
   GitBranch,
-  Puzzle,
   ShieldCheck,
   Store,
   Zap,
@@ -42,33 +41,25 @@ const GATE_INDEX = 2
 /* ── Proof stats ────────────────────────────────────────────────────── */
 
 const PROOF = [
-  { value: '3', label: '能力中心' },
+  { value: '2', label: '能力中心' },
   { value: '4', label: '步跑通' },
   { value: '1', label: 'Human Gate 审批' },
 ]
 
-/* ── The three centres ───────────────────────────────────────────────
+/* ── The two centres ─────────────────────────────────────────────────
    Each centre gets an icon, a colour, and one line saying what you keep
    there, because that is what a person is actually choosing between.
-   应用广场既是发布市场也是自己的 Agent/Bundle 管理台——两者互为镜像，
-   拆成两个中心反而让人来回切，所以合成一个。 */
+   应用广场是发布市场、自己的 Agent/Bundle 管理台，也是资源登记处——三者
+   互为同一条主线上的环节，拆成几个中心反而让人来回切，所以合成一个。 */
 
 const CENTRES = [
   {
     to: '/apps',
     name: '应用广场',
-    holds: 'Agent · Bundle · 发布市场',
-    line: '自己建的 Agent 与 Bundle 在这里编排、发起运行；别人发布的能力也在这里订阅即用，互不打扰。',
+    holds: 'Agent · Bundle · 资源登记 · 发布市场',
+    line: '自己建的 Agent 与 Bundle 在这里编排、发起运行；Tool/Skill/MCP/知识库/记忆库在这里登记；别人发布的能力也在这里订阅即用。',
     icon: Store,
     tone: 'blueprint' as const,
-  },
-  {
-    to: '/resources',
-    name: '资源中心',
-    holds: 'Tool · Skill · MCP · 知识库',
-    line: 'Agent 能引用的一切都先在这里登记；凭证加密落库，任何响应里都不会出现。',
-    icon: Puzzle,
-    tone: 'violet' as const,
   },
   {
     to: '/models',
@@ -117,8 +108,8 @@ const FAQS = [
     a: 'Human Gate 是运行流中的一个强制暂停点。Agent 不会自己越过需要人类判断的节点；平台会停下来，等有人批准或驳回后才继续。',
   },
   {
-    q: '三个中心分别做什么？',
-    a: '应用广场负责 Agent 与 Bundle 的编排管理，也是发布市场——自己建的和别人发布的都在这里，互不打扰；资源中心管理 Tool、Skill、MCP 与知识库；模型广场管理 LLM Provider 与凭证。',
+    q: '两个中心分别做什么？',
+    a: '应用广场负责 Agent 与 Bundle 的编排管理，也是资源登记处（Tool、Skill、MCP、知识库、记忆库）和发布市场——自己建的和别人发布的都在这里，互不打扰；模型广场管理 LLM Provider 与凭证。',
   },
   {
     q: '运行出错了怎么定位？',
@@ -401,8 +392,8 @@ const TONE_STYLES = {
 
 function CentresSection() {
   return (
-    <Section title="平台由三个中心组成">
-      <ul className="grid grid-cols-1 gap-space-4 md:grid-cols-3">
+    <Section title="平台由两个中心组成">
+      <ul className="grid grid-cols-1 gap-space-4 md:grid-cols-2">
         {CENTRES.map((centre) => {
           const Icon = centre.icon
           return (

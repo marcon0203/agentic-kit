@@ -283,6 +283,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/resources/{id}/kb/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 一个 knowledge_base 类型资源的 id；其他类型返回 404 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** 已摄入的文档列表（按 source_ref 聚合，不是按 chunk） */
+        get: operations["listKnowledgeBaseDocuments"];
+        put?: never;
+        /**
+         * 摄入一份文档（分块、向量化、存储）
+         * @description 用相同 source_ref 重新摄入即为更新——旧的 chunk 会先被整体替换
+         */
+        post: operations["ingestKnowledgeBaseDocument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resources/{id}/kb/documents/{source_ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除一份文档的全部 chunk */
+        delete: operations["deleteKnowledgeBaseDocument"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resources/{id}/kb/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 检索预览——手动验证摄入的内容能不能被合理召回 */
+        post: operations["searchKnowledgeBase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents": {
         parameters: {
             query?: never;
@@ -646,7 +704,7 @@ export interface components {
          */
         Status: 1 | 2;
         /** @enum {string} */
-        ResourceType: "tool" | "skill" | "mcp" | "knowledge_base";
+        ResourceType: "tool" | "skill" | "mcp" | "knowledge_base" | "memory";
         /** @enum {string} */
         ProviderName: "anthropic" | "openai" | "google" | "deepseek" | "qwen" | "custom";
         /** @enum {string} */
@@ -687,6 +745,8 @@ export interface components {
             capabilities: {
                 tools?: string[];
                 skills?: string[];
+                /** @description ADK 自带工具，不经过资源中心登记 */
+                builtin_tools?: ("google_search" | "load_memory" | "preload_memory" | "load_artifacts" | "exit_loop")[];
                 hooks?: {
                     before_tool_call?: string[];
                     after_tool_call?: string[];
@@ -978,6 +1038,18 @@ export interface components {
             status: components["schemas"]["Status"];
             /** Format: date-time */
             created_at: string;
+        };
+        KnowledgeBaseDocument: {
+            source_ref: string;
+            chunk_count: number;
+            /** Format: date-time */
+            ingested_at: string;
+        };
+        KnowledgeBaseSearchResult: {
+            source_ref: string;
+            content: string;
+            /** @description 1 - 余弦距离，越大越相关 */
+            score: number;
         };
     };
     responses: {
@@ -1580,6 +1652,136 @@ export interface operations {
                                 version?: string;
                             }[];
                         };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listKnowledgeBaseDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 一个 knowledge_base 类型资源的 id；其他类型返回 404 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["KnowledgeBaseDocument"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    ingestKnowledgeBaseDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 一个 knowledge_base 类型资源的 id；其他类型返回 404 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description 文档标识，如文件名或标题 */
+                    source_ref: string;
+                    content: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 摄入成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            chunk_count?: number;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description embedding 调用失败或维度不匹配 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    deleteKnowledgeBaseDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                source_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    searchKnowledgeBase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    query: string;
+                    /** @default 5 */
+                    top_k?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["KnowledgeBaseSearchResult"][];
                     };
                 };
             };
