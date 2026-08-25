@@ -204,7 +204,7 @@ func run() error {
 		gateRegistry,
 		postgres.NewAuditLogWriter(queries),
 		orchestrator.NewRunIDGenerator(),
-	)
+	).WithAgentTestRuns(postgres.NewAgentTestBundleProvider(queries))
 
 	// Providers and usage are two halves of one context: which providers
 	// this user may reach, and what reaching them has cost.

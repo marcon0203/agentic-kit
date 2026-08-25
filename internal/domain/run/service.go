@@ -26,6 +26,11 @@ type Service struct {
 	notifier GateNotifier
 	audit    AuditLog
 	ids      IDGenerator
+
+	// testBundles backs StartAgentTest. nil is fine — that surface then
+	// returns a clear "not configured" error instead of panicking, the
+	// same shape every other optional collaborator on this codebase uses.
+	testBundles AgentTestBundleProvider
 }
 
 func NewService(
@@ -35,11 +40,106 @@ func NewService(
 	return &Service{runs: runs, events: events, bundles: bundles, deps: deps, orch: orch, gates: gates, notifier: notifier, audit: audit, ids: ids}
 }
 
+// WithAgentTestRuns enables StartAgentTest — an opt-in builder step rather
+// than a tenth NewService parameter, matching resource.Service's
+// WithSkillUploads / WithOpenAPIImport.
+func (s *Service) WithAgentTestRuns(testBundles AgentTestBundleProvider) *Service {
+	s.testBundles = testBundles
+	return s
+}
+
 // StartCommand launches a run.
 type StartCommand struct {
 	BundleRef     string
 	BundleVersion string
 	Input         map[string]any
+}
+
+// AgentTestBundleProvider hands back the placeholder Bundle a 草稿试运行
+// hangs off. bundle_runs.bundle_id is a NOT NULL foreign key, so even a run
+// that executes an unsaved Agent needs *some* bundle row to point at; the
+// adapter lazily creates one hidden system Bundle per owner and returns it
+// every time after that. Its stored definition is a placeholder and is
+// never executed — StartAgentTest overrides it with the draft.
+type AgentTestBundleProvider interface {
+	Ensure(ctx context.Context, ownerID int64) (bundleID int64, ref, version string, err error)
+}
+
+// AgentTestCommand runs one Agent definition — typically one the caller is
+// still editing and has never saved — without going through a Bundle.
+type AgentTestCommand struct {
+	Definition map[string]any
+	Input      map[string]any
+}
+
+// StartAgentTest is Start for a single, possibly unsaved, Agent: the 智能体
+// 工作台's right-hand test panel. Everything after bundle resolution is
+// deliberately the same chain — the same dependency pre-flight, the same
+// compiler, the same run row, the same event stream — so what the test
+// panel shows is what a real run does, not a second execution path that can
+// drift away from it.
+//
+// The Bundle wrapped around the draft is a "single" one, which is a real
+// run type the engine already implements (spec-05a/§bundle run types), not
+// a special case invented for testing.
+func (s *Service) StartAgentTest(ctx context.Context, userID int64, cmd AgentTestCommand) (Run, error) {
+	if s.testBundles == nil {
+		return Run{}, domain.Invalid(domain.CodeValidationFailed, "agent test runs are not configured on this deployment")
+	}
+	agentRef, _ := cmd.Definition["agent"].(string)
+	if agentRef == "" {
+		return Run{}, domain.Invalid(domain.CodeValidationFailed, "invalid request").
+			WithDetails(domain.FieldError{Field: "definition.agent", Reason: "required"})
+	}
+	if cmd.Input == nil {
+		cmd.Input = map[string]any{}
+	}
+
+	bundleID, ref, version, err := s.testBundles.Ensure(ctx, userID)
+	if err != nil {
+		return Run{}, domain.Internal(err)
+	}
+
+	resolved := ResolvedBundle{
+		BundleID: bundleID, Ref: ref, Version: version, OwnerUserID: userID,
+		Definition: map[string]any{
+			"bundle": ref,
+			"type":   "single",
+			// The draft travels inline rather than by ref — see
+			// Engine.resolveAgentDefinition, which is the only place that
+			// shape is ever produced or consumed.
+			"agents": []any{map[string]any{"ref": agentRef, "definition": cmd.Definition}},
+		},
+	}
+
+	status, err := s.deps.Check(ctx, userID, resolved.Definition)
+	if err != nil {
+		return Run{}, domain.Internal(err)
+	}
+	if depErr := dependencyError(status); depErr != nil {
+		return Run{}, depErr
+	}
+
+	runID, err := s.ids.NewRunID()
+	if err != nil {
+		return Run{}, domain.Internal(err)
+	}
+
+	execution, err := s.orch.Prepare(ctx, runID, resolved, ParseGateConfigs(resolved.Definition))
+	if err != nil {
+		return Run{}, domain.Unprocessable(domain.CodeAgentVersionNotFound, "该智能体当前无法编译执行").WithCause(err)
+	}
+
+	created, err := s.runs.Create(ctx, Run{
+		ID: runID, BundleID: bundleID, BundleRef: ref, BundleVersion: version,
+		TriggeredBy: userID, Status: StatusRunning,
+	})
+	if err != nil {
+		return Run{}, domain.Internal(err)
+	}
+
+	go execution.Start(userID, cmd.Input, ParseLimits(resolved.Definition))
+	return created, nil
 }
 
 // Start implements spec-11's launch chain: resolve the Bundle (ownership

@@ -1268,6 +1268,50 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
 
+  /runs/agent-test:
+    post:
+      tags: [Runs]
+      summary: 试运行一个（可以尚未保存的）智能体
+      description: |
+        智能体工作台右侧测试面板用的接口：传完整的 Agent 定义而不是 ref，所以正在编辑、
+        还没保存的配置也能直接跑。服务端把它包成一个 `single` 类型的运行，走的是和
+        `POST /runs` 完全相同的依赖预检、编译、事件流——返回的也是同一个 RunSummary，
+        随后照常连 `/runs/{id}/stream` 消费事件。
+      operationId: createAgentTestRun
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition: { $ref: '#/components/schemas/AgentDefinition' }
+                input:
+                  type: object
+                  description: 初始输入，写入 shared_state
+                  additionalProperties: true
+      responses:
+        '201':
+          description: 已启动
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/RunSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422':
+          description: 引用资源被禁用（30002）/ 无法编译（40004）/ Provider 未配置（60001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
   /runs/{id}:
     parameters:
       - name: id

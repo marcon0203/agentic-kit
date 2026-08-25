@@ -38,6 +38,13 @@ func (r *BundleRepository) ListLatestByOwner(ctx context.Context, ownerID int64,
 	}
 	out := make([]bundle.Bundle, 0, len(rows))
 	for _, row := range rows {
+		// The 草稿试运行 placeholder is platform plumbing, not one of the
+		// user's applications — hidden here rather than in SQL because it
+		// is at most one row per owner, and keeping the filter in Go means
+		// every query that lists bundles doesn't have to remember it.
+		if row.BundleRef == bundle.SystemAgentTestRef {
+			continue
+		}
 		b, err := toDomainBundle(row)
 		if err != nil {
 			return nil, err

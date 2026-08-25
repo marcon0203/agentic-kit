@@ -187,6 +187,9 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				// gets its own tighter limiter on top of the general one.
 				runCreateLimiter := NewRateLimiter(20, time.Minute, generalRateLimitKey)
 				r.With(runCreateLimiter.Middleware).Post("/runs", cfg.Runs.Create)
+				// A draft test run burns tokens exactly like a real one, so
+				// it sits behind the same tighter limiter.
+				r.With(runCreateLimiter.Middleware).Post("/runs/agent-test", cfg.Runs.CreateAgentTest)
 			}
 		})
 	})

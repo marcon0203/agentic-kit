@@ -82,8 +82,15 @@ func (stubDeps) Check(context.Context, int64, map[string]any) (run.DependencySta
 
 type stubOrchestrator struct{}
 
+// A nil Execution is not a valid Orchestrator result — the service launches
+// whatever Prepare returns in its own goroutine, so returning nil panics as
+// soon as a test actually reaches a launch.
+type stubExecution struct{}
+
+func (stubExecution) Start(int64, map[string]any, run.Limits) {}
+
 func (stubOrchestrator) Prepare(context.Context, string, run.ResolvedBundle, map[string]run.GateConfig) (run.Execution, error) {
-	return nil, nil
+	return stubExecution{}, nil
 }
 func (stubOrchestrator) Cancel(string) bool { return true }
 
@@ -360,5 +367,65 @@ func TestList_InvalidCursorReturns400(t *testing.T) {
 	f.handlers.List(w, runRequest(http.MethodGet, "/runs?cursor=!!!not-base64!!!", "", 5, nil))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+// ── 草稿试运行 ────────────────────────────────────────────────────────
+
+type stubAgentTestBundles struct{}
+
+func (stubAgentTestBundles) Ensure(context.Context, int64) (int64, string, string, error) {
+	return 77, "__agent_test__", "1.0", nil
+}
+
+func newAgentTestFixture() *runFixture {
+	f := newRunFixture()
+	// The service is shared with the fixture's handlers, so enabling the
+	// surface here enables it for the handler under test too.
+	f.handlers.svc.WithAgentTestRuns(stubAgentTestBundles{})
+	return f
+}
+
+func TestCreateAgentTest_StartsARunFromAnInlineDefinition(t *testing.T) {
+	f := newAgentTestFixture()
+	body, _ := json.Marshal(createAgentTestRunRequest{
+		Definition: map[string]any{"agent": "researcher", "role": "研究员"},
+		Input:      map[string]any{"message": "hi"},
+	})
+	r := runRequest(http.MethodPost, "/api/v1/runs/agent-test", "", 1, body)
+	w := httptest.NewRecorder()
+
+	f.handlers.CreateAgentTest(w, r)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+	if len(f.runs.runs) != 1 {
+		t.Fatalf("expected exactly one run to be created, got %d", len(f.runs.runs))
+	}
+}
+
+func TestCreateAgentTest_RequiresAuth(t *testing.T) {
+	f := newAgentTestFixture()
+	body, _ := json.Marshal(createAgentTestRunRequest{Definition: map[string]any{"agent": "researcher"}})
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/agent-test", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+
+	f.handlers.CreateAgentTest(w, r)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestCreateAgentTest_MalformedBodyReturns400(t *testing.T) {
+	f := newAgentTestFixture()
+	r := runRequest(http.MethodPost, "/api/v1/runs/agent-test", "", 1, []byte("{not json"))
+	w := httptest.NewRecorder()
+
+	f.handlers.CreateAgentTest(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
 	}
 }

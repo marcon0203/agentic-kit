@@ -604,6 +604,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/agent-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 试运行一个（可以尚未保存的）智能体
+         * @description 智能体工作台右侧测试面板用的接口：传完整的 Agent 定义而不是 ref，所以正在编辑、
+         *     还没保存的配置也能直接跑。服务端把它包成一个 `single` 类型的运行，走的是和
+         *     `POST /runs` 完全相同的依赖预检、编译、事件流——返回的也是同一个 RunSummary，
+         *     随后照常连 `/runs/{id}/stream` 消费事件。
+         */
+        post: operations["createAgentTestRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/{id}": {
         parameters: {
             query?: never;
@@ -2796,6 +2819,52 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
             /** @description 引用资源被禁用（30002）/ Agent 版本不存在（40004）/ Provider 未配置（60001） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    createAgentTestRun: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 客户端生成的 UUID，24h 内相同 Key 重复请求直接返回首次结果 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    definition: components["schemas"]["AgentDefinition"];
+                    /** @description 初始输入，写入 shared_state */
+                    input?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description 已启动 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunSummary"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 引用资源被禁用（30002）/ 无法编译（40004）/ Provider 未配置（60001） */
             422: {
                 headers: {
                     [name: string]: unknown;

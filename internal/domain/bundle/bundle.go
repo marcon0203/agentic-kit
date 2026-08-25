@@ -12,6 +12,15 @@ package bundle
 
 import "time"
 
+// SystemAgentTestRef is the one Bundle ref the platform creates on a user's
+// behalf rather than the user authoring it: the placeholder that 草稿试运行
+// runs hang off, because bundle_runs.bundle_id is a NOT NULL foreign key
+// (see run.AgentTestBundleProvider). It is filtered out of the Bundle list —
+// it is plumbing, not one of the user's applications. The leading
+// underscores are also outside the ref pattern the API accepts, so a user
+// can never author a Bundle that collides with it.
+const SystemAgentTestRef = "__agent_test__"
+
 // Status is a Bundle version's lifecycle flag.
 type Status int16
 

@@ -97,6 +97,40 @@ func (h *RunHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusCreated, toRunSummaryDTO(created))
 }
 
+// CreateAgentTest handles POST /runs/agent-test — the 智能体工作台's
+// right-hand test panel. It takes a full Agent definition rather than a ref
+// so the配置 being tested can be one the user has not saved yet, and returns
+// the same RunSummary POST /runs does, so the caller consumes the result
+// through the existing /runs/{id}/stream rather than a second event
+// transport.
+func (h *RunHandlers) CreateAgentTest(w http.ResponseWriter, r *http.Request) {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
+		return
+	}
+
+	var req createAgentTestRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
+		return
+	}
+
+	created, err := h.svc.StartAgentTest(r.Context(), userID, run.AgentTestCommand{
+		Definition: req.Definition, Input: req.Input,
+	})
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusCreated, toRunSummaryDTO(created))
+}
+
+type createAgentTestRunRequest struct {
+	Definition map[string]any `json:"definition"`
+	Input      map[string]any `json:"input"`
+}
+
 // ── List ─────────────────────────────────────────────────────────────
 
 // List handles GET /runs.

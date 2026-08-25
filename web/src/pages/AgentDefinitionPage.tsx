@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '@/components/ui/button'
@@ -6,7 +7,8 @@ import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { EmptyRail } from '@/components/common/Rail'
 import { Ref, Section } from '@/components/common/Page'
 import { cn } from '@/lib/utils'
-import { AgentForm, definitionToFormState, type FormState } from '@/components/agents/AgentForm'
+import { AgentForm } from '@/components/agents/AgentForm'
+import { definitionToFormState, type FormState } from '@/lib/agents/definition'
 import { apiClient, unwrap } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 
@@ -16,6 +18,7 @@ export function AgentDefinitionPage() {
   const [mode, setMode] = useState<'list' | 'create'>('list')
   const [copyFrom, setCopyFrom] = useState<FormState | undefined>(undefined)
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const query = useQuery({
     queryKey: ['agents'],
@@ -57,7 +60,7 @@ export function AgentDefinitionPage() {
     <Section
       title="我的智能体"
       aside={
-        <Button size="sm" onClick={() => setMode('create')}>
+        <Button size="sm" onClick={() => navigate('/agents/new')}>
           新建智能体
         </Button>
       }
@@ -70,7 +73,7 @@ export function AgentDefinitionPage() {
           title="先定义一个角色"
           description="一个智能体（Agent）就是一个角色：它是谁、能用哪些资源、单轮最多花多少 token。应用编排的就是这些角色。"
           action={
-            <Button size="sm" onClick={() => setMode('create')}>
+            <Button size="sm" onClick={() => navigate('/agents/new')}>
               新建智能体
             </Button>
           }

@@ -118,19 +118,24 @@ func (f *fakeDeps) Check(context.Context, int64, map[string]any) (run.Dependency
 }
 
 type fakeOrchestrator struct {
-	prepareErr  error
-	prepared    int
-	started     chan struct{}
-	cancelled   []string
-	gateConfigs map[string]run.GateConfig
-	limits      run.Limits
+	prepareErr error
+	prepared   int
+	// preparedBundle is the last ResolvedBundle handed to Prepare — what a
+	// 草稿试运行 test asserts on, since the whole point there is *what* got
+	// compiled, not just that something did.
+	preparedBundle run.ResolvedBundle
+	started        chan struct{}
+	cancelled      []string
+	gateConfigs    map[string]run.GateConfig
+	limits         run.Limits
 }
 
-func (f *fakeOrchestrator) Prepare(_ context.Context, _ string, _ run.ResolvedBundle, gates map[string]run.GateConfig) (run.Execution, error) {
+func (f *fakeOrchestrator) Prepare(_ context.Context, _ string, b run.ResolvedBundle, gates map[string]run.GateConfig) (run.Execution, error) {
 	if f.prepareErr != nil {
 		return nil, f.prepareErr
 	}
 	f.prepared++
+	f.preparedBundle = b
 	f.gateConfigs = gates
 	return &fakeExecution{owner: f}, nil
 }
@@ -356,6 +361,104 @@ func TestStart_LaunchesAsynchronouslyWithParsedLimitsAndGates(t *testing.T) {
 	gate, ok := h.orch.gateConfigs["review"]
 	if !ok || gate.OnTimeout != run.TimeoutAutoReject || gate.TimeoutSeconds == nil || *gate.TimeoutSeconds != 300 {
 		t.Fatalf("gate config not parsed: %+v", h.orch.gateConfigs)
+	}
+}
+
+// ── 草稿试运行 ────────────────────────────────────────────────────────
+
+type fakeTestBundles struct {
+	calls int
+	err   error
+}
+
+func (f *fakeTestBundles) Ensure(context.Context, int64) (int64, string, string, error) {
+	f.calls++
+	if f.err != nil {
+		return 0, "", "", f.err
+	}
+	return 77, "__agent_test__", "1.0", nil
+}
+
+func TestStartAgentTest_WrapsTheDraftInASingleBundleInline(t *testing.T) {
+	h := newHarness()
+	h.orch.started = make(chan struct{})
+	h.svc.WithAgentTestRuns(&fakeTestBundles{})
+
+	def := map[string]any{"agent": "researcher", "role": "研究员", "persona": "你是一名研究员"}
+	created, err := h.svc.StartAgentTest(context.Background(), 42, run.AgentTestCommand{
+		Definition: def, Input: map[string]any{"message": "hi"},
+	})
+	if err != nil {
+		t.Fatalf("StartAgentTest: %v", err)
+	}
+	if created.BundleID != 77 || created.BundleRef != "__agent_test__" {
+		t.Fatalf("the run should hang off the placeholder bundle, got %+v", created)
+	}
+
+	// The compiler must receive the draft inline — never a (ref, version)
+	// pointing at a registry row that does not exist for an unsaved Agent.
+	agents, _ := h.orch.preparedBundle.Definition["agents"].([]any)
+	if len(agents) != 1 {
+		t.Fatalf("expected exactly one agent, got %+v", h.orch.preparedBundle.Definition)
+	}
+	entry, _ := agents[0].(map[string]any)
+	if entry["ref"] != "researcher" {
+		t.Fatalf("unexpected agent ref: %+v", entry)
+	}
+	inline, ok := entry["definition"].(map[string]any)
+	if !ok || inline["persona"] != "你是一名研究员" {
+		t.Fatalf("expected the draft definition inline, got %+v", entry)
+	}
+	if h.orch.preparedBundle.Definition["type"] != "single" {
+		t.Fatalf("a one-agent test run should use the single run type, got %+v", h.orch.preparedBundle.Definition)
+	}
+
+	select {
+	case <-h.orch.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the execution to be started in its own goroutine")
+	}
+}
+
+func TestStartAgentTest_RequiresAnAgentRef(t *testing.T) {
+	h := newHarness()
+	h.svc.WithAgentTestRuns(&fakeTestBundles{})
+
+	_, err := h.svc.StartAgentTest(context.Background(), 1, run.AgentTestCommand{
+		Definition: map[string]any{"role": "研究员"},
+	})
+	de := mustDomainErr(t, err)
+	if de.Code != domain.CodeValidationFailed || len(de.Details) != 1 || de.Details[0].Field != "definition.agent" {
+		t.Fatalf("unexpected error: %+v", de)
+	}
+}
+
+func TestStartAgentTest_NotConfigured_ReturnsClearError(t *testing.T) {
+	h := newHarness() // no WithAgentTestRuns
+
+	_, err := h.svc.StartAgentTest(context.Background(), 1, run.AgentTestCommand{
+		Definition: map[string]any{"agent": "researcher"},
+	})
+	if de := mustDomainErr(t, err); de.Code != domain.CodeValidationFailed {
+		t.Fatalf("unexpected error: %+v", de)
+	}
+}
+
+// A draft that references a disabled resource must be rejected by the same
+// pre-flight a real run gets — the test panel is not a way around it.
+func TestStartAgentTest_RunsTheSameDependencyPreflight(t *testing.T) {
+	h := newHarness()
+	h.svc.WithAgentTestRuns(&fakeTestBundles{})
+	h.deps.status = run.DependencyResourceUnavailable
+
+	_, err := h.svc.StartAgentTest(context.Background(), 1, run.AgentTestCommand{
+		Definition: map[string]any{"agent": "researcher"},
+	})
+	if de := mustDomainErr(t, err); de.Code != domain.CodeResourceDisabled {
+		t.Fatalf("unexpected error: %+v", de)
+	}
+	if len(h.repo.runs) != 0 {
+		t.Fatal("a rejected test run must not leave a run row behind")
 	}
 }
 

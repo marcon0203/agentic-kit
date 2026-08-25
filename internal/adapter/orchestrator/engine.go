@@ -100,7 +100,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 			node = alias
 		}
 
-		agentDef, err := e.loadAgentDefinition(ctx, b.OwnerUserID, ref, version)
+		agentDef, err := e.resolveAgentDefinition(ctx, b.OwnerUserID, am, ref, version)
 		if err != nil {
 			return nil, fmt.Errorf("resolve agent %q: %w", ref, err)
 		}
@@ -153,6 +153,27 @@ func firstOrEmpty(nodes []string) string {
 		return ""
 	}
 	return nodes[0]
+}
+
+// resolveAgentDefinition picks where an agents[] entry's definition comes
+// from. Normally it's a (ref, version) pair resolved against the agent
+// registry. An entry may instead carry the definition inline, which is how
+// a 草稿试运行 runs an Agent the user is still editing and has never saved
+// (run.Service.StartAgentTest) — that shape is constructed server-side
+// only; schemas/bundle.schema.json does not let anyone author it into a
+// stored Bundle, so a persisted Bundle can never smuggle past agent
+// versioning this way.
+func (e *Engine) resolveAgentDefinition(ctx context.Context, ownerID int64, entry map[string]any, ref, version string) (map[string]any, error) {
+	if inline, ok := entry["definition"].(map[string]any); ok {
+		// Copied because Prepare writes the node name into it, and the
+		// caller's map may be reused across a retry.
+		def := make(map[string]any, len(inline))
+		for k, v := range inline {
+			def[k] = v
+		}
+		return def, nil
+	}
+	return e.loadAgentDefinition(ctx, ownerID, ref, version)
 }
 
 func (e *Engine) loadAgentDefinition(ctx context.Context, ownerID int64, ref, version string) (map[string]any, error) {

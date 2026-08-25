@@ -46,17 +46,22 @@ func (c *RunDependencyChecker) Check(ctx context.Context, ownerID int64, bundleD
 		ref, _ := am["ref"].(string)
 		version, _ := am["version"].(string)
 
-		row, err := ResolveAgentVersion(ctx, c.q, ownerID, ref, version)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return run.DependencyAgentMissing, nil
-		}
-		if err != nil {
-			return run.DependenciesOK, err
-		}
-
-		var def map[string]any
-		if err := json.Unmarshal(row.Definition, &def); err != nil {
-			return run.DependenciesOK, err
+		// An inline definition (a 草稿试运行 of an unsaved Agent — see
+		// run.Service.StartAgentTest) has no registry row to resolve, but
+		// everything it *references* still has to be checked exactly the
+		// same way, which is what the two checks below do.
+		def, inline := am["definition"].(map[string]any)
+		if !inline {
+			row, err := ResolveAgentVersion(ctx, c.q, ownerID, ref, version)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return run.DependencyAgentMissing, nil
+			}
+			if err != nil {
+				return run.DependenciesOK, err
+			}
+			if err := json.Unmarshal(row.Definition, &def); err != nil {
+				return run.DependenciesOK, err
+			}
 		}
 
 		status, err := c.checkCapabilities(ctx, ownerID, def)

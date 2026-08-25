@@ -26,6 +26,7 @@ import { McpServerEditorPage } from '@/pages/McpServerEditorPage'
 import { SkillUploadPage } from '@/pages/SkillUploadPage'
 import { ComponentWizardPage } from '@/pages/ComponentWizardPage'
 import { ComponentPlazaPage } from '@/pages/ComponentPlazaPage'
+import { AgentStudioPage } from '@/pages/AgentStudioPage'
 import { OperationsPage } from '@/pages/OperationsPage'
 
 /**
@@ -59,6 +60,17 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
+          {/* 智能体工作台是整屏页面（左配置 / 右试运行），刻意放在 AppShell
+              外面：它自己带顶栏和左侧导航，再套一层应用外壳只会把右边的
+              测试区挤没。 */}
+          <Route
+            path="/agents/new"
+            element={
+              <ProtectedRoute>
+                <AgentStudioPage />
+              </ProtectedRoute>
+            }
+          />
           <Route element={<AppShell />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/marketplace" element={<MarketplaceRedirect />} />
