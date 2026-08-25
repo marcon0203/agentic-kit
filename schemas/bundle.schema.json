@@ -7,11 +7,61 @@
   "required": [
     "bundle",
     "version",
-    "agents",
-    "orchestration"
+    "agents"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "flow",
+              "single"
+            ]
+          }
+        }
+      },
+      "else": {
+        "required": [
+          "orchestration"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "single"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "agents": {
+            "maxItems": 1
+          }
+        }
+      }
+    }
+  ],
   "properties": {
+    "type": {
+      "type": "string",
+      "description": "bundle 的运行类型，决定编排引擎如何调度：graph（默认）——完整的条件/并行/自循环图，走图执行引擎；flow——agents[] 按声明顺序严格串行执行，无需 orchestration 块，走 ADK 原生 SequentialAgent；single——只有一个 agent，直接运行，无编排开销。三者是真正不同的运行模式，不是同一引擎的不同外观。",
+      "enum": [
+        "graph",
+        "flow",
+        "single"
+      ],
+      "default": "graph"
+    },
     "bundle": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$",

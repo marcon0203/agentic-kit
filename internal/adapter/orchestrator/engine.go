@@ -58,9 +58,20 @@ var _ run.Orchestrator = (*Engine)(nil)
 // adk.CompileAgent (each resource reference gated by the authorizer), then
 // the whole graph through adk.CompileBundle.
 func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle, gateConfigs map[string]run.GateConfig) (run.Execution, error) {
-	graph, err := bundlegraph.ParseGraph(b.Definition)
-	if err != nil {
-		return nil, fmt.Errorf("parse orchestration graph: %w", err)
+	runType, _ := b.Definition["type"].(string)
+	if runType == "" {
+		runType = "graph"
+	}
+
+	// A flow/single Bundle has no orchestration block to parse at all —
+	// only a graph Bundle's edges need bundlegraph's graph shape.
+	var graph bundlegraph.Graph
+	if runType == "graph" {
+		var err error
+		graph, err = bundlegraph.ParseGraph(b.Definition)
+		if err != nil {
+			return nil, fmt.Errorf("parse orchestration graph: %w", err)
+		}
 	}
 
 	creds, err := e.keys.Keys(ctx, b.OwnerUserID)
@@ -72,6 +83,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 
 	agentsRaw, _ := b.Definition["agents"].([]any)
 	compiled := make(map[string]adk.CompiledAgent, len(agentsRaw))
+	nodeOrder := make([]string, 0, len(agentsRaw)) // agents[] declaration order — a flow's implicit schedule
 	for _, a := range agentsRaw {
 		am, _ := a.(map[string]any)
 		ref, _ := am["ref"].(string)
@@ -98,6 +110,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 			return nil, fmt.Errorf("compile agent %q: %w", node, err)
 		}
 		compiled[node] = compiledAgent
+		nodeOrder = append(nodeOrder, node)
 	}
 
 	gateNodes := make(map[string]bool, len(gateConfigs))
@@ -107,13 +120,35 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 	waiter := &gateWaiter{gates: e.gates, events: e.events, registry: e.registry, runID: runID, configs: gateConfigs}
 
 	bundleRef, _ := b.Definition["bundle"].(string)
-	root, err := adk.CompileBundle(adk.BundleCompileOptions{
-		BundleRef: bundleRef, Graph: graph, Agents: compiled, GateNodes: gateNodes, GateWaiter: waiter,
-	})
+
+	// The run type genuinely changes how the Bundle is dispatched, not just
+	// how it was authored: graph keeps the hand-rolled graph-walking
+	// executor, flow is built on ADK's own SequentialAgent, and single
+	// skips compilation altogether.
+	var root adk.CompiledAgent
+	switch runType {
+	case "flow":
+		root, err = adk.CompileFlow(adk.FlowCompileOptions{
+			BundleRef: bundleRef, Nodes: nodeOrder, Agents: compiled, GateNodes: gateNodes, GateWaiter: waiter,
+		})
+	case "single":
+		root, err = adk.CompileSingle(bundleRef, firstOrEmpty(nodeOrder), compiled)
+	default:
+		root, err = adk.CompileBundle(adk.BundleCompileOptions{
+			BundleRef: bundleRef, Graph: graph, Agents: compiled, GateNodes: gateNodes, GateWaiter: waiter,
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
 	return &execution{engine: e, runID: runID, root: root, ownerID: b.OwnerUserID}, nil
+}
+
+func firstOrEmpty(nodes []string) string {
+	if len(nodes) == 0 {
+		return ""
+	}
+	return nodes[0]
 }
 
 func (e *Engine) loadAgentDefinition(ctx context.Context, ownerID int64, ref, version string) (map[string]any, error) {

@@ -144,6 +144,69 @@ func TestBundleValidator_AcceptsExampleFixture(t *testing.T) {
 	}
 }
 
+func TestBundleValidator_FlowNeedsNoOrchestrationBlock(t *testing.T) {
+	validator, err := NewBundleValidator()
+	if err != nil {
+		t.Fatalf("new validator: %v", err)
+	}
+
+	doc := map[string]any{
+		"bundle": "flow-bundle", "version": "1.0", "type": "flow",
+		"agents": []any{
+			map[string]any{"ref": "a"},
+			map[string]any{"ref": "b"},
+		},
+	}
+	errs, err := validator.Validate(doc)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if len(errs) != 0 {
+		t.Fatalf("a flow Bundle without an orchestration block should pass, got errors: %+v", errs)
+	}
+}
+
+func TestBundleValidator_SingleRejectsMoreThanOneAgent(t *testing.T) {
+	validator, err := NewBundleValidator()
+	if err != nil {
+		t.Fatalf("new validator: %v", err)
+	}
+
+	doc := map[string]any{
+		"bundle": "solo", "version": "1.0", "type": "single",
+		"agents": []any{
+			map[string]any{"ref": "a"},
+			map[string]any{"ref": "b"},
+		},
+	}
+	errs, err := validator.Validate(doc)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if len(errs) == 0 {
+		t.Fatal("a single Bundle with two agents should be rejected")
+	}
+}
+
+func TestBundleValidator_GraphStillRequiresOrchestration(t *testing.T) {
+	validator, err := NewBundleValidator()
+	if err != nil {
+		t.Fatalf("new validator: %v", err)
+	}
+
+	doc := map[string]any{
+		"bundle": "no-orch", "version": "1.0",
+		"agents": []any{map[string]any{"ref": "a"}},
+	}
+	errs, err := validator.Validate(doc)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if len(errs) == 0 {
+		t.Fatal("a graph Bundle (the default when type is omitted) without orchestration should be rejected")
+	}
+}
+
 func TestValidateJSON_MalformedJSONReturnsFieldError(t *testing.T) {
 	validator, err := NewAgentValidator()
 	if err != nil {

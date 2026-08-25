@@ -1026,6 +1026,12 @@ export interface components {
             created_at: string;
         };
         BundleDefinition: {
+            /**
+             * @description 运行类型，决定编排引擎如何调度：graph（默认，省略即此）走完整图执行引擎；flow 按 agents[] 声明顺序严格串行执行，走 ADK 原生 SequentialAgent，无需 orchestration；single 只有一个 agent，直接运行。省略时按 graph 处理，此时 orchestration 必填。
+             * @default graph
+             * @enum {string}
+             */
+            type: "graph" | "flow" | "single";
             bundle: string;
             version: string;
             description?: string;
@@ -1035,7 +1041,7 @@ export interface components {
                 alias?: string;
                 version?: string;
             }[];
-            orchestration: {
+            orchestration?: {
                 /** @enum {string} */
                 mode: "pipeline" | "graph";
                 entry: string;

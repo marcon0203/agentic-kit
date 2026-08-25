@@ -37,6 +37,37 @@ type Definition map[string]any
 func (d Definition) Ref() string     { s, _ := d["bundle"].(string); return s }
 func (d Definition) Version() string { s, _ := d["version"].(string); return s }
 
+// RunType is how a Bundle's agents[] get scheduled at run time — a real
+// difference in orchestrator dispatch, not a DSL-authoring convenience
+// (spec: "不同的类型的 bundle 运行模式不一样的").
+type RunType string
+
+const (
+	// RunTypeGraph is the general case: orchestration.edges are walked by
+	// the graph engine — conditions, parallel fan-out, join, self-loop
+	// retries, human gates. Everything else is a restricted special case
+	// of this.
+	RunTypeGraph RunType = "graph"
+	// RunTypeFlow runs agents[] once, strictly in declaration order, with
+	// no conditions/branching/parallelism — compiled onto ADK's own
+	// SequentialAgent instead of the graph engine, so there is no
+	// orchestration block to author at all.
+	RunTypeFlow RunType = "flow"
+	// RunTypeSingle is exactly one agent, run directly with no
+	// orchestration layer whatsoever.
+	RunTypeSingle RunType = "single"
+)
+
+// Type reads the DSL's optional top-level `type`, defaulting to
+// RunTypeGraph — every Bundle saved before this field existed is a graph
+// Bundle, so an absent field must mean exactly that, not an error.
+func (d Definition) Type() RunType {
+	if s, _ := d["type"].(string); s != "" {
+		return RunType(s)
+	}
+	return RunTypeGraph
+}
+
 // AgentBinding is one entry of the Bundle's agents[]. Node is the name the
 // orchestration graph refers to: the alias when there is one, otherwise the
 // Agent's own ref — which is what lets the same Agent appear twice in one

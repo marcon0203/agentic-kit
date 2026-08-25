@@ -6,6 +6,7 @@ import type { components } from '@/lib/api/schema'
 type BundleDefinition = components['schemas']['BundleDefinition']
 
 const HANDWRITTEN: BundleDefinition = {
+  type: 'graph',
   bundle: 'web-app-builder',
   version: '1.0',
   description: 'test',

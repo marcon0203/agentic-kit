@@ -187,6 +187,82 @@ func TestCreate_ConditionalRetrySelfLoopSaves(t *testing.T) {
 	}
 }
 
+// A "flow" Bundle has no orchestration block at all — agents[]'s own
+// declaration order is the schedule, so the graph-statics gate (which only
+// makes sense for arbitrary edge topology) never runs.
+func TestCreate_Flow_NoOrchestrationRequired(t *testing.T) {
+	svc := newSvc(newFakeRepo(), newFakeHandoffs(), passValidator{})
+	def := bundle.Definition{
+		"bundle": "flow-bundle", "version": "1.0", "type": "flow",
+		"agents": []any{
+			map[string]any{"ref": "a"},
+			map[string]any{"ref": "b"},
+			map[string]any{"ref": "c"},
+		},
+	}
+
+	got, err := svc.Create(context.Background(), 1, def)
+	if err != nil {
+		t.Fatalf("create flow: %v", err)
+	}
+	if got.Bundle.Ref != "flow-bundle" {
+		t.Fatalf("ref should come from the DSL, got %q", got.Bundle.Ref)
+	}
+	if len(got.Warnings) != 0 {
+		t.Fatalf("a clean flow should produce no warnings, got %+v", got.Warnings)
+	}
+}
+
+// A flow's implicit a->b->c order still feeds the same handoff-drift check
+// a graph's real edges do — declared handoffs and actual execution order
+// can drift here too.
+func TestCreate_Flow_HandoffDriftIsWarningNotBlocking(t *testing.T) {
+	handoffs := newFakeHandoffs()
+	handoffs.byRef["b"] = bundle.Handoff{AcceptsInputFrom: []string{"someone_else"}}
+	svc := newSvc(newFakeRepo(), handoffs, passValidator{})
+	def := bundle.Definition{
+		"bundle": "flow-drift", "version": "1.0", "type": "flow",
+		"agents": []any{
+			map[string]any{"ref": "a"},
+			map[string]any{"ref": "b"},
+		},
+	}
+
+	got, err := svc.Create(context.Background(), 1, def)
+	if err != nil {
+		t.Fatalf("handoff drift must not block a flow save: %v", err)
+	}
+	if len(got.Warnings) == 0 {
+		t.Fatal("expected a handoff-drift warning")
+	}
+}
+
+// A "single" Bundle is exactly one agent with no orchestration layer.
+func TestCreate_Single_Saves(t *testing.T) {
+	svc := newSvc(newFakeRepo(), newFakeHandoffs(), passValidator{})
+	def := bundle.Definition{
+		"bundle": "solo", "version": "1.0", "type": "single",
+		"agents": []any{map[string]any{"ref": "a"}},
+	}
+
+	got, err := svc.Create(context.Background(), 1, def)
+	if err != nil {
+		t.Fatalf("create single: %v", err)
+	}
+	if got.Bundle.Ref != "solo" || len(got.Warnings) != 0 {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+}
+
+// A Bundle saved before the type field existed has no `type` key at all —
+// Definition.Type() must default it to graph, not treat it as invalid.
+func TestDefinitionType_DefaultsToGraph(t *testing.T) {
+	def := bundle.Definition{"bundle": "x", "version": "1.0"}
+	if def.Type() != bundle.RunTypeGraph {
+		t.Fatalf("expected RunTypeGraph for a definition with no type field, got %q", def.Type())
+	}
+}
+
 // spec-07 point 5: the two DSLs can be maintained by different people, so
 // drift is reported and the save still succeeds.
 func TestCreate_HandoffDriftWarnsButSaves(t *testing.T) {

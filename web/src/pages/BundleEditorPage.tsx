@@ -30,6 +30,7 @@ import {
   END_NODE_ID,
   type AgentNode as AgentNodeT,
   type BundleEdge,
+  type BundleRunType,
 } from '@/lib/bundleEditor/graphIO'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
@@ -40,7 +41,7 @@ type BundleDefinition = components['schemas']['BundleDefinition']
 const nodeTypes = { agentNode: AgentNode, endNode: EndNode }
 const edgeTypes = { bundleEdge: BundleEdgeView, selfLoop: SelfLoopEdgeView }
 
-const BLANK_META = { bundle: '', version: '1.0', description: '' }
+const BLANK_META = { bundle: '', version: '1.0', description: '', runType: 'graph' as BundleRunType }
 const BLANK_END = { id: END_NODE_ID, type: 'endNode' as const, position: { x: 480, y: 40 }, data: { ref: END_NODE_ID }, deletable: false }
 
 interface ValidationIssue {
@@ -85,7 +86,7 @@ function EditorInner() {
     const graph = definitionToGraph(bundle.definition)
     setNodes(graph.nodes)
     setEdges(annotateParallelEdges(graph.edges))
-    setMeta({ bundle: graph.bundle, version: bumpVersion(graph.version), description: graph.description })
+    setMeta({ bundle: graph.bundle, version: bumpVersion(graph.version), description: graph.description, runType: graph.runType })
     setEntry(graph.entry)
     setDirty(false)
     requestAnimationFrame(() => fitView({ padding: 0.2 }))
@@ -164,12 +165,23 @@ function EditorInner() {
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null
 
   function buildDefinition(): BundleDefinition {
-    return {
+    const base = {
       bundle: meta.bundle,
       version: meta.version,
       description: meta.description || undefined,
-      agents: agentNodesToDefinitionAgents(nodes),
-      orchestration: graphToOrchestration(nodes, edges, entry),
+    }
+    const agents = agentNodesToDefinitionAgents(nodes)
+
+    // The run type is a real dispatch difference, not just a DSL shape
+    // choice — flow/single never carry an orchestration block at all,
+    // since neither has edges to walk.
+    switch (meta.runType) {
+      case 'flow':
+        return { ...base, type: 'flow', agents }
+      case 'single':
+        return { ...base, type: 'single', agents: agents.slice(0, 1) }
+      default:
+        return { ...base, type: 'graph', agents, orchestration: graphToOrchestration(nodes, edges, entry) }
     }
   }
 
@@ -185,7 +197,7 @@ function EditorInner() {
       const graph = definitionToGraph(def)
       setNodes(graph.nodes)
       setEdges(annotateParallelEdges(graph.edges))
-      setMeta({ bundle: graph.bundle, version: graph.version, description: graph.description })
+      setMeta({ bundle: graph.bundle, version: graph.version, description: graph.description, runType: graph.runType })
       setEntry(graph.entry)
       setTab('canvas')
       markDirty()
@@ -351,6 +363,10 @@ function EditorInner() {
           bundleMeta={meta}
           onUpdateMeta={(patch) => {
             setMeta((m) => ({ ...m, ...patch }))
+            markDirty()
+          }}
+          onUpdateRunType={(runType) => {
+            setMeta((m) => ({ ...m, runType }))
             markDirty()
           }}
           entry={entry}

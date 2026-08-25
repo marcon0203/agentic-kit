@@ -3,7 +3,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { validateCondition } from '@/lib/bundleEditor/validateCondition'
-import type { AgentNode, BundleEdge } from '@/lib/bundleEditor/graphIO'
+import type { AgentNode, BundleEdge, BundleRunType } from '@/lib/bundleEditor/graphIO'
+
+const RUN_TYPE_HELP: Record<BundleRunType, string> = {
+  graph: '完整编排图：支持条件分支、并行 fan-out、join 汇合与自循环重试。',
+  flow: '顺序流程：agents 按加入画布的顺序严格串行执行一次，无分支/并行。',
+  single: '单体：只运行一个 agent，没有编排开销。',
+}
 
 interface ValidationIssue {
   target: string
@@ -18,6 +24,7 @@ export function PropertiesPanel({
   onUpdateEdge,
   bundleMeta,
   onUpdateMeta,
+  onUpdateRunType,
   entry,
   onSetEntry,
   issues,
@@ -28,8 +35,9 @@ export function PropertiesPanel({
   nodeNames: string[]
   onUpdateNode: (id: string, patch: Partial<AgentNode['data']>) => void
   onUpdateEdge: (id: string, patch: Partial<BundleEdge['data']>) => void
-  bundleMeta: { bundle: string; version: string; description: string }
+  bundleMeta: { bundle: string; version: string; description: string; runType: BundleRunType }
   onUpdateMeta: (patch: Partial<{ bundle: string; version: string; description: string }>) => void
+  onUpdateRunType: (runType: BundleRunType) => void
   entry: string | null
   onSetEntry: (id: string) => void
   issues: ValidationIssue[]
@@ -172,22 +180,43 @@ export function PropertiesPanel({
             <Input id="meta-desc" value={bundleMeta.description} onChange={(e) => onUpdateMeta({ description: e.target.value })} className="h-9" />
           </div>
           <div className="flex flex-col gap-space-2">
-            <label htmlFor="meta-entry" className="text-label-md text-ink-700">
-              entry（入口节点）
+            <label htmlFor="meta-run-type" className="text-label-md text-ink-700">
+              运行类型
             </label>
-            <Select value={entry ?? undefined} onValueChange={onSetEntry}>
-              <SelectTrigger id="meta-entry" className="h-9 w-full">
-                <SelectValue placeholder="选择入口节点" />
+            <Select value={bundleMeta.runType} onValueChange={(v) => onUpdateRunType(v as BundleRunType)}>
+              <SelectTrigger id="meta-run-type" className="h-9 w-full">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {nodeNames.map((n) => (
-                  <SelectItem key={n} value={n}>
-                    {n}
-                  </SelectItem>
-                ))}
+                <SelectItem value="graph">graph（图编排）</SelectItem>
+                <SelectItem value="flow">flow（顺序流程）</SelectItem>
+                <SelectItem value="single">single（单体）</SelectItem>
               </SelectContent>
             </Select>
+            <p className="text-body-sm text-ink-500">{RUN_TYPE_HELP[bundleMeta.runType]}</p>
           </div>
+          {bundleMeta.runType === 'graph' && (
+            <div className="flex flex-col gap-space-2">
+              <label htmlFor="meta-entry" className="text-label-md text-ink-700">
+                entry（入口节点）
+              </label>
+              <Select value={entry ?? undefined} onValueChange={onSetEntry}>
+                <SelectTrigger id="meta-entry" className="h-9 w-full">
+                  <SelectValue placeholder="选择入口节点" />
+                </SelectTrigger>
+                <SelectContent>
+                  {nodeNames.map((n) => (
+                    <SelectItem key={n} value={n}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {bundleMeta.runType === 'single' && nodeNames.length > 1 && (
+            <p className="text-body-sm text-rust">single 类型只会运行第一个 agent（{nodeNames[0]}），其余节点会被忽略。</p>
+          )}
         </div>
       </div>
 

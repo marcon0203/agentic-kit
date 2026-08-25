@@ -65,6 +65,11 @@ func (s *Service) List(ctx context.Context, ownerID int64, q domain.PageQuery) (
 //     means the Bundle simply cannot run
 //  3. reachability + handoff drift — never blocking, returned as warnings on
 //     the created Bundle (spec-07: "允许暂时脱节但要可见")
+//
+// Gate 2 and the reachability half of gate 3 are specific to RunTypeGraph's
+// arbitrary edge topology — a flow has no branch that can fail to fire (it
+// is exactly one path through agents[] in order) and a single Bundle has no
+// edges at all, so both skip straight to the handoff check and the save.
 func (s *Service) Create(ctx context.Context, ownerID int64, def Definition) (CreateResult, error) {
 	if def == nil {
 		return CreateResult{}, domain.Invalid(domain.CodeValidationFailed, "definition is required")
@@ -78,23 +83,33 @@ func (s *Service) Create(ctx context.Context, ownerID int64, def Definition) (Cr
 		return CreateResult{}, domain.Invalid(domain.CodeBundleSchemaInvalid, "Bundle 定义不符合 Schema").WithDetails(schemaErrs...)
 	}
 
-	graph, err := bundlegraph.ParseGraph(def)
-	if err != nil {
-		return CreateResult{}, domain.Invalid(domain.CodeBundleSchemaInvalid, "malformed orchestration block")
-	}
+	var warnings []Warning
+	switch def.Type() {
+	case RunTypeFlow, RunTypeSingle:
+		handoffWarnings, err := s.checkHandoffDrift(ctx, ownerID, def, consecutiveEdges(def.Agents()))
+		if err != nil {
+			return CreateResult{}, domain.Internal(err)
+		}
+		warnings = handoffWarnings
+	default:
+		graph, err := bundlegraph.ParseGraph(def)
+		if err != nil {
+			return CreateResult{}, domain.Invalid(domain.CodeBundleSchemaInvalid, "malformed orchestration block")
+		}
 
-	result := bundlegraph.Validate(graph)
-	if !result.Valid() {
-		return CreateResult{}, domain.Unprocessable(domain.CodeBundleGraphInvalid, "Bundle 编排图存在无法触发的节点").
-			WithDetails(issuesToFieldErrors(result.Errors)...)
-	}
+		result := bundlegraph.Validate(graph)
+		if !result.Valid() {
+			return CreateResult{}, domain.Unprocessable(domain.CodeBundleGraphInvalid, "Bundle 编排图存在无法触发的节点").
+				WithDetails(issuesToFieldErrors(result.Errors)...)
+		}
 
-	warnings := issuesToWarnings(result.Warnings)
-	handoffWarnings, err := s.checkHandoffDrift(ctx, ownerID, def, graph)
-	if err != nil {
-		return CreateResult{}, domain.Internal(err)
+		warnings = issuesToWarnings(result.Warnings)
+		handoffWarnings, err := s.checkHandoffDrift(ctx, ownerID, def, graph.Edges)
+		if err != nil {
+			return CreateResult{}, domain.Internal(err)
+		}
+		warnings = append(warnings, handoffWarnings...)
 	}
-	warnings = append(warnings, handoffWarnings...)
 
 	created, err := s.repo.Create(ctx, Bundle{
 		OwnerID: ownerID, Ref: def.Ref(), Version: def.Version(), Definition: def,
@@ -106,6 +121,22 @@ func (s *Service) Create(ctx context.Context, ownerID int64, def Definition) (Cr
 		return CreateResult{}, domain.Internal(err)
 	}
 	return CreateResult{Bundle: created, Warnings: warnings}, nil
+}
+
+// consecutiveEdges gives a RunTypeFlow/RunTypeSingle Bundle's implicit
+// linear order (agents[i] -> agents[i+1], as declared) the same shape
+// checkHandoffDrift already knows how to read off a graph's real edges —
+// a flow's execution order needs no separate representation, since it's
+// exactly the array order agents[] already carries.
+func consecutiveEdges(bindings []AgentBinding) []bundlegraph.Edge {
+	if len(bindings) < 2 {
+		return nil
+	}
+	edges := make([]bundlegraph.Edge, 0, len(bindings)-1)
+	for i := 0; i < len(bindings)-1; i++ {
+		edges = append(edges, bundlegraph.Edge{Index: i, From: bindings[i].Node, To: []string{bindings[i+1].Node}})
+	}
+	return edges
 }
 
 // Delete removes every version of a ref. A subscribed-and-active version can
@@ -133,7 +164,7 @@ func (s *Service) Delete(ctx context.Context, ownerID int64, ref string) error {
 // declarations and the Bundle's actual edges can disagree, because the two
 // DSLs may be maintained by different people. Reporting the drift is useful;
 // blocking on it would force one team to wait for the other.
-func (s *Service) checkHandoffDrift(ctx context.Context, ownerID int64, def Definition, g bundlegraph.Graph) ([]Warning, error) {
+func (s *Service) checkHandoffDrift(ctx context.Context, ownerID int64, def Definition, edges []bundlegraph.Edge) ([]Warning, error) {
 	nodeToRef := map[string]string{}
 	for _, binding := range def.Agents() {
 		nodeToRef[binding.Node] = binding.Ref
@@ -157,7 +188,7 @@ func (s *Service) checkHandoffDrift(ctx context.Context, ownerID int64, def Defi
 	}
 
 	var warnings []Warning
-	for _, edge := range g.Edges {
+	for _, edge := range edges {
 		fromRef := nodeToRef[edge.From]
 		for _, to := range edge.To {
 			if to == bundlegraph.EndNode {

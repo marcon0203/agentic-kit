@@ -45,10 +45,13 @@ export function annotateParallelEdges(edges: BundleEdge[]): BundleEdge[] {
 export type AgentNode = Node<AgentNodeData>
 export type BundleEdge = Edge<EdgeData>
 
+export type BundleRunType = NonNullable<BundleDefinition['type']>
+
 export interface BundleGraph {
   bundle: string
   version: string
   description: string
+  runType: BundleRunType
   entry: string | null
   nodes: AgentNode[]
   edges: BundleEdge[]
@@ -143,6 +146,7 @@ export function definitionToGraph(def: BundleDefinition): BundleGraph {
     bundle: def.bundle ?? '',
     version: def.version ?? '1.0',
     description: def.description ?? '',
+    runType: def.type ?? 'graph',
     entry: entry || null,
     nodes,
     edges: rfEdges,
