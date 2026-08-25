@@ -1781,11 +1781,14 @@ paths:
                     properties:
                       data:
                         type: object
-                        required: [knowledge_base_enabled]
+                        required: [knowledge_base_enabled, skill_upload_enabled]
                         properties:
                           knowledge_base_enabled:
                             type: boolean
                             description: KB_ENABLED — 知识库依赖 Milvus + Elasticsearch，未部署时关闭
+                          skill_upload_enabled:
+                            type: boolean
+                            description: OSS_* 是否已配置 — Skill zip 上传依赖对象存储，未配置时前端灰显上传入口
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   # ─────────────── 系统配置 → 用户管理 / 角色权限（RBAC）───────────────

@@ -88,15 +88,20 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
   const [toggleError, setToggleError] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const { knowledgeBaseEnabled, isLoading: featuresLoading } = useFeatures()
+  const { knowledgeBaseEnabled, skillUploadEnabled, isLoading: featuresLoading } = useFeatures()
 
   // MCP Server has its own multi-field page (URL, header list, a 检测
-  // button that needs room to show probed results) — the generic
-  // ref+display_name+JSON dialog can't fit that, so its CTA routes
-  // there instead of opening the dialog.
+  // button that needs room to show probed results), and Skill only
+  // accepts a zip upload (spec-05a) — neither fits the generic
+  // ref+display_name+JSON dialog, so their CTAs route to a dedicated page
+  // instead of opening the dialog.
   function openRegister() {
     if (type === 'mcp') {
       navigate('/apps/mcp/new')
+      return
+    }
+    if (type === 'skill') {
+      navigate('/apps/skill/new')
       return
     }
     setRegisterOpen(true)
@@ -119,6 +124,12 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
       />
     )
   }
+
+  // Skill zip upload needs an object store — a deployment that never sets
+  // OSS_* still shows the list (existing Skills stay visible), but the CTA
+  // is disabled with an explanation rather than opening an upload page that
+  // will 400 on submit.
+  const skillUploadBlocked = type === 'skill' && !featuresLoading && !skillUploadEnabled
 
   async function toggleStatus(r: Resource) {
     setToggleError(null)
@@ -144,8 +155,15 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
 
   return (
     <div className="flex flex-col gap-space-6">
-      <div className="flex items-center justify-end">
-        <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={openRegister}>
+      <div className="flex items-center justify-end gap-space-3">
+        {skillUploadBlocked && (
+          <span className="text-caption text-ink-500">未配置对象存储（OSS_*），Skill 上传暂不可用</span>
+        )}
+        <Button
+          className="bg-gradient-cta text-white hover:opacity-90"
+          onClick={openRegister}
+          disabled={skillUploadBlocked}
+        >
           {kind.blank.cta}
         </Button>
       </div>
@@ -171,12 +189,18 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
 
       {query.isSuccess && items.length === 0 && (
         <EmptyRail
-          title={kind.blank.title}
-          description={kind.blank.description}
+          title={skillUploadBlocked ? 'Skill 上传暂不可用' : kind.blank.title}
+          description={
+            skillUploadBlocked
+              ? '这台服务器没有配置对象存储（OSS_*），Skill 上传依赖它来存放 zip 包的内容——找管理员在部署配置里补上。'
+              : kind.blank.description
+          }
           action={
-            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={openRegister}>
-              {kind.blank.cta}
-            </Button>
+            !skillUploadBlocked && (
+              <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={openRegister}>
+                {kind.blank.cta}
+              </Button>
+            )
           }
         />
       )}

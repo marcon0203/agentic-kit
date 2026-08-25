@@ -3332,6 +3332,8 @@ export interface operations {
                         data?: {
                             /** @description KB_ENABLED — 知识库依赖 Milvus + Elasticsearch，未部署时关闭 */
                             knowledge_base_enabled: boolean;
+                            /** @description OSS_* 是否已配置 — Skill zip 上传依赖对象存储，未配置时前端灰显上传入口 */
+                            skill_upload_enabled: boolean;
                         };
                     };
                 };

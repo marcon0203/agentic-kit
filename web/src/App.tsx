@@ -23,6 +23,7 @@ import { ModelProviderPage } from '@/pages/ModelProviderPage'
 import { ListingDetailPage } from '@/pages/ListingDetailPage'
 import { BundleEditorPage } from '@/pages/BundleEditorPage'
 import { McpServerEditorPage } from '@/pages/McpServerEditorPage'
+import { SkillUploadPage } from '@/pages/SkillUploadPage'
 import { OperationsPage } from '@/pages/OperationsPage'
 
 /**
@@ -83,6 +84,7 @@ export default function App() {
               <Route path="agents" element={<AgentDefinitionPage />} />
               <Route path="tool" element={<ResourceKindPage type="tool" />} />
               <Route path="skill" element={<ResourceKindPage type="skill" />} />
+              <Route path="skill/new" element={<SkillUploadPage />} />
               <Route path="mcp" element={<ResourceKindPage type="mcp" />} />
               <Route path="mcp/new" element={<McpServerEditorPage />} />
               <Route path="knowledge_base" element={<ResourceKindPage type="knowledge_base" />} />

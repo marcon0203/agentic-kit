@@ -15,7 +15,9 @@ export function useFeatures() {
   const query = useQuery({
     queryKey: ['features'],
     queryFn: async () =>
-      unwrap<{ knowledge_base_enabled: boolean }>(await apiClient.GET('/features', {})),
+      unwrap<{ knowledge_base_enabled: boolean; skill_upload_enabled: boolean }>(
+        await apiClient.GET('/features', {}),
+      ),
     enabled: isAuthenticated,
   })
   return {
@@ -23,6 +25,10 @@ export function useFeatures() {
     // before the first response lands is a smaller cost than every
     // resource-kind page flashing "disabled" on every load.
     knowledgeBaseEnabled: query.data?.knowledge_base_enabled ?? true,
+    // Default false while loading: the Skill upload entry point greyed out
+    // for a moment costs less than a user submitting a zip only to hit a
+    // 400 because OSS isn't actually configured.
+    skillUploadEnabled: query.data?.skill_upload_enabled ?? false,
     isLoading: query.isLoading,
   }
 }
