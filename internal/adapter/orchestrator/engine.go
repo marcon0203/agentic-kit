@@ -31,6 +31,7 @@ type Engine struct {
 	appName    string
 	kbSearcher adk.KnowledgeBaseSearcher
 	skills     adk.SkillContentFetcher
+	plugins    adk.PluginRuntime
 
 	cancelMu sync.Mutex
 	cancels  map[string]context.CancelFunc
@@ -42,16 +43,26 @@ type providerKeys interface {
 	Keys(ctx context.Context, ownerID int64) (map[string]modelgateway.Credential, error)
 }
 
+// NewEngine's pluginRuntime is nil-safe (adk.PluginRuntime, typically
+// *internal/adapter/extism.Runtime) — plugins.CompileAgent simply never
+// builds a KindPlugin tool because nothing resolves a
+// "plugin:{id}/{tool}" capabilities ref to one yet: that resolution (a
+// resourceAuthorizer branch reading plugin_installations and fetching the
+// installed version's wasm from OSS) is deliberately not part of P1
+// (spec-20 §七's own phasing checkpoint) — wiring the runtime through now
+// means it's ready the moment that branch lands, without another engine
+// signature change.
 func NewEngine(
 	queries store.Querier, runs run.Repository, events run.EventStore,
 	gates run.GateRepository, registry *GateRegistry, keys providerKeys, aesKey []byte,
-	kbService *knowledgebase.Service, skillObjectStore resource.ObjectStore,
+	kbService *knowledgebase.Service, skillObjectStore resource.ObjectStore, pluginRuntime adk.PluginRuntime,
 ) *Engine {
 	return &Engine{
 		queries: queries, runs: runs, events: events, gates: gates, registry: registry,
 		keys: keys, aesKey: aesKey, appName: "agentic-kit", cancels: map[string]context.CancelFunc{},
 		kbSearcher: newKnowledgeBaseSearcher(kbService),
 		skills:     newSkillContentFetcher(skillObjectStore),
+		plugins:    pluginRuntime,
 	}
 }
 
@@ -108,7 +119,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 
 		compiledAgent, err := adk.CompileAgent(ctx, agentDef, adk.AgentCompileOptions{
 			Gateway: gateway, Credentials: creds, Authorizer: authorizer,
-			KnowledgeBaseSearcher: e.kbSearcher, SkillContentFetcher: e.skills,
+			KnowledgeBaseSearcher: e.kbSearcher, SkillContentFetcher: e.skills, PluginRuntime: e.plugins,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("compile agent %q: %w", node, err)

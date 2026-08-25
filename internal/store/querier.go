@@ -60,7 +60,7 @@ type Querier interface {
 	DeleteCatalogModel(ctx context.Context, id int64) error
 	DeleteCatalogProvider(ctx context.Context, id int64) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
-	DeletePluginInstallation(ctx context.Context, arg DeletePluginInstallationParams) error
+	DeletePluginInstallation(ctx context.Context, arg DeletePluginInstallationParams) (int64, error)
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error

@@ -18,6 +18,7 @@ import (
 
 	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
 	esstore "github.com/marcon0203/agentic-kit/internal/adapter/elasticsearch"
+	"github.com/marcon0203/agentic-kit/internal/adapter/extism"
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
 	"github.com/marcon0203/agentic-kit/internal/adapter/milvus"
 	adaptermodelgateway "github.com/marcon0203/agentic-kit/internal/adapter/modelgateway"
@@ -39,6 +40,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcatalog"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 	"github.com/marcon0203/agentic-kit/internal/domain/operation"
+	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
 	"github.com/marcon0203/agentic-kit/internal/domain/rbac"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	domainrun "github.com/marcon0203/agentic-kit/internal/domain/run"
@@ -133,22 +135,42 @@ func run() error {
 		mcp.NewReachabilityProbe(),
 		cfg.KBEnabled,
 	).WithOpenAPIImport(adapteropenapi.NewParser())
-	// Skill zip upload needs an object store; a deployment that never sets
-	// the OSS_* vars still boots cleanly (WithSkillUploads just never gets
-	// called, so UploadSkill/ListSkillFiles/GetSkillFile all return a clear
-	// "not configured" error instead of a nil-pointer panic). skillObjectStore
-	// is also handed to orchestrator.NewEngine below, so a run-time Skill
-	// tool call can fetch its SKILL.md the same way the upload/list/download
-	// handlers do.
+	// Skill zip upload (and, identically, plugin package upload below) needs
+	// an object store; a deployment that never sets the OSS_* vars still
+	// boots cleanly (WithSkillUploads/WithObjectStore just never get
+	// called, so those upload paths return a clear "not configured" error
+	// instead of a nil-pointer panic). skillObjectStore is also handed to
+	// orchestrator.NewEngine below, so a run-time Skill tool call can fetch
+	// its SKILL.md the same way the upload/list/download handlers do.
 	var skillObjectStore resource.ObjectStore
+	var pluginObjectStore plugin.ObjectStore
 	if cfg.OSSEnabled() {
-		store, err := oss.New(cfg.OSSEndpoint, cfg.OSSAccessKeyID, cfg.OSSAccessKeySecret, cfg.OSSBucket)
+		ossStore, err := oss.New(cfg.OSSEndpoint, cfg.OSSAccessKeyID, cfg.OSSAccessKeySecret, cfg.OSSBucket)
 		if err != nil {
 			return fmt.Errorf("connect to OSS: %w", err)
 		}
-		skillObjectStore = store
+		skillObjectStore = ossStore
+		pluginObjectStore = ossStore
 		resourceService = resourceService.WithSkillUploads(skillObjectStore, postgres.NewSkillFileRepository(queries))
 	}
+
+	// adminDirectory is needed early: plugin review-queue authorization
+	// (below) reuses it, same as 系统配置's admin surfaces further down.
+	adminDirectory := postgres.NewAdminDirectory(queries)
+
+	pluginValidator, err := dslschema.NewPluginValidator()
+	if err != nil {
+		return fmt.Errorf("compile plugin schema: %w", err)
+	}
+	pluginRuntime := extism.NewRuntime()
+	pluginService := plugin.NewService(
+		postgres.NewPluginRepository(queries),
+		postgres.NewPluginPublisherKeys(queries),
+		adapterschema.NewValidator(pluginValidator),
+		adminDirectory,
+		adaptercrypto.NewCipher(aesKey),
+		pluginRuntime,
+	).WithObjectStore(pluginObjectStore)
 
 	providerKeys := postgres.NewProviderKeyStore(queries, aesKey)
 
@@ -199,7 +221,7 @@ func run() error {
 		runEvents,
 		postgres.NewRunBundleResolver(queries),
 		postgres.NewRunDependencyChecker(queries, resourceCatalog, providerKeys),
-		orchestrator.NewEngine(queries, runRepo, runEvents, gateRepo, gateRegistry, providerKeys, aesKey, knowledgeBaseService, skillObjectStore),
+		orchestrator.NewEngine(queries, runRepo, runEvents, gateRepo, gateRegistry, providerKeys, aesKey, knowledgeBaseService, skillObjectStore, extism.ForADK(pluginRuntime)),
 		gateRepo,
 		gateRegistry,
 		postgres.NewAuditLogWriter(queries),
@@ -217,7 +239,6 @@ func run() error {
 
 	// 系统配置 → 模型提供商: admin-managed catalog (Provider + its Models),
 	// distinct from modelCenter's per-user connected credentials above.
-	adminDirectory := postgres.NewAdminDirectory(queries)
 	modelCatalog := modelcatalog.NewService(postgres.NewModelCatalogRepository(queries), adminDirectory)
 
 	// 系统配置 → 用户管理 / 角色权限: roles/permissions engine. adminDirectory
@@ -274,6 +295,7 @@ func run() error {
 		Usage:             api.NewUsageHandlers(modelCenter),
 		Runs:              api.NewRunHandlers(runService),
 		RBAC:              api.NewRBACHandlers(rbacService),
+		Plugins:           api.NewPluginHandlers(pluginService),
 		Features:          api.FeaturesConfig{KnowledgeBaseEnabled: cfg.KBEnabled, SkillUploadEnabled: cfg.OSSEnabled()},
 		Operations: api.NewOperationHandlers(operation.NewService(
 			postgres.NewReportRepository(queries),

@@ -50,7 +50,7 @@ SET version = $3, resolution = $4, config = $5, granted = $6
 WHERE owner_user_id = $1 AND plugin_id = $2
 RETURNING *;
 
--- name: DeletePluginInstallation :exec
+-- name: DeletePluginInstallation :execrows
 DELETE FROM plugin_installations WHERE owner_user_id = $1 AND plugin_id = $2;
 
 -- name: GetPublisherKey :one

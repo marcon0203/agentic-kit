@@ -95,7 +95,7 @@ func (q *Queries) CreatePluginInstallation(ctx context.Context, arg CreatePlugin
 	return i, err
 }
 
-const deletePluginInstallation = `-- name: DeletePluginInstallation :exec
+const deletePluginInstallation = `-- name: DeletePluginInstallation :execrows
 DELETE FROM plugin_installations WHERE owner_user_id = $1 AND plugin_id = $2
 `
 
@@ -104,9 +104,12 @@ type DeletePluginInstallationParams struct {
 	PluginID    string `json:"plugin_id"`
 }
 
-func (q *Queries) DeletePluginInstallation(ctx context.Context, arg DeletePluginInstallationParams) error {
-	_, err := q.db.Exec(ctx, deletePluginInstallation, arg.OwnerUserID, arg.PluginID)
-	return err
+func (q *Queries) DeletePluginInstallation(ctx context.Context, arg DeletePluginInstallationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePluginInstallation, arg.OwnerUserID, arg.PluginID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getLatestPluginVersion = `-- name: GetLatestPluginVersion :one
