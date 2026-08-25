@@ -94,7 +94,9 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
   // button that needs room to show probed results), and Skill only
   // accepts a zip upload (spec-05a) — neither fits the generic
   // ref+display_name+JSON dialog, so their CTAs route to a dedicated page
-  // instead of opening the dialog.
+  // instead of opening the dialog. 组件 doesn't appear here at all any
+  // more: /apps/tool renders ComponentPlazaPage, which owns its own
+  // 新建组件 entry point into the two-step wizard.
   function openRegister() {
     if (type === 'mcp') {
       navigate('/apps/mcp/new')
@@ -102,10 +104,6 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
     }
     if (type === 'skill') {
       navigate('/apps/skill/new')
-      return
-    }
-    if (type === 'tool') {
-      navigate('/apps/tool/new')
       return
     }
     setRegisterOpen(true)

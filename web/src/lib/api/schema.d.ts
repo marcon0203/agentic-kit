@@ -2283,6 +2283,11 @@ export interface operations {
                 "application/json": {
                     base_ref: string;
                     base_url: string;
+                    /**
+                     * @description 使用场景，整批共用；仅供组件广场筛选展示，运行时不读。留空则为"未分类"
+                     * @enum {string}
+                     */
+                    category?: "business" | "lifestyle" | "media" | "productivity" | "education";
                     operations: components["schemas"]["OpenAPIOperation"][];
                 };
             };

@@ -25,6 +25,7 @@ import { BundleEditorPage } from '@/pages/BundleEditorPage'
 import { McpServerEditorPage } from '@/pages/McpServerEditorPage'
 import { SkillUploadPage } from '@/pages/SkillUploadPage'
 import { ComponentWizardPage } from '@/pages/ComponentWizardPage'
+import { ComponentPlazaPage } from '@/pages/ComponentPlazaPage'
 import { OperationsPage } from '@/pages/OperationsPage'
 
 /**
@@ -83,7 +84,7 @@ export default function App() {
               <Route path="bundles/new" element={<BundleEditorPage />} />
               <Route path="bundles/:ref/edit" element={<BundleEditorPage />} />
               <Route path="agents" element={<AgentDefinitionPage />} />
-              <Route path="tool" element={<ResourceKindPage type="tool" />} />
+              <Route path="tool" element={<ComponentPlazaPage />} />
               <Route path="tool/new" element={<ComponentWizardPage />} />
               <Route path="skill" element={<ResourceKindPage type="skill" />} />
               <Route path="skill/new" element={<SkillUploadPage />} />

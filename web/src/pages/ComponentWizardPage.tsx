@@ -7,8 +7,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
+import { COMPONENT_CATEGORIES, type ComponentCategory } from '@/lib/components/taxonomy'
 
 type Step = 'type' | 'tool-shape' | 'tool-http' | 'tool-openapi' | 'sandbox'
 type ComponentType = 'tool' | 'sandbox'
@@ -100,7 +102,7 @@ function TypeCard({
       disabled={disabled}
       className={cn(
         'flex flex-col items-start gap-space-2 rounded-lg border border-border bg-surface p-space-5 text-left transition-colors',
-        disabled ? 'cursor-not-allowed opacity-50' : 'hover:border-ink-300',
+        disabled ? 'cursor-not-allowed opacity-50' : 'hover:border-border-strong',
       )}
     >
       <Icon className="size-5 text-ink-500" aria-hidden />
@@ -108,6 +110,41 @@ function TypeCard({
       <span className="text-body-sm text-ink-500">{description}</span>
       {disabled && <span className="text-caption text-ink-500">即将支持</span>}
     </button>
+  )
+}
+
+/**
+ * 使用场景——只影响组件广场的筛选和卡片标签，运行时不读它，所以是可选的，
+ * 留空就落到"未分类"。
+ */
+function CategorySelect({
+  value,
+  onChange,
+}: {
+  value: ComponentCategory | ''
+  onChange: (value: ComponentCategory | '') => void
+}) {
+  return (
+    <div className="flex flex-col gap-space-2">
+      <span className="text-label-md text-ink-700">使用场景（可选）</span>
+      <Select
+        value={value || 'none'}
+        onValueChange={(v) => onChange(v === 'none' ? '' : (v as ComponentCategory))}
+      >
+        <SelectTrigger className="w-full" aria-label="使用场景">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">未分类</SelectItem>
+          {COMPONENT_CATEGORIES.map((c) => (
+            <SelectItem key={c.value} value={c.value}>
+              {c.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-caption text-ink-500">只用于组件广场的筛选和分类标签，不影响 Agent 怎么调用它。</p>
+    </div>
   )
 }
 
@@ -136,6 +173,7 @@ function ToolHTTPForm() {
   const [displayName, setDisplayName] = useState('')
   const [endpoint, setEndpoint] = useState('')
   const [description, setDescription] = useState('')
+  const [category, setCategory] = useState<ComponentCategory | ''>('')
   const [refError, setRefError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -160,7 +198,7 @@ function ToolHTTPForm() {
             type: 'tool',
             ref,
             display_name: displayName || undefined,
-            config: { endpoint, description: description || undefined },
+            config: { endpoint, description: description || undefined, category: category || undefined },
           },
           params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
         }),
@@ -218,6 +256,8 @@ function ToolHTTPForm() {
         <Textarea id="tool-description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
       </div>
 
+      <CategorySelect value={category} onChange={setCategory} />
+
       {saveError && (
         <p role="alert" className="text-body-sm text-rust">
           {saveError}
@@ -245,6 +285,7 @@ function ToolOpenAPIImport() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [baseRef, setBaseRef] = useState('')
   const [baseURL, setBaseURL] = useState('')
+  const [category, setCategory] = useState<ComponentCategory | ''>('')
   const [baseRefError, setBaseRefError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
@@ -298,6 +339,7 @@ function ToolOpenAPIImport() {
           body: {
             base_ref: baseRef,
             base_url: baseURL,
+            category: category || undefined,
             operations: operations.filter((op) => selected.has(op.operation_id)),
           },
           params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
@@ -381,6 +423,8 @@ function ToolOpenAPIImport() {
             <Input id="openapi-base-url" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} placeholder="https://api.example.com/v1" />
           </div>
 
+          <CategorySelect value={category} onChange={setCategory} />
+
           <div className="flex flex-col gap-space-2">
             <span className="text-label-md text-ink-700">勾选要开放给 Agent 的 operation（{selected.size}/{operations.length}）</span>
             {operations.length === 0 && <p className="text-body-sm text-ink-500">这份 spec 没有解析出任何 operation。</p>}
@@ -425,6 +469,7 @@ function SandboxForm() {
   const [apiURL, setApiURL] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [organizationID, setOrganizationID] = useState('')
+  const [category, setCategory] = useState<ComponentCategory | ''>('')
   const [refError, setRefError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -454,6 +499,7 @@ function SandboxForm() {
               api_url: apiURL,
               api_key: apiKey,
               organization_id: organizationID || undefined,
+              category: category || undefined,
             },
           },
           params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
@@ -517,6 +563,8 @@ function SandboxForm() {
         </label>
         <Input id="sandbox-org" value={organizationID} onChange={(e) => setOrganizationID(e.target.value)} />
       </div>
+
+      <CategorySelect value={category} onChange={setCategory} />
 
       {saveError && (
         <p role="alert" className="text-body-sm text-rust">

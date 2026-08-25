@@ -59,7 +59,7 @@ func (h *ResourceHandlers) BatchCreateComponents(w http.ResponseWriter, r *http.
 	}
 
 	created, err := h.svc.CreateComponentsBatch(r.Context(), userID, resource.BatchCreateComponentsCommand{
-		BaseRef: req.BaseRef, BaseURL: req.BaseURL, Operations: ops,
+		BaseRef: req.BaseRef, BaseURL: req.BaseURL, Category: req.Category, Operations: ops,
 	})
 	if err != nil {
 		writeDomainErr(w, r, err)
@@ -93,5 +93,6 @@ type importOpenAPIResponse struct {
 type batchCreateComponentsRequest struct {
 	BaseRef    string                `json:"base_ref"`
 	BaseURL    string                `json:"base_url"`
+	Category   string                `json:"category"`
 	Operations []openAPIOperationDTO `json:"operations"`
 }

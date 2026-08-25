@@ -759,6 +759,10 @@ paths:
               properties:
                 base_ref: { type: string, pattern: '^[a-z][a-z0-9_-]*$' }
                 base_url: { type: string }
+                category:
+                  type: string
+                  description: 使用场景，整批共用；仅供组件广场筛选展示，运行时不读。留空则为"未分类"
+                  enum: [business, lifestyle, media, productivity, education]
                 operations:
                   type: array
                   items: { $ref: '#/components/schemas/OpenAPIOperation' }

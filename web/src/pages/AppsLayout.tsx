@@ -57,7 +57,7 @@ const SECTION_TITLE: Record<Section, string> = {
   browse: '应用广场',
   bundles: '应用管理',
   agents: '智能体管理',
-  tool: '组件',
+  tool: '组件广场',
   skill: 'Skill',
   mcp: 'MCP Server',
   knowledge_base: '知识库',

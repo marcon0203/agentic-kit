@@ -87,6 +87,44 @@ func TestCreateComponentsBatch_CreatesOneToolPerOperation(t *testing.T) {
 	}
 }
 
+func TestCreateComponentsBatch_CategoryAppliesToWholeBatch(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSvc(repo, stubProbe{})
+
+	created, err := svc.CreateComponentsBatch(context.Background(), 1, resource.BatchCreateComponentsCommand{
+		BaseRef: "petstore", BaseURL: "https://api.example.com", Category: "business",
+		Operations: []resource.OpenAPIOperation{
+			{OperationID: "get_pet", Method: "GET", Path: "/pets/{id}"},
+			{OperationID: "list_pets", Method: "GET", Path: "/pets"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateComponentsBatch: %v", err)
+	}
+	for _, r := range created {
+		if r.Config["category"] != "business" {
+			t.Fatalf("expected every imported operation to carry the batch's category, got %+v", r.Config)
+		}
+	}
+}
+
+// No category given means the key is absent, not present-and-empty — the
+// 组件广场's "未分类" filter matches on absence.
+func TestCreateComponentsBatch_WithoutCategoryOmitsTheKey(t *testing.T) {
+	svc := newSvc(newFakeRepo(), stubProbe{})
+
+	created, err := svc.CreateComponentsBatch(context.Background(), 1, resource.BatchCreateComponentsCommand{
+		BaseRef: "petstore", BaseURL: "https://api.example.com",
+		Operations: []resource.OpenAPIOperation{{OperationID: "get_pet", Method: "GET", Path: "/pets/{id}"}},
+	})
+	if err != nil {
+		t.Fatalf("CreateComponentsBatch: %v", err)
+	}
+	if _, ok := created[0].Config["category"]; ok {
+		t.Fatalf("expected no category key at all, got %+v", created[0].Config)
+	}
+}
+
 func TestCreateComponentsBatch_DuplicateOperationIDRejected(t *testing.T) {
 	svc := newSvc(newFakeRepo(), stubProbe{})
 

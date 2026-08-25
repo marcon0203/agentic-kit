@@ -67,10 +67,13 @@ func (s *Service) ImportOpenAPIPreview(ctx context.Context, specURL, specContent
 // BatchCreateComponentsCommand is the "勾选 → 批量创建" step: BaseURL
 // overrides whatever the spec's own servers[0].url was (a person may need to
 // point at a different environment than the spec advertises), and Operations
-// is the subset the preview's caller chose to actually register.
+// is the subset the preview's caller chose to actually register. Category is
+// the 使用场景 the 组件广场 groups the whole imported batch under — optional,
+// display-only, never read at run time.
 type BatchCreateComponentsCommand struct {
 	BaseRef    string
 	BaseURL    string
+	Category   string
 	Operations []OpenAPIOperation
 }
 
@@ -112,22 +115,30 @@ func (s *Service) CreateComponentsBatch(ctx context.Context, ownerID int64, cmd 
 		}
 		seenRefs[ref] = true
 
+		config := Config{
+			// "tool"/"openapi" mirror internal/orchestrator/adk's
+			// ComponentTypeTool/ToolTypeOpenAPI constants — duplicated as
+			// literals rather than imported, since this domain package
+			// doesn't depend on the ADK orchestration layer.
+			"component_type": "tool",
+			"tool_type":      "openapi",
+			"method":         op.Method,
+			"path":           op.Path,
+			"base_url":       cmd.BaseURL,
+			"import_group":   importGroup,
+		}
+		// Omitted rather than stored empty: "no category" and "category is
+		// the empty string" would otherwise be two spellings of the same
+		// thing for the 组件广场 filter to disambiguate.
+		if cmd.Category != "" {
+			config["category"] = cmd.Category
+		}
+
 		resources = append(resources, Resource{
 			OwnerID: ownerID, Kind: KindTool, Ref: ref, Version: "1.0",
 			DisplayName: op.Summary,
-			Config: Config{
-				// "tool"/"openapi" mirror internal/orchestrator/adk's
-				// ComponentTypeTool/ToolTypeOpenAPI constants — duplicated
-				// as literals rather than imported, since this domain
-				// package doesn't depend on the ADK orchestration layer.
-				"component_type": "tool",
-				"tool_type":      "openapi",
-				"method":         op.Method,
-				"path":           op.Path,
-				"base_url":       cmd.BaseURL,
-				"import_group":   importGroup,
-			},
-			Status: StatusEnabled,
+			Config:      config,
+			Status:      StatusEnabled,
 		})
 	}
 
