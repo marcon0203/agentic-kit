@@ -56,7 +56,7 @@ func TestCompileAgent_UnauthorizedResource_ExcludedFromTools(t *testing.T) {
 	}
 	authorizer := &fakeAuthorizer{authorized: map[string]ToolSpec{}} // private-tool not authorized
 
-	tools, _, err := compileTools(context.Background(), def, authorizer, nil, nil)
+	tools, _, err := compileTools(context.Background(), def, authorizer, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("compileTools: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestCompileAgent_AuthorizerError_PropagatesAsCompileError(t *testing.T) {
 		"persona":      "p",
 		"capabilities": map[string]any{"tools": []any{"boom"}, "skills": []any{}},
 	}
-	_, _, err := compileTools(context.Background(), def, &fakeAuthorizer{authorized: map[string]ToolSpec{}}, nil, nil)
+	_, _, err := compileTools(context.Background(), def, &fakeAuthorizer{authorized: map[string]ToolSpec{}}, nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected a registry error to fail compilation, not be silently swallowed")
 	}

@@ -48,7 +48,7 @@ func TestCompileTools_SandboxComponent_ProducesTwoTools(t *testing.T) {
 		},
 	}}
 
-	tools, toolsets, err := compileTools(context.Background(), def, authorizer, nil, nil)
+	tools, toolsets, err := compileTools(context.Background(), def, authorizer, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("compileTools: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestCompileTools_PlainToolComponent_UnaffectedBySandboxDispatch(t *testing.
 		"http-tool": {Ref: "http-tool", Kind: KindTool, Config: map[string]any{"endpoint": "http://example.com"}},
 	}}
 
-	tools, toolsets, err := compileTools(context.Background(), def, authorizer, nil, nil)
+	tools, toolsets, err := compileTools(context.Background(), def, authorizer, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("compileTools: %v", err)
 	}

@@ -67,6 +67,11 @@ const (
 	KindMCP           ResourceKind = "mcp"
 	KindSkill         ResourceKind = "skill"
 	KindKnowledgeBase ResourceKind = "knowledge_base"
+	// KindPlugin is a "plugin:{plugin_id}/{tool_name}" capabilities.tools[]
+	// ref (spec-20 §5.1) — not one of the four resource-center tables, but
+	// dispatched the same way: the Authorizer resolves the ref and tells
+	// this package apart by Kind, same as KindMCP/ComponentTypeSandbox.
+	KindPlugin ResourceKind = "plugin"
 )
 
 // A "tool"-kind resource's config carries two discriminator fields

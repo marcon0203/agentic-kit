@@ -35,6 +35,9 @@ type AgentCompileOptions struct {
 	// references an OSS-backed Skill — buildSkillTool falls back to
 	// config.instructions.
 	SkillContentFetcher SkillContentFetcher
+	// PluginRuntime backs a "plugin:{id}/{tool}" capabilities.tools[] ref
+	// (spec-20); nil is fine when no Agent in the Bundle references one.
+	PluginRuntime PluginRuntime
 }
 
 // CompileAgent turns one validated Agent DSL document (schemas/agent.schema.json)
@@ -60,7 +63,7 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		}
 	}
 
-	tools, toolsets, err := compileTools(ctx, def, opts.Authorizer, opts.KnowledgeBaseSearcher, opts.SkillContentFetcher)
+	tools, toolsets, err := compileTools(ctx, def, opts.Authorizer, opts.KnowledgeBaseSearcher, opts.SkillContentFetcher, opts.PluginRuntime)
 	if err != nil {
 		return nil, fmt.Errorf("adk: agent %q: %w", ref, err)
 	}
@@ -112,7 +115,7 @@ func anyFallbackHasKey(fallbacks []modelgateway.ModelSpec, creds map[string]mode
 	return modelgateway.ModelSpec{}, false
 }
 
-func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAuthorizer, kb KnowledgeBaseSearcher, skills SkillContentFetcher) ([]tool.Tool, []tool.Toolset, error) {
+func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAuthorizer, kb KnowledgeBaseSearcher, skills SkillContentFetcher, plugins PluginRuntime) ([]tool.Tool, []tool.Toolset, error) {
 	caps, _ := def["capabilities"].(map[string]any)
 	if caps == nil || authorizer == nil {
 		return nil, nil, nil
@@ -165,6 +168,17 @@ func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAu
 				return nil, nil, fmt.Errorf("build sandbox tools %q: %w", ref, err)
 			}
 			tools = append(tools, sandboxTools...)
+			continue
+		}
+		// A "plugin:{id}/{tool}" ref (spec-20 §5.1) — third-party WASM code,
+		// not a resource-center row, but authorized and dispatched the same
+		// way as everything else here.
+		if spec.Kind == KindPlugin {
+			t, err := BuildPluginTool(spec, plugins)
+			if err != nil {
+				return nil, nil, fmt.Errorf("build plugin tool %q: %w", ref, err)
+			}
+			tools = append(tools, t)
 			continue
 		}
 		t, err := BuildTool(spec, kb, skills)
