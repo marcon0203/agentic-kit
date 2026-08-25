@@ -150,6 +150,18 @@ func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAu
 			toolsets = append(toolsets, ts)
 			continue
 		}
+		// A "sandbox" component (config.component_type — still Kind
+		// "tool", registered the same way any other 组件 is) exposes two
+		// tools (run_code, execute_command) off one Daytona sandbox, not
+		// one — same reason MCP gets its own branch above.
+		if componentType, _ := spec.Config["component_type"].(string); componentType == "sandbox" {
+			sandboxTools, err := BuildSandboxTools(spec)
+			if err != nil {
+				return nil, nil, fmt.Errorf("build sandbox tools %q: %w", ref, err)
+			}
+			tools = append(tools, sandboxTools...)
+			continue
+		}
 		t, err := BuildTool(spec, kb)
 		if err != nil {
 			return nil, nil, fmt.Errorf("build tool %q: %w", ref, err)

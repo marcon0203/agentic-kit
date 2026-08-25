@@ -7,6 +7,16 @@ import { cn } from '@/lib/utils'
 type Resource = components['schemas']['Resource']
 type ResourceType = components['schemas']['ResourceType']
 
+// "tool"-kind resources can be a plain HTTP tool, an MCP-backed toolset
+// (kind "mcp", not this), or a sandbox component — config.component_type
+// is how the compiler tells them apart (internal/orchestrator/adk's
+// compileTools). Options here look identical otherwise, so a sandbox
+// resource needs a visible tag or there's no way to tell it apart from a
+// plain tool while picking an Agent's capabilities.
+const COMPONENT_TYPE_LABEL: Record<string, string> = {
+  sandbox: '沙箱',
+}
+
 /**
  * 能力白名单 selector — pulls from the resource center, greys out
  * disabled resources with a hover tooltip explaining why (spec-15).
@@ -49,6 +59,8 @@ export function ResourceMultiSelect({
       {options.map((opt) => {
         const disabled = opt.status !== 1
         const active = selected.includes(opt.ref)
+        const componentType = (opt.config as { component_type?: string } | undefined)?.component_type
+        const componentLabel = componentType ? COMPONENT_TYPE_LABEL[componentType] : undefined
         return (
           <button
             key={opt.id}
@@ -57,13 +69,18 @@ export function ResourceMultiSelect({
             title={disabled ? '该资源已被停用，无法在新的能力白名单中选用' : undefined}
             onClick={() => toggle(opt.ref)}
             className={cn(
-              'text-body-sm rounded-full border px-space-3 py-space-2',
+              'text-body-sm flex items-center gap-space-2 rounded-full border px-space-3 py-space-2',
               disabled && 'cursor-not-allowed border-border bg-surface-muted text-ink-500 opacity-60',
               !disabled && active && 'border-primary bg-blueprint-tint text-blueprint',
               !disabled && !active && 'border-border bg-surface text-ink-700 hover:border-border-strong',
             )}
           >
             {opt.ref}
+            {componentLabel && (
+              <span className="text-caption rounded-full bg-surface-muted px-space-2 py-0.5 text-ink-500">
+                {componentLabel}
+              </span>
+            )}
           </button>
         )
       })}

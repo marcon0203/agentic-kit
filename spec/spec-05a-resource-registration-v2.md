@@ -18,7 +18,7 @@
 2. **新增能力是叠加，不是替换**——现有最简单的"手填 JSON config"路径继续保留兜底（比如没配 OSS 时 Skill 还能用纯文本 instructions），新表单是更好的输入方式，不是唯一路径，避免这轮改动把线上已存在的资源"契约"破坏掉。
 3. **凭证加密模型从"字符串子串匹配"扩展为"按 kind 注册专属规则"**——MCP 的自定义 Header 是本轮唯一一个必须现在处理的加密模型缺口（否则用户填的 Header 值明文落库）。
 4. **运行时编译代码只在必要处改**——Tool 的 `http` 形态、Skill 走纯 `instructions` 的旧路径，行为完全不变；新形态是新增分支，不是重写。
-5. **名字和判别字段按终态设计，功能按当下需要实现**——"组件"这个菜单名和 `component_type` 判别字段现在就按"以后要装下插件/沙箱环境"的终态定下来，但插件/沙箱环境本身不做，只做 Tool 这一支；这样以后补类型是加一个枚举值，不是推倒重来。
+5. **名字和判别字段按终态设计，功能按当下需要实现**——"组件"这个菜单名和 `component_type` 判别字段现在就按"以后要装下更多组件类型"的终态定下来；Tool 和 Sandbox 已经按这个设计做了，插件还没做（业务没梳理清楚前不做），以后补类型是加一个枚举值，不是推倒重来。
 6. **系统级资源目录复用已有先例**——Skill 源同步下来的"系统提供"Skill，管理模式直接照抄系统设置里已经跑通的模型目录（`modelcatalog`：管理员登记、全局只读、所有人可见），不重新发明一套。
 
 ---
@@ -138,18 +138,29 @@ CREATE TABLE skill_files (
 
 ---
 
-## 四、菜单改名"组件"：Tool 只是组件的一种类型，插件/沙箱环境是预留的其他类型
+## 四、菜单改名"组件"：Tool 是组件的一种类型，Sandbox 已实现，插件是预留的其他类型
 
-**改口**：侧栏菜单 "Tool" 改名"组件"。"组件"是一个更大的伞：Tool、插件（Plugin）、沙箱环境（Sandbox）……都是"组件"下不同的类型，差别只在类型，不是各自独立的资源门类。插件体系本身**本轮不做**——用户明确说了"这是把目前业务梳理清楚后再做的事情"，这里只做两件事：(1) 菜单/产品命名现在就改，(2) 数据结构上现在就留出"类型"判别位，不要现在把 Tool 焊死成唯一形态，将来插件/沙箱环境落地时是加一个新的 `component_type` 取值，不是另起一张表、另设计一遍。
+**改口**：侧栏菜单 "Tool" 改名"组件"。"组件"是一个更大的伞：Tool、沙箱环境（Sandbox）、插件（Plugin）……都是"组件"下不同的类型，差别只在类型，不是各自独立的资源门类。
+
+**沙箱环境已经实现**（这点在本轮讨论中改口了——原计划里 Sandbox 只留判别位不做，但 ADK 的工具接口本来就是"自己包一个 `functiontool.New`"就能接第三方服务，跟 MCP/HTTP tool 是同一套路子，改口后直接做了）：
+
+- 用 Daytona 官方 Go SDK（`github.com/daytonaio/daytona/libs/sdk-go`）而不是 ADK 自带能力——ADK Go（`google.golang.org/adk`）本身没有内置 Daytona 集成（Python 版 ADK 生态里的 `daytona-adk-plugin` 是 Python 专属），Go 这边是照抄 `buildEndpointTool`/`BuildMCPToolset` 已经立好的"外部服务包成 functiontool"模式手写的。
+- 实现见 `internal/orchestrator/adk/sandbox.go`：`BuildSandboxTools(spec)` 为一个 `config.component_type = "sandbox"` 的资源产出两个 ADK tool——`{ref}_run_code`（Python/JS/TS 解释器执行）和 `{ref}_execute_command`（原始 shell 命令），跟 Daytona 自己的 ADK 插件对外暴露的两个核心工具对齐。
+- 一个 Daytona sandbox 在同一次运行内懒加载、只建一次、后续调用复用（`sandboxSession`），不是每次工具调用都新建一个 sandbox——避免每次调用都付几秒的 sandbox 启动延迟。没有显式的运行结束清理钩子：创建时设置 `AutoStopInterval`/`AutoDeleteInterval`（闲置 15 分钟自动停止，停止后再过 15 分钟自动删除），交给 Daytona 服务端自己兜底，不需要往 run 生命周期里插入清理逻辑。
+- `internal/orchestrator/adk/agent_compiler.go` 的 `compileTools` 里加了第三个分支（跟 `spec.Kind == KindMCP` 那个分支平级）：`config.component_type == "sandbox"` 时调 `BuildSandboxTools` 拿两个 tool 一起塞进去，而不是走 `BuildTool` 的单 tool 路径。
+- 资源注册：暂时还是走现有的 `RegisterResourceDialog`（手填 JSON config：`{"component_type": "sandbox", "api_url": "...", "api_key": "...", "organization_id": "..."}`），本节下面的"组件"多步骤新建页是独立的后续工作，不是这次的前提——只要资源的 `config` 长这个形状，运行时就能识别并工作。
+- Agent 引用：沙箱资源的 `kind` 仍然是 `tool`，所以已有的能力白名单选择器（`capabilities.tools[]`）**不需要改**就能选中它；`web/src/components/agents/ResourceMultiSelect.tsx` 加了一个小徽标，`component_type` 有值时显示对应中文标签（沙箱→"沙箱"），不然列表里一个沙箱资源和一个普通 HTTP Tool 长得一模一样，选的时候分不清是哪个。
+
+**插件体系本轮仍然不做**——用户明确说了"这是把目前业务梳理清楚后再做的事情"。
 
 ### 判别字段设计：`component_type`（大类）+ `tool_type`（Tool 内部的子形态）
 
 两层判别，不是一层：
 
-- `config.component_type`：`"tool"`（本轮唯一实现的取值）｜ `"plugin"`（预留，不做）｜ `"sandbox"`（预留，不做）。菜单/列表页按这个字段分组展示。
+- `config.component_type`：`"tool"`（现状默认）｜ `"sandbox"`（已实现，见上）｜ `"plugin"`（预留，不做）。菜单/列表页按这个字段分组展示。
 - 当 `component_type == "tool"` 时，才有第二层 `config.tool_type` 区分 Tool 自己的形态：`"http"`（现状，单接口）｜ `"openapi"`（导入一批 operation）。
 
-这样以后插件/沙箱环境落地时，各自会有自己的一套 `config` 形状（插件大概率需要"托管代码执行"，沙箱环境大概率需要"隔离运行环境的生命周期管理"），但都挂在同一张 `tools` 表、同一个 `component` Kind 下，靠 `component_type` 分流——不需要因为新增一个组件类型就新建一张表、新加一个 Resource Kind、新加一整套 CRUD 接口。**这是本轮唯一要现在做的改动**：把 Tool 相关的表/字段命名和判别逻辑按"组件"的终态设计，但只实现 `component_type=tool` 这一支。
+这样以后插件落地时，会有自己的一套 `config` 形状（大概率需要"托管代码执行"，安全边界和沙箱环境已经解决的"连一个外部沙箱执行"不是一回事），但仍然挂在同一张 `tools` 表、同一个 Kind 下，靠 `component_type` 再加一个取值分流——不需要因为新增一个组件类型就新建一张表、新加一个 Resource Kind、新加一整套 CRUD 接口。沙箱环境这次的实现路径已经验证了这个判别字段设计是站得住的。
 
 ### Tool 自己的形态扩展：OpenAPI 导入（收益最大，优先做）
 
@@ -173,8 +184,7 @@ CREATE TABLE skill_files (
 ### 本轮不做，但写清楚以后往哪走
 
 - **插件体系**（`component_type = "plugin"`）：用户明确说了"业务梳理清楚后再做"，本轮只留判别字段，不设计具体形态。
-- **沙箱环境**（`component_type = "sandbox"`）：同上，本轮不做。
-- Tool 自己的 `code`（用户写一段脚本在沙箱里执行）：这个未来可能会和"沙箱环境"这个组件类型是同一件事的两个入口，等沙箱环境立项时一起想清楚，不单独作为 Tool 的第三种 `tool_type` 抢跑。
+- Tool 自己的 `code`（在 Tool 里直接写一段脚本执行，而不是引用一个独立的 Sandbox 组件资源）：沙箱环境已经实现了"连一个外部沙箱执行代码"这条路，这个是否还需要单独存在、还是直接指导用户去配一个 Sandbox 组件，等有真实需求再定，不抢跑。
 
 ---
 
@@ -225,8 +235,10 @@ CREATE TABLE skill_files (
 1. **Phase 1 —— MCP**：二级页面 + Header 列表（逐项加密）+ 真实 MCP 探测/拉工具列表，替换掉现在的裸 HTTP GET 健康检查。诉求最明确、改动面最小、不依赖 OSS，优先做。
 2. **Phase 2 —— OSS + Skill 上传**：`internal/adapter/oss` 接入真实阿里云 OSS（等 AK/SK 配好 `.env`）、zip 上传/解压/建索引（只读文件树，无在线编辑）、运行时按需拉取 `SKILL.md`。
 3. **Phase 2.5 —— Skill 源同步**：系统设置"Skill 源"页 + `skill_sources`/`system_skills` 表 + `SkillSourceSyncer` 接口 + clawhub 适配器 + Agent 引用解析扩展到系统目录。依赖 Phase 2 的 OSS 基础设施，紧跟其后。
-4. **Phase 3 —— 组件/Tool 多形态**：菜单改名"组件"+ `component_type`/`tool_type` 判别字段落地、OpenAPI 导入（预览→勾选→批量创建）+ 运行时按 `tool_type` 分支请求逻辑。插件/沙箱环境两个组件类型只留判别位，不实现。
+4. **Phase 3 —— 组件/Tool 多形态**：菜单改名"组件"+ `component_type`/`tool_type` 判别字段落地为可视化多步骤新建页（沙箱环境的后端运行时已经在本轮实现，这里补的是前端"组件"两步新建 UI）、OpenAPI 导入（预览→勾选→批量创建）+ 运行时按 `tool_type` 分支请求逻辑。插件这个组件类型只留判别位，不实现。
 5. **Phase 4 —— 记忆库表单化**（体量最小，顺手做）。
+
+**已完成（提前于计划）**：沙箱环境（`component_type = "sandbox"`）运行时——`internal/orchestrator/adk/sandbox.go` + `agent_compiler.go` 的 `compileTools` 分支 + `ResourceMultiSelect` 的组件类型徽标。资源注册暂时还是走现有弹窗（手填 JSON config），Phase 3 的"组件"多步骤新建页会给它一个更好的表单，但不是运行时能力的前提。
 
 ## 验收清单（草案，实现阶段按 Phase 拆分为独立任务时再细化）
 
@@ -238,3 +250,4 @@ CREATE TABLE skill_files (
 - [ ] Agent 引用一个只存在于 `system_skills` 而不在自己 `skills` 表里的 ref 时，编译期能正确解析
 - [ ] OpenAPI 导入后，Agent 的 `capabilities.tools[]` 引用其中任一 operation 的 ref 时行为和手填的 `http` 型 tool 完全一致（对 Agent 层透明）
 - [ ] 侧栏菜单显示"组件"而不是"Tool"，路由 `/apps/tool` 不变
+- [x] 注册一个 `component_type: "sandbox"` 资源后，Agent 的能力白名单里能选中它（`ResourceMultiSelect` 显示"沙箱"徽标），运行时会拿到 `{ref}_run_code`/`{ref}_execute_command` 两个可调用工具
