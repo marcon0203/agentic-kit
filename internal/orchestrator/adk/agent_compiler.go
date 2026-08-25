@@ -30,6 +30,11 @@ type AgentCompileOptions struct {
 	// KnowledgeBaseSearcher backs a "knowledge_base" resource's real vector
 	// search; nil is fine when no Agent in the Bundle references one.
 	KnowledgeBaseSearcher KnowledgeBaseSearcher
+	// SkillContentFetcher backs a zip-uploaded "skill" resource's SKILL.md
+	// fetch (spec-05a); nil is fine when OSS isn't configured or no Agent
+	// references an OSS-backed Skill — buildSkillTool falls back to
+	// config.instructions.
+	SkillContentFetcher SkillContentFetcher
 }
 
 // CompileAgent turns one validated Agent DSL document (schemas/agent.schema.json)
@@ -55,7 +60,7 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		}
 	}
 
-	tools, toolsets, err := compileTools(ctx, def, opts.Authorizer, opts.KnowledgeBaseSearcher)
+	tools, toolsets, err := compileTools(ctx, def, opts.Authorizer, opts.KnowledgeBaseSearcher, opts.SkillContentFetcher)
 	if err != nil {
 		return nil, fmt.Errorf("adk: agent %q: %w", ref, err)
 	}
@@ -107,7 +112,7 @@ func anyFallbackHasKey(fallbacks []modelgateway.ModelSpec, creds map[string]mode
 	return modelgateway.ModelSpec{}, false
 }
 
-func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAuthorizer, kb KnowledgeBaseSearcher) ([]tool.Tool, []tool.Toolset, error) {
+func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAuthorizer, kb KnowledgeBaseSearcher, skills SkillContentFetcher) ([]tool.Tool, []tool.Toolset, error) {
 	caps, _ := def["capabilities"].(map[string]any)
 	if caps == nil || authorizer == nil {
 		return nil, nil, nil
@@ -162,7 +167,7 @@ func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAu
 			tools = append(tools, sandboxTools...)
 			continue
 		}
-		t, err := BuildTool(spec, kb)
+		t, err := BuildTool(spec, kb, skills)
 		if err != nil {
 			return nil, nil, fmt.Errorf("build tool %q: %w", ref, err)
 		}

@@ -135,13 +135,18 @@ func run() error {
 	// Skill zip upload needs an object store; a deployment that never sets
 	// the OSS_* vars still boots cleanly (WithSkillUploads just never gets
 	// called, so UploadSkill/ListSkillFiles/GetSkillFile all return a clear
-	// "not configured" error instead of a nil-pointer panic).
+	// "not configured" error instead of a nil-pointer panic). skillObjectStore
+	// is also handed to orchestrator.NewEngine below, so a run-time Skill
+	// tool call can fetch its SKILL.md the same way the upload/list/download
+	// handlers do.
+	var skillObjectStore resource.ObjectStore
 	if cfg.OSSEnabled() {
-		objectStore, err := oss.New(cfg.OSSEndpoint, cfg.OSSAccessKeyID, cfg.OSSAccessKeySecret, cfg.OSSBucket)
+		store, err := oss.New(cfg.OSSEndpoint, cfg.OSSAccessKeyID, cfg.OSSAccessKeySecret, cfg.OSSBucket)
 		if err != nil {
 			return fmt.Errorf("connect to OSS: %w", err)
 		}
-		resourceService = resourceService.WithSkillUploads(objectStore, postgres.NewSkillFileRepository(queries))
+		skillObjectStore = store
+		resourceService = resourceService.WithSkillUploads(skillObjectStore, postgres.NewSkillFileRepository(queries))
 	}
 
 	providerKeys := postgres.NewProviderKeyStore(queries, aesKey)
@@ -193,7 +198,7 @@ func run() error {
 		runEvents,
 		postgres.NewRunBundleResolver(queries),
 		postgres.NewRunDependencyChecker(queries, resourceCatalog, providerKeys),
-		orchestrator.NewEngine(queries, runRepo, runEvents, gateRepo, gateRegistry, providerKeys, aesKey, knowledgeBaseService),
+		orchestrator.NewEngine(queries, runRepo, runEvents, gateRepo, gateRegistry, providerKeys, aesKey, knowledgeBaseService, skillObjectStore),
 		gateRepo,
 		gateRegistry,
 		postgres.NewAuditLogWriter(queries),

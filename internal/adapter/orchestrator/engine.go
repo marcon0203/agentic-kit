@@ -11,6 +11,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/adapter/postgres"
 	"github.com/marcon0203/agentic-kit/internal/bundlegraph"
 	"github.com/marcon0203/agentic-kit/internal/domain/knowledgebase"
+	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	"github.com/marcon0203/agentic-kit/internal/domain/run"
 	"github.com/marcon0203/agentic-kit/internal/modelgateway"
 	"github.com/marcon0203/agentic-kit/internal/orchestrator/adk"
@@ -29,6 +30,7 @@ type Engine struct {
 	aesKey     []byte
 	appName    string
 	kbSearcher adk.KnowledgeBaseSearcher
+	skills     adk.SkillContentFetcher
 
 	cancelMu sync.Mutex
 	cancels  map[string]context.CancelFunc
@@ -43,12 +45,13 @@ type providerKeys interface {
 func NewEngine(
 	queries store.Querier, runs run.Repository, events run.EventStore,
 	gates run.GateRepository, registry *GateRegistry, keys providerKeys, aesKey []byte,
-	kbService *knowledgebase.Service,
+	kbService *knowledgebase.Service, skillObjectStore resource.ObjectStore,
 ) *Engine {
 	return &Engine{
 		queries: queries, runs: runs, events: events, gates: gates, registry: registry,
 		keys: keys, aesKey: aesKey, appName: "agentic-kit", cancels: map[string]context.CancelFunc{},
 		kbSearcher: newKnowledgeBaseSearcher(kbService),
+		skills:     newSkillContentFetcher(skillObjectStore),
 	}
 }
 
@@ -104,7 +107,8 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 		agentDef["agent"] = node
 
 		compiledAgent, err := adk.CompileAgent(ctx, agentDef, adk.AgentCompileOptions{
-			Gateway: gateway, Credentials: creds, Authorizer: authorizer, KnowledgeBaseSearcher: e.kbSearcher,
+			Gateway: gateway, Credentials: creds, Authorizer: authorizer,
+			KnowledgeBaseSearcher: e.kbSearcher, SkillContentFetcher: e.skills,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("compile agent %q: %w", node, err)

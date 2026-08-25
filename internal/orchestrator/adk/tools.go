@@ -100,6 +100,17 @@ type KnowledgeBaseSearcher interface {
 	Search(ctx context.Context, ownerID, knowledgeBaseID int64, query string, topK int) ([]KnowledgeBaseSearchResult, error)
 }
 
+// SkillContentFetcher fetches a "skill" resource's SKILL.md body from OSS
+// at call time — only used when the resource's config.oss_prefix is set
+// (spec-05a: zip-uploaded Skills). ossPrefix is the resource's own stored
+// prefix (e.g. "skills/{owner}/{ref}/1.0"); implementations live outside
+// this package (internal/adapter/orchestrator, backed by
+// internal/domain/resource.ObjectStore) so this package stays free of an
+// OSS/domain dependency.
+type SkillContentFetcher interface {
+	Fetch(ctx context.Context, ownerID, resourceID int64, ossPrefix string) (string, error)
+}
+
 // ResourceAuthorizer authorizes one capabilities.tools/skills ref against
 // the Resource Registry (spec-05/spec-10 §2: "未授权的资源不进入图 — 不是
 // 运行时拦截，而是编译期就不构造这个 Tool"). Implementations live outside
@@ -122,10 +133,10 @@ const toolCallTimeout = 30 * time.Second
 // real vector search. "mcp" is handled separately by BuildMCPToolset (it
 // produces a tool.Toolset, not a single tool.Tool — an MCP server can
 // expose any number of tools, discovered at connect time).
-func BuildTool(spec ToolSpec, kb KnowledgeBaseSearcher) (tool.Tool, error) {
+func BuildTool(spec ToolSpec, kb KnowledgeBaseSearcher, skills SkillContentFetcher) (tool.Tool, error) {
 	switch spec.Kind {
 	case KindSkill:
-		return buildSkillTool(spec)
+		return buildSkillTool(spec, skills)
 	case KindKnowledgeBase:
 		return buildKnowledgeBaseTool(spec, kb)
 	case KindMCP:
@@ -280,13 +291,24 @@ func callEndpoint(ctx context.Context, client *http.Client, endpoint, ref, input
 	return string(body), nil
 }
 
-func buildSkillTool(spec ToolSpec) (tool.Tool, error) {
-	instructions := skillInstructions(spec)
+// buildSkillTool surfaces a Skill's instructions as the tool's result. A
+// zip-uploaded Skill (config.oss_prefix set, spec-05a) fetches its SKILL.md
+// from OSS at call time via skills; an older/config-only Skill falls back
+// to config.instructions the way it always has.
+func buildSkillTool(spec ToolSpec, skills SkillContentFetcher) (tool.Tool, error) {
 	description := fmt.Sprintf("Retrieves the %q skill's instructions to follow.", spec.Ref)
+	ossPrefix, _ := spec.Config["oss_prefix"].(string)
 
 	return functiontool.New(functiontool.Config{Name: spec.Ref, Description: description},
 		func(ctx agent.ToolContext, args toolArgs) (toolResult, error) {
-			return toolResult{Output: instructions}, nil
+			if ossPrefix != "" && skills != nil {
+				content, err := skills.Fetch(ctx, spec.OwnerID, spec.ResourceID, ossPrefix)
+				if err != nil {
+					return toolResult{}, fmt.Errorf("fetch skill %q content: %w", spec.Ref, err)
+				}
+				return toolResult{Output: content}, nil
+			}
+			return toolResult{Output: skillInstructions(spec)}, nil
 		})
 }
 

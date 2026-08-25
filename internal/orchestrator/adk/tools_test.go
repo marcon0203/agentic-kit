@@ -62,7 +62,7 @@ func TestSkillInstructions_FallsBackToDescription(t *testing.T) {
 }
 
 func TestBuildTool_Skill(t *testing.T) {
-	tl, err := BuildTool(ToolSpec{Ref: "code-review", Kind: KindSkill, Config: map[string]any{"instructions": "review carefully"}}, nil)
+	tl, err := BuildTool(ToolSpec{Ref: "code-review", Kind: KindSkill, Config: map[string]any{"instructions": "review carefully"}}, nil, nil)
 	if err != nil {
 		t.Fatalf("BuildTool: %v", err)
 	}
@@ -71,11 +71,36 @@ func TestBuildTool_Skill(t *testing.T) {
 	}
 }
 
+type fakeSkillContentFetcher struct {
+	content string
+	err     error
+	calls   int
+}
+
+func (f *fakeSkillContentFetcher) Fetch(_ context.Context, _, _ int64, _ string) (string, error) {
+	f.calls++
+	return f.content, f.err
+}
+
+func TestBuildTool_OSSBackedSkill_BuildsWithFetcher(t *testing.T) {
+	fetcher := &fakeSkillContentFetcher{content: "# SKILL.md body"}
+	tl, err := BuildTool(ToolSpec{
+		Ref: "zip-skill", Kind: KindSkill, OwnerID: 1, ResourceID: 7,
+		Config: map[string]any{"oss_prefix": "skills/1/zip-skill/1.0", "instructions": "stale fallback"},
+	}, nil, fetcher)
+	if err != nil {
+		t.Fatalf("BuildTool: %v", err)
+	}
+	if tl.Name() != "zip-skill" {
+		t.Fatalf("unexpected tool name: %q", tl.Name())
+	}
+}
+
 // A "mcp" resource builds a tool.Toolset via BuildMCPToolset, not a single
 // Tool via BuildTool — BuildTool rejects it outright so a caller can't
 // silently get a broken half-built tool for the wrong resource kind.
 func TestBuildTool_MCPIsRejected(t *testing.T) {
-	_, err := BuildTool(ToolSpec{Ref: "internal-search", Kind: KindMCP, Config: map[string]any{"endpoint": "http://example.com"}}, nil)
+	_, err := BuildTool(ToolSpec{Ref: "internal-search", Kind: KindMCP, Config: map[string]any{"endpoint": "http://example.com"}}, nil, nil)
 	if err == nil {
 		t.Fatal("expected BuildTool to reject a KindMCP spec")
 	}
