@@ -23,8 +23,8 @@ function sectionGroups(knowledgeBaseEnabled: boolean): SectionSidebarGroup[] {
     {
       label: '应用',
       items: [
-        { value: 'bundles', label: 'Bundle 编排', icon: Boxes },
-        { value: 'agents', label: 'Agent 定义', icon: Bot },
+        { value: 'bundles', label: '应用管理', icon: Boxes },
+        { value: 'agents', label: '智能体管理', icon: Bot },
       ],
     },
     {
@@ -50,47 +50,20 @@ function sectionGroups(knowledgeBaseEnabled: boolean): SectionSidebarGroup[] {
   ]
 }
 
-const SECTION_COPY: Record<Section, { title: string; description: string }> = {
-  browse: {
-    title: '应用广场',
-    description: '所有人发布的 Bundle、Agent、Skill 与 MCP Server。订阅锁定版本，作者的编排图和提示词不会跟着过来。',
-  },
-  bundles: {
-    title: 'Bundle 编排',
-    description: '把多个 Agent 编排成一次协作：谁先做、谁并行、哪一步必须有人点头。运行从这里发起。',
-  },
-  agents: {
-    title: 'Agent 定义',
-    description: '单个角色的定义：模型、人设、能力白名单与执行约束，按版本管理。',
-  },
-  tool: {
-    title: 'Tool',
-    description: 'Agent 能调用的外部能力：一个检索接口、一个内部服务。注册后才能写进 Agent 的能力白名单。',
-  },
-  skill: {
-    title: 'Skill',
-    description: '把一段固定的做事方式打包，让多个 Agent 共用同一套步骤，而不是各写各的提示词。',
-  },
-  mcp: {
-    title: 'MCP Server',
-    description: '登记地址与凭证后平台会立刻探测一次连通性。凭证加密落库，任何响应都不会带出来。',
-  },
-  knowledge_base: {
-    title: '知识库',
-    description: '登记后可以被 Agent 引用，回答时从这里做向量检索，而不是全靠模型自己记得。',
-  },
-  memory: {
-    title: '记忆库',
-    description: '同一个账号下的运行会把对话写进这里；Agent 勾选 load_memory / preload_memory 内置工具即可检索，重启进程也不会丢。',
-  },
-  publish: {
-    title: '我的发布',
-    description: '把自己的 Bundle 或 Agent 发布到广场，让其他人可以订阅使用；广场上看到的仍然是黑盒，编排图与提示词不会带出去。',
-  },
-  subscriptions: {
-    title: '我的订阅',
-    description: '订阅版本已锁定，作者发布新版本时会单独提醒，是否升级由你决定。',
-  },
+// No description here on purpose — each section used to carry one, but a
+// different length per item made the page jump on every switch. The title
+// alone is enough; what each section does is obvious once you're in it.
+const SECTION_TITLE: Record<Section, string> = {
+  browse: '应用广场',
+  bundles: '应用管理',
+  agents: '智能体管理',
+  tool: 'Tool',
+  skill: 'Skill',
+  mcp: 'MCP Server',
+  knowledge_base: '知识库',
+  memory: '记忆库',
+  publish: '我的发布',
+  subscriptions: '我的订阅',
 }
 
 /**
@@ -102,14 +75,20 @@ export function AppsLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { knowledgeBaseEnabled } = useFeatures()
-  const section = (location.pathname.split('/apps/')[1]?.split('/')[0] || 'browse') as Section
-  const copy = SECTION_COPY[section] ?? SECTION_COPY.browse
+  const segments = location.pathname.split('/apps/')[1]?.split('/') ?? []
+  const section = (segments[0] || 'browse') as Section
+  const title = SECTION_TITLE[section] ?? SECTION_TITLE.browse
+  // Bundle create/edit (/apps/bundles/new, /apps/bundles/:ref/edit) is a
+  // full-canvas tool, not a list — the section title row is dead weight
+  // next to it. The sidebar still renders underneath so leaving the
+  // editor is always one click, never a route dead-end.
+  const isBundleEditor = section === 'bundles' && segments.length > 1
 
   return (
     <div className="flex flex-col gap-space-6">
-      <PageHeader eyebrow="APPLICATIONS" title={copy.title} description={copy.description} />
+      {!isBundleEditor && <PageHeader eyebrow="APPLICATIONS" title={title} />}
 
-      <div className="flex flex-col gap-space-6 sm:flex-row">
+      <div className="flex flex-1 flex-col gap-space-6 sm:flex-row">
         <SectionSidebar groups={sectionGroups(knowledgeBaseEnabled)} active={section} onChange={(v) => navigate(`/apps/${v}`)} />
 
         <div className="min-w-0 flex-1">

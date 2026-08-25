@@ -6,6 +6,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { AuthModal } from '@/components/auth/AuthModal'
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { HomePage } from '@/pages/HomePage'
+import { NewRunPage } from '@/pages/NewRunPage'
 import { RunPage } from '@/pages/RunPage'
 import { AppsLayout } from '@/pages/AppsLayout'
 import { SettingsLayout } from '@/pages/SettingsLayout'
@@ -76,6 +77,8 @@ export default function App() {
               <Route index element={<Navigate to="browse" replace />} />
               <Route path="browse" element={<MarketplaceBrowsePage />} />
               <Route path="bundles" element={<BundleListPage />} />
+              <Route path="bundles/new" element={<BundleEditorPage />} />
+              <Route path="bundles/:ref/edit" element={<BundleEditorPage />} />
               <Route path="agents" element={<AgentDefinitionPage />} />
               <Route path="tool" element={<ResourceKindPage type="tool" />} />
               <Route path="skill" element={<ResourceKindPage type="skill" />} />
@@ -86,18 +89,10 @@ export default function App() {
               <Route path="subscriptions" element={<MySubscriptionsPage />} />
             </Route>
             <Route
-              path="/bundles/new"
+              path="/runs/new"
               element={
                 <ProtectedRoute>
-                  <BundleEditorPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/bundles/:ref/edit"
-              element={
-                <ProtectedRoute>
-                  <BundleEditorPage />
+                  <NewRunPage />
                 </ProtectedRoute>
               }
             />

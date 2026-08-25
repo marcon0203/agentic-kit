@@ -90,7 +90,7 @@ export function AppShell() {
         </div>
       </header>
 
-      <main id="main" className="mx-auto w-full max-w-container-app flex-1 px-space-6 py-space-8">
+      <main id="main" className="w-full flex-1 px-space-6 py-space-8">
         <Outlet />
       </main>
 

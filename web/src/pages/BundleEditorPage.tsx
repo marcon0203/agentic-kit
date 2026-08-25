@@ -14,6 +14,7 @@ import {
   type Connection,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { ArrowLeft } from 'lucide-react'
 
 import { TabRail, TabRailItem } from '@/components/common/Page'
 import { Button } from '@/components/ui/button'
@@ -273,14 +274,20 @@ function EditorInner() {
   return (
     <div className="flex h-[calc(100vh-160px)] flex-col gap-space-3">
       <div className="flex items-center justify-between">
-        <TabRail className="border-b-0">
-          <TabRailItem active={tab === 'canvas'} onClick={switchToCanvas}>
-            画布
-          </TabRailItem>
-          <TabRailItem active={tab === 'source'} onClick={switchToSource}>
-            DSL 源码
-          </TabRailItem>
-        </TabRail>
+        <div className="flex items-center gap-space-4">
+          <Button variant="ghost" size="sm" onClick={() => navigate('/apps/bundles')}>
+            <ArrowLeft className="size-4" aria-hidden />
+            返回
+          </Button>
+          <TabRail className="border-b-0">
+            <TabRailItem active={tab === 'canvas'} onClick={switchToCanvas}>
+              画布
+            </TabRailItem>
+            <TabRailItem active={tab === 'source'} onClick={switchToSource}>
+              DSL 源码
+            </TabRailItem>
+          </TabRail>
+        </div>
 
         <div className="flex items-center gap-space-3">
           {dirty && <span className="text-caption text-signal">有未保存的更改</span>}

@@ -27,7 +27,7 @@ export function AgentDefinitionPage() {
     return (
       <div className="flex flex-col gap-space-6">
         <div className="flex items-center justify-between border-b border-border pb-space-3">
-          <h2 className="text-display-md text-ink-900">{copyFrom ? '复制 Agent' : '新建 Agent'}</h2>
+          <h2 className="text-display-md text-ink-900">{copyFrom ? '复制智能体' : '新建智能体'}</h2>
           <Button
             variant="outline"
             size="sm"
@@ -55,23 +55,23 @@ export function AgentDefinitionPage() {
 
   return (
     <Section
-      title="我的 Agent"
+      title="我的智能体"
       aside={
         <Button size="sm" onClick={() => setMode('create')}>
-          新建 Agent
+          新建智能体
         </Button>
       }
     >
       {query.isLoading && <ListSkeleton />}
-      {query.isError && <ErrorPanel message="Agent 列表没能加载出来" onRetry={() => query.refetch()} />}
+      {query.isError && <ErrorPanel message="智能体列表没能加载出来" onRetry={() => query.refetch()} />}
 
       {query.isSuccess && items.length === 0 && (
         <EmptyRail
           title="先定义一个角色"
-          description="一个 Agent 就是一个角色：它是谁、能用哪些资源、单轮最多花多少 token。Bundle 编排的就是这些角色。"
+          description="一个智能体（Agent）就是一个角色：它是谁、能用哪些资源、单轮最多花多少 token。应用编排的就是这些角色。"
           action={
             <Button size="sm" onClick={() => setMode('create')}>
-              新建 Agent
+              新建智能体
             </Button>
           }
         />

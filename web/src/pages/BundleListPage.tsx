@@ -7,7 +7,6 @@ import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { EmptyRail } from '@/components/common/Rail'
 import { Ref, Section } from '@/components/common/Page'
 import { cn } from '@/lib/utils'
-import { StartRunCard } from '@/components/run/StartRunCard'
 import { apiClient, unwrap, assertOk, ApiError } from '@/lib/api/client'
 import { useHasModelProvider } from '@/lib/models/useHasModelProvider'
 import type { components } from '@/lib/api/schema'
@@ -41,16 +40,16 @@ export function BundleListPage() {
   return (
     <div className="flex flex-col gap-space-8">
       <Section
-        title="我的 Bundle"
+        title="我的应用"
         aside={
-          <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/bundles/new')}>
-            新建 Bundle
+          <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/apps/bundles/new')}>
+            新建应用
           </Button>
         }
       >
         {query.isLoading && <ListSkeleton />}
         {query.isError && (
-          <ErrorPanel message="Bundle 列表没能加载出来" onRetry={() => query.refetch()} />
+          <ErrorPanel message="应用列表没能加载出来" onRetry={() => query.refetch()} />
         )}
         {deleteError && (
           <p role="alert" className="text-body-sm text-rust">
@@ -60,11 +59,11 @@ export function BundleListPage() {
 
         {query.isSuccess && items.length === 0 && (
           <EmptyRail
-            title="编排你的第一次协作"
-            description="Bundle 决定谁先做、谁并行、哪一步要停下来等人。它是运行的最小单位——有了 Bundle 才能发起运行。"
+            title="编排你的第一个应用"
+            description="一个应用（Bundle）决定谁先做、谁并行、哪一步要停下来等人。有了应用才能发起运行。"
             action={
-              <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/bundles/new')}>
-                新建 Bundle
+              <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/apps/bundles/new')}>
+                新建应用
               </Button>
             }
           />
@@ -99,7 +98,7 @@ export function BundleListPage() {
                   size="sm"
                   disabled={runBlocked}
                   title={runBlocked ? '先去模型广场接入一个 Provider，才能发起运行' : undefined}
-                  onClick={() => navigate('/apps/bundles', { state: { quickStartBundleRef: b.bundle_ref } })}
+                  onClick={() => navigate(`/runs/new?bundle=${encodeURIComponent(b.bundle_ref)}`)}
                 >
                   运行
                 </Button>
@@ -111,8 +110,6 @@ export function BundleListPage() {
           </ul>
         )}
       </Section>
-
-      <StartRunCard />
     </div>
   )
 }

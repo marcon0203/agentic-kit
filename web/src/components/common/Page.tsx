@@ -28,7 +28,7 @@ export function PageHeader({
 }: {
   eyebrow: string
   title: string
-  description: string
+  description?: string
   actions?: ReactNode
   className?: string
 }) {
@@ -39,7 +39,7 @@ export function PageHeader({
       <div className="flex min-w-0 max-w-[62ch] flex-col gap-space-2">
         <span className="text-eyebrow text-ink-500">{eyebrow}</span>
         <h1 className="text-display-lg text-ink-900">{title}</h1>
-        <p className="text-body-md text-ink-700">{description}</p>
+        {description && <p className="text-body-md text-ink-700">{description}</p>}
       </div>
       {actions ? <div className="flex shrink-0 items-center gap-space-3">{actions}</div> : null}
     </header>

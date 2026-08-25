@@ -27,7 +27,7 @@ export function AgentPanel() {
       {query.isLoading && <p className="text-body-sm text-ink-500">加载中…</p>}
       {query.isSuccess && items.length === 0 && (
         <p className="text-body-sm text-ink-500">
-          {search ? '没有匹配的 Agent' : '还没有 Agent，先在 Agent 定义页创建一个'}
+          {search ? '没有匹配的智能体' : '还没有智能体，先在智能体管理页创建一个'}
         </p>
       )}
 
