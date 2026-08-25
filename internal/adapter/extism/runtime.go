@@ -16,19 +16,20 @@ package extism
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	extism "github.com/extism/go-sdk"
 )
 
-// DefaultTimeoutMS and DefaultMaxMemoryPages are the sandbox ceilings a
-// plugin call gets when its manifest doesn't ask for something tighter —
-// generous enough for a real tool call, small enough that one runaway
-// plugin can't take a pod's other in-flight requests down with it
-// (spec-20 §九's "watch item", not a hard blocker).
+// DefaultTimeoutMS and DefaultMaxMemoryPages are the sandbox's hard
+// ceilings (spec-20 §4.1) — a plugin manifest cannot ask for more, only
+// less. Timeout matches the existing toolCallTimeout every other tool kind
+// already uses; the memory ceiling has no empirical basis yet (spec-20's
+// own 【待确认】) and may need revisiting once real plugins exist to profile.
 const (
-	DefaultTimeoutMS      uint64 = 10_000
-	DefaultMaxMemoryPages uint32 = 256 // 64 KiB/page × 256 = 16 MiB
+	DefaultTimeoutMS      uint64 = 30_000
+	DefaultMaxMemoryPages uint32 = 2048 // 64 KiB/page × 2048 = 128 MiB
 )
 
 // Options configures one plugin's sandbox. AllowedHosts is the manifest's
@@ -46,11 +47,15 @@ type Options struct {
 	Config map[string]string
 }
 
+// normalize applies the hard ceilings: a zero value gets the default, and
+// per spec-20 §4.1 ("不接受插件清单里调大") anything above the ceiling is
+// clamped down to it rather than honored — a plugin's own manifest can ask
+// for a tighter sandbox, never a looser one.
 func (o Options) normalize() Options {
-	if o.TimeoutMS == 0 {
+	if o.TimeoutMS == 0 || o.TimeoutMS > DefaultTimeoutMS {
 		o.TimeoutMS = DefaultTimeoutMS
 	}
-	if o.MaxMemoryPages == 0 {
+	if o.MaxMemoryPages == 0 || o.MaxMemoryPages > DefaultMaxMemoryPages {
 		o.MaxMemoryPages = DefaultMaxMemoryPages
 	}
 	return o
@@ -125,6 +130,36 @@ func (r *Runtime) Call(ctx context.Context, wasmKey string, wasmBytes []byte, op
 		return nil, fmt.Errorf("extism: %q %q exited %d: %s", wasmKey, funcName, exitCode, instance.GetError())
 	}
 	return output, nil
+}
+
+// ValidateEntries compiles wasmBytes — populating the same compile cache
+// Call uses under wasmKey, so a validation run at upload time also primes
+// the first real call rather than compiling twice — and confirms every
+// name in funcNames is actually exported. This is the upload-time
+// automated gate (spec-20 §5.3): a manifest can *claim* an entry point
+// exists; only resolving it against the compiled module proves it.
+func (r *Runtime) ValidateEntries(ctx context.Context, wasmKey string, wasmBytes []byte, funcNames []string) error {
+	cp, err := r.compile(ctx, wasmKey, wasmBytes, Options{})
+	if err != nil {
+		return err
+	}
+
+	instance, err := cp.Instance(ctx, extism.PluginInstanceConfig{})
+	if err != nil {
+		return fmt.Errorf("extism: instantiate plugin %q for validation: %w", wasmKey, err)
+	}
+	defer func() { _ = instance.Close(ctx) }()
+
+	var missing []string
+	for _, fn := range funcNames {
+		if !instance.FunctionExists(fn) {
+			missing = append(missing, fn)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("extism: plugin %q missing exported function(s): %s", wasmKey, strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 // Close releases every cached compiled module — call this on server

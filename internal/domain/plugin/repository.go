@@ -70,3 +70,13 @@ type PublisherKeys interface {
 // ErrNoSigningKey is returned by PublisherKeys.Get when the caller hasn't
 // registered a key yet.
 var ErrNoSigningKey = errors.New("plugin: no signing key registered")
+
+// WasmValidator confirms an uploaded plugin's compiled WASM module
+// actually exports every function its manifest's tools/connectors/hooks
+// entries claim to have — spec-20 §5.3's automated gate, run once at
+// upload time so a broken entry point is caught before the plugin can
+// ever be installed, not discovered the first time an agent calls it.
+// Implementations live in internal/adapter/extism.
+type WasmValidator interface {
+	ValidateEntries(ctx context.Context, wasmKey string, wasmBytes []byte, funcNames []string) error
+}

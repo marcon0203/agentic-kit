@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"errors"
 	"testing"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
 	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
 )
+
+var errValidationFailed = errors.New("missing exported function")
 
 // ── Fakes ────────────────────────────────────────────────────────────
 
@@ -198,12 +201,27 @@ func (v failValidator) Validate(map[string]any) ([]domain.FieldError, error) { r
 
 type fakeAdmins struct{ admins map[int64]bool }
 
-func (f *fakeAdmins) IsAdmin(_ context.Context, userID int64) (bool, error) { return f.admins[userID], nil }
+func (f *fakeAdmins) IsAdmin(_ context.Context, userID int64) (bool, error) {
+	return f.admins[userID], nil
+}
 
 type fakeCipher struct{}
 
 func (fakeCipher) Encrypt(s string) (string, error) { return "enc:" + s, nil }
 func (fakeCipher) Decrypt(s string) (string, error) { return s[len("enc:"):], nil }
+
+type fakeWasmValidator struct {
+	calls   int
+	wasmKey string
+	fns     []string
+	err     error
+}
+
+func (f *fakeWasmValidator) ValidateEntries(_ context.Context, wasmKey string, _ []byte, funcNames []string) error {
+	f.calls++
+	f.wasmKey, f.fns = wasmKey, funcNames
+	return f.err
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -223,7 +241,7 @@ func signedUpload(t *testing.T, priv ed25519.PrivateKey, pluginID, version strin
 // ── Tests ────────────────────────────────────────────────────────────
 
 func TestUpload_RejectsUnregisteredPublisher(t *testing.T) {
-	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{})
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	_ = pub
 
@@ -240,7 +258,7 @@ func TestUpload_RejectsBadSignature(t *testing.T) {
 	keys.byUser[1] = pub
 	_, otherPriv, _ := ed25519.GenerateKey(nil)
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{})
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
 	_, err := svc.Upload(context.Background(), 1, signedUpload(t, otherPriv, "acme.charts", "1.0.0"))
 	de, ok := domain.AsError(err)
 	if !ok || de.Code != domain.CodePluginSignatureInvalid {
@@ -253,7 +271,7 @@ func TestUpload_RejectsManifestSchemaFailure(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, failValidator{errs: []domain.FieldError{{Field: "id", Reason: "bad"}}}, &fakeAdmins{}, fakeCipher{})
+	svc := plugin.NewService(newFakeRepo(), keys, failValidator{errs: []domain.FieldError{{Field: "id", Reason: "bad"}}}, &fakeAdmins{}, fakeCipher{}, nil)
 	_, err := svc.Upload(context.Background(), 1, signedUpload(t, priv, "acme.charts", "1.0.0"))
 	de, ok := domain.AsError(err)
 	if !ok || de.Code != domain.CodePluginManifestInvalid {
@@ -266,7 +284,7 @@ func TestUpload_SucceedsAsPrivatePending(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{})
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
 	p, err := svc.Upload(context.Background(), 1, signedUpload(t, priv, "acme.charts", "1.0.0"))
 	if err != nil {
 		t.Fatalf("Upload: %v", err)
@@ -281,7 +299,7 @@ func TestUpload_RejectsDuplicateVersion(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{})
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
 	ctx := context.Background()
 	if _, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0")); err != nil {
 		t.Fatalf("first Upload: %v", err)
@@ -298,7 +316,7 @@ func TestInstall_OwnerCanInstallOwnPrivateUpload(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{})
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
 	ctx := context.Background()
 	if _, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0")); err != nil {
 		t.Fatalf("Upload: %v", err)
@@ -318,7 +336,7 @@ func TestInstall_RejectsUnpublishedPluginForOtherUsers(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{})
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
 	ctx := context.Background()
 	if _, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0")); err != nil {
 		t.Fatalf("Upload: %v", err)
@@ -337,7 +355,7 @@ func TestInstall_EncryptsCredentialConfig(t *testing.T) {
 	keys.byUser[1] = pub
 
 	repo := newFakeRepo()
-	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{}, fakeCipher{})
+	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
 	ctx := context.Background()
 	if _, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0")); err != nil {
 		t.Fatalf("Upload: %v", err)
@@ -370,7 +388,7 @@ func TestReview_RequiresAdmin(t *testing.T) {
 	keys.byUser[1] = pub
 
 	repo := newFakeRepo()
-	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{admins: map[int64]bool{}}, fakeCipher{})
+	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{admins: map[int64]bool{}}, fakeCipher{}, nil)
 	ctx := context.Background()
 	created, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0"))
 	if err != nil {
@@ -393,7 +411,7 @@ func TestReview_ApprovePutsVersionInMarket(t *testing.T) {
 	keys.byUser[1] = pub
 
 	repo := newFakeRepo()
-	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{admins: map[int64]bool{42: true}}, fakeCipher{})
+	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{admins: map[int64]bool{42: true}}, fakeCipher{}, nil)
 	ctx := context.Background()
 	created, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0"))
 	if err != nil {
@@ -424,10 +442,113 @@ func TestReview_ApprovePutsVersionInMarket(t *testing.T) {
 }
 
 func TestUninstall_NotInstalledReturnsNotFound(t *testing.T) {
-	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{})
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
 	err := svc.Uninstall(context.Background(), 1, "acme.charts")
 	de, ok := domain.AsError(err)
 	if !ok || de.Code != domain.CodePluginNotInstalled {
 		t.Fatalf("expected CodePluginNotInstalled, got %v", err)
+	}
+}
+
+func TestUpload_RejectsOversizedPackage(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
+	cmd.Package = make([]byte, plugin.MaxPackageBytes+1)
+	// Re-sign over the (now oversized) package so this fails on size, not
+	// on a stale signature.
+	digest := sha256.Sum256(cmd.Package)
+	cmd.Signature = ed25519.Sign(priv, digest[:])
+
+	_, err := svc.Upload(context.Background(), 1, cmd)
+	de, ok := domain.AsError(err)
+	if !ok || de.Code != domain.CodePluginManifestInvalid {
+		t.Fatalf("expected CodePluginManifestInvalid for an oversized package, got %v", err)
+	}
+}
+
+func TestUpload_RejectsToolsEntryWithNoWasm(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
+	cmd.Manifest["extensions"] = map[string]any{
+		"tools": []any{map[string]any{"name": "render_chart", "entry": "plugin.wasm#render_chart"}},
+	}
+
+	_, err := svc.Upload(context.Background(), 1, cmd)
+	de, ok := domain.AsError(err)
+	if !ok || de.Code != domain.CodePluginManifestInvalid {
+		t.Fatalf("expected CodePluginManifestInvalid when tools[] is declared with no plugin.wasm, got %v", err)
+	}
+}
+
+func TestUpload_RejectsMalformedEntryFormat(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
+	cmd.Manifest["extensions"] = map[string]any{
+		"tools": []any{map[string]any{"name": "render_chart", "entry": "plugin.wasm"}}, // missing "#function"
+	}
+
+	_, err := svc.Upload(context.Background(), 1, cmd)
+	de, ok := domain.AsError(err)
+	if !ok || de.Code != domain.CodePluginManifestInvalid {
+		t.Fatalf("expected CodePluginManifestInvalid for a malformed entry, got %v", err)
+	}
+}
+
+func TestUpload_RunsWasmValidatorWhenToolsDeclared(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	wasm := &fakeWasmValidator{}
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, wasm)
+	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
+	cmd.Manifest["extensions"] = map[string]any{
+		"tools": []any{map[string]any{"name": "render_chart", "entry": "plugin.wasm#render_chart"}},
+	}
+	cmd.WasmBytes = []byte{0x00, 0x61, 0x73, 0x6d}
+
+	if _, err := svc.Upload(context.Background(), 1, cmd); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if wasm.calls != 1 {
+		t.Fatalf("expected the wasm validator to be called once, got %d", wasm.calls)
+	}
+	if wasm.wasmKey != "acme.charts@1.0.0" {
+		t.Fatalf("unexpected wasm key: %q", wasm.wasmKey)
+	}
+	if len(wasm.fns) != 1 || wasm.fns[0] != "render_chart" {
+		t.Fatalf("expected funcNames [render_chart], got %v", wasm.fns)
+	}
+}
+
+func TestUpload_RejectsWhenWasmValidatorFails(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	wasm := &fakeWasmValidator{err: errValidationFailed}
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, wasm)
+	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
+	cmd.Manifest["extensions"] = map[string]any{
+		"tools": []any{map[string]any{"name": "render_chart", "entry": "plugin.wasm#render_chart"}},
+	}
+	cmd.WasmBytes = []byte{0x00, 0x61, 0x73, 0x6d}
+
+	_, err := svc.Upload(context.Background(), 1, cmd)
+	de, ok := domain.AsError(err)
+	if !ok || de.Code != domain.CodePluginManifestInvalid {
+		t.Fatalf("expected CodePluginManifestInvalid when the wasm validator rejects the module, got %v", err)
 	}
 }

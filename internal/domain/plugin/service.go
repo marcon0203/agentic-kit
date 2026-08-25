@@ -5,9 +5,16 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
 )
+
+// MaxPackageBytes caps a single .akp upload (spec-20 §5.3's automated
+// gate). No number is prescribed by the spec; a generous but bounded
+// ceiling keeps one plugin from filling OSS storage indefinitely.
+const MaxPackageBytes = 50 * 1024 * 1024 // 50 MiB
 
 // Service is the 插件体系 application service.
 type Service struct {
@@ -16,10 +23,15 @@ type Service struct {
 	validator ManifestValidator
 	admins    AdminDirectory
 	cipher    CredentialCipher
+	// wasm runs the automated gate's compilability/entry-existence check
+	// (spec-20 §5.3). Nil is tolerated — Upload simply skips that one
+	// check — so the domain package stays testable and wireable before
+	// internal/adapter/extism exists in a given deployment path.
+	wasm WasmValidator
 }
 
-func NewService(repo Repository, keys PublisherKeys, validator ManifestValidator, admins AdminDirectory, cipher CredentialCipher) *Service {
-	return &Service{repo: repo, keys: keys, validator: validator, admins: admins, cipher: cipher}
+func NewService(repo Repository, keys PublisherKeys, validator ManifestValidator, admins AdminDirectory, cipher CredentialCipher, wasm WasmValidator) *Service {
+	return &Service{repo: repo, keys: keys, validator: validator, admins: admins, cipher: cipher, wasm: wasm}
 }
 
 // RegisterSigningKey stores a publisher's Ed25519 public verification key,
@@ -45,6 +57,12 @@ type UploadCommand struct {
 	OSSPrefix string
 	Package   []byte // raw .akp bytes, hashed here to verify Signature
 	Signature []byte
+	// WasmBytes is the package's extracted plugin.wasm content (spec-20
+	// §3.1's .akp layout) — nil for a frontend-only plugin whose manifest
+	// declares no tools/connectors/hooks entries. Extracting it from the
+	// uploaded .akp zip is the caller's job (transport-layer file-format
+	// work); the domain layer only ever sees the bytes it needs to check.
+	WasmBytes []byte
 }
 
 // Upload validates the manifest, verifies the publisher's signature over
@@ -53,6 +71,10 @@ type UploadCommand struct {
 // visibility needs no review); entering the market queue is a separate,
 // deliberate SetVisibility(Public) call.
 func (s *Service) Upload(ctx context.Context, publisherID int64, cmd UploadCommand) (Plugin, error) {
+	if len(cmd.Package) > MaxPackageBytes {
+		return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, fmt.Sprintf("package exceeds the %d byte limit", MaxPackageBytes))
+	}
+
 	fieldErrs, err := s.validator.Validate(cmd.Manifest)
 	if err != nil {
 		return Plugin{}, domain.Internal(err)
@@ -77,6 +99,26 @@ func (s *Service) Upload(ctx context.Context, publisherID int64, cmd UploadComma
 	digest := sha256.Sum256(cmd.Package)
 	if !ed25519.Verify(pubKey, digest[:], cmd.Signature) {
 		return Plugin{}, domain.Invalid(domain.CodePluginSignatureInvalid, "package signature does not verify against the registered key")
+	}
+
+	// Automated gate (spec-20 §5.3): a manifest can *claim* its
+	// tools/connectors/hooks entries exist — only actually resolving them
+	// against the compiled module proves it, catching a broken package at
+	// upload time instead of the first time an agent tries to call it.
+	funcNames, err := wasmEntryFuncNames(cmd.Manifest)
+	if err != nil {
+		return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, err.Error())
+	}
+	if len(funcNames) > 0 {
+		if len(cmd.WasmBytes) == 0 {
+			return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, "manifest declares tools/connectors/hooks entries but no plugin.wasm was provided")
+		}
+		if s.wasm != nil {
+			wasmKey := cmd.PluginID + "@" + cmd.Version
+			if err := s.wasm.ValidateEntries(ctx, wasmKey, cmd.WasmBytes, funcNames); err != nil {
+				return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, "wasm module failed automated validation: "+err.Error())
+			}
+		}
 	}
 
 	owner := publisherID
@@ -427,4 +469,34 @@ func encodeSignature(sig []byte) string {
 		out[i*2+1] = hextable[b&0x0f]
 	}
 	return string(out)
+}
+
+// wasmEntryFuncNames collects the exported function name half of every
+// tools/connectors/hooks entry in a manifest — the set the automated gate
+// must confirm actually exists in the compiled module. renderers are
+// deliberately excluded: they run in a frontend iframe (spec-20 §3.2), not
+// the WASM sandbox, so their entry is a file path, not an exported
+// function.
+func wasmEntryFuncNames(manifest map[string]any) ([]string, error) {
+	extensions, _ := manifest["extensions"].(map[string]any)
+	var names []string
+	for _, point := range []string{"tools", "connectors", "hooks"} {
+		items, _ := extensions[point].([]any)
+		for _, item := range items {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			entry, _ := m["entry"].(string)
+			if entry == "" {
+				continue
+			}
+			_, fn, ok := strings.Cut(entry, "#")
+			if !ok || fn == "" {
+				return nil, fmt.Errorf("extensions.%s entry %q: expected \"<file>#<function>\"", point, entry)
+			}
+			names = append(names, fn)
+		}
+	}
+	return names, nil
 }

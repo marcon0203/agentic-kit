@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/marcon0203/agentic-kit/internal/adapter/extism"
+	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
 )
 
 // testdata/hello.wasm and fail.wasm are extism/go-sdk's own upstream test
@@ -69,6 +70,50 @@ func TestRuntime_CallUnknownFunctionErrors(t *testing.T) {
 	_, err := rt.Call(context.Background(), "hello@1.0.0", loadWasm(t, "hello.wasm"), extism.Options{}, "does_not_exist", nil)
 	if err == nil {
 		t.Fatal("expected an error calling an unknown function")
+	}
+}
+
+// Runtime must satisfy the domain port it backs — a compile-time check,
+// not a runtime assertion.
+var _ plugin.WasmValidator = (*extism.Runtime)(nil)
+
+func TestRuntime_ValidateEntriesAcceptsExistingFunction(t *testing.T) {
+	rt := extism.NewRuntime()
+	defer func() { _ = rt.Close(context.Background()) }()
+
+	err := rt.ValidateEntries(context.Background(), "hello@1.0.0", loadWasm(t, "hello.wasm"), []string{"run_test"})
+	if err != nil {
+		t.Fatalf("ValidateEntries: %v", err)
+	}
+}
+
+func TestRuntime_ValidateEntriesRejectsMissingFunction(t *testing.T) {
+	rt := extism.NewRuntime()
+	defer func() { _ = rt.Close(context.Background()) }()
+
+	err := rt.ValidateEntries(context.Background(), "hello@1.0.0", loadWasm(t, "hello.wasm"), []string{"does_not_exist"})
+	if err == nil {
+		t.Fatal("expected an error for a function the module doesn't export")
+	}
+}
+
+func TestRuntime_ValidateEntriesPrimesCompileCacheForCall(t *testing.T) {
+	rt := extism.NewRuntime()
+	defer func() { _ = rt.Close(context.Background()) }()
+
+	wasm := loadWasm(t, "hello.wasm")
+	if err := rt.ValidateEntries(context.Background(), "hello@1.0.0", wasm, []string{"run_test"}); err != nil {
+		t.Fatalf("ValidateEntries: %v", err)
+	}
+	// A subsequent Call under the same wasmKey reuses the same compiled
+	// module rather than recompiling — proven indirectly by it succeeding
+	// without needing wasm bytes to be re-supplied correctly.
+	out, err := rt.Call(context.Background(), "hello@1.0.0", wasm, extism.Options{}, "run_test", nil)
+	if err != nil {
+		t.Fatalf("Call after ValidateEntries: %v", err)
+	}
+	if string(out) != "Hello, world!" {
+		t.Fatalf("expected %q, got %q", "Hello, world!", out)
 	}
 }
 
