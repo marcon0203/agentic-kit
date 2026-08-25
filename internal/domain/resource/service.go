@@ -21,6 +21,11 @@ var (
 // inside the adapter and the service reads as one flow.
 type Repository interface {
 	Create(ctx context.Context, r Resource) (Resource, error)
+	// CreateBatch creates every given resource in one all-or-nothing
+	// transaction — used by CreateComponentsBatch (OpenAPI import, spec-05a
+	// §4) so a duplicate ref partway through a batch leaves nothing
+	// half-registered rather than the first N operations.
+	CreateBatch(ctx context.Context, resources []Resource) ([]Resource, error)
 	GetByID(ctx context.Context, kind Kind, id, ownerID int64) (Resource, error)
 	ListPage(ctx context.Context, kind Kind, ownerID, afterID int64, limit int32) ([]Resource, error)
 	Update(ctx context.Context, r Resource) (Resource, error)
@@ -84,6 +89,13 @@ type Service struct {
 	// than panicking; the rest of the service works identically either way.
 	objectStore ObjectStore
 	skillFiles  SkillFileRepository
+
+	// openAPIParser backs ImportOpenAPIPreview/CreateComponentsBatch
+	// (openapi_import.go); nil means that surface returns a clear "not
+	// configured" error rather than a nil-pointer panic — it's always
+	// available in practice (no external dependency to gate it, unlike OSS)
+	// but kept opt-in for the same builder-method shape as WithSkillUploads.
+	openAPIParser OpenAPIParser
 }
 
 // kbEnabled mirrors config.Config.KBEnabled — the knowledge_base kind

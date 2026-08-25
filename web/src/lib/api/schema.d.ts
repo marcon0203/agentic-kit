@@ -346,6 +346,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/resources/components/import-openapi": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 解析 OpenAPI spec，返回 operation 列表（预览，不落库）
+         * @description 组件的 OpenAPI 导入是"预览 → 勾选 → 批量创建"三步：这一步只解析 spec（`spec_url`
+         *     或直接贴 `spec_content`，二选一）并列出每个 operation，供前端勾选；真正落库是
+         *     `POST /resources/components/batch` 的事。
+         */
+        post: operations["importOpenAPI"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resources/components/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量创建勾选的 operation（单事务）
+         * @description 每个 operation 各建一行独立的 `tools` 资源，`ref` 形如 `{base_ref}__{operation_id}`，
+         *     `config` 存 `{component_type:"tool", tool_type:"openapi", method, path, base_url,
+         *     import_group}`——`capabilities.tools[]` 引用其中任一 ref 时和手填的 http 型 Tool
+         *     完全一样，Agent 层不用感知这个来源。整批在一个事务里创建，任何一个 ref 冲突都会让
+         *     整批失败，不会留下部分创建的状态。
+         */
+        post: operations["batchCreateComponents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/resources/{id}/delete-check": {
         parameters: {
             query?: never;
@@ -1056,6 +1102,15 @@ export interface components {
             health?: "unknown" | "healthy" | "unhealthy";
             /** Format: date-time */
             created_at: string;
+        };
+        OpenAPIOperation: {
+            /** @description 已消毒为 ref 安全片段（小写字母数字下划线），不一定是 spec 原始 operationId */
+            operation_id: string;
+            /** @example GET */
+            method: string;
+            /** @example /pets/{id} */
+            path: string;
+            summary?: string;
         };
         AgentDefinition: {
             /** @example architect */
@@ -2176,6 +2231,84 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    importOpenAPI: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    spec_url?: string;
+                    spec_content?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            /** @description spec 的 servers[0].url，可能为空 */
+                            base_url?: string;
+                            operations?: components["schemas"]["OpenAPIOperation"][];
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    batchCreateComponents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    base_ref: string;
+                    base_url: string;
+                    operations: components["schemas"]["OpenAPIOperation"][];
+                };
+            };
+        };
+        responses: {
+            /** @description 创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items?: components["schemas"]["Resource"][];
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 批次中至少一个 ref 已存在，整批未创建 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
         };
     };
     checkResourceDeletable: {

@@ -18,7 +18,7 @@ func TestCallEndpoint_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	out, err := callEndpoint(context.Background(), srv.Client(), srv.URL, "internal-search", `{"q":"go"}`)
+	out, err := callEndpoint(context.Background(), srv.Client(), http.MethodPost, srv.URL, "internal-search", `{"q":"go"}`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -34,16 +34,67 @@ func TestCallEndpoint_HTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := callEndpoint(context.Background(), srv.Client(), srv.URL, "internal-search", "")
+	_, err := callEndpoint(context.Background(), srv.Client(), http.MethodPost, srv.URL, "internal-search", "")
 	if err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("expected an http 500 error, got %v", err)
 	}
 }
 
 func TestCallEndpoint_NoEndpointConfigured(t *testing.T) {
-	_, err := callEndpoint(context.Background(), http.DefaultClient, "", "internal-search", "")
+	_, err := callEndpoint(context.Background(), http.DefaultClient, http.MethodPost, "", "internal-search", "")
 	if err == nil {
 		t.Fatal("expected an error for a resource with no endpoint")
+	}
+}
+
+func TestCallEndpoint_GETSendsNoBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET, got %s", r.Method)
+		}
+		if r.ContentLength > 0 {
+			t.Fatalf("expected no request body, got Content-Length %d", r.ContentLength)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	out, err := callEndpoint(context.Background(), srv.Client(), http.MethodGet, srv.URL, "list-pets", "ignored input")
+	if err != nil {
+		t.Fatalf("callEndpoint: %v", err)
+	}
+	if out != `[]` {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestBuildEndpointTool_PlainHTTP_DefaultsToolType(t *testing.T) {
+	tl, err := buildEndpointTool(ToolSpec{Ref: "legacy-tool", Config: map[string]any{"endpoint": "http://example.com"}})
+	if err != nil {
+		t.Fatalf("buildEndpointTool: %v", err)
+	}
+	if tl.Name() != "legacy-tool" {
+		t.Fatalf("unexpected tool name: %q", tl.Name())
+	}
+}
+
+func TestBuildEndpointTool_OpenAPIToolType_DispatchesToOpenAPIBuilder(t *testing.T) {
+	tl, err := buildEndpointTool(ToolSpec{
+		Ref: "petstore__list_pets",
+		Config: map[string]any{
+			"component_type": "tool", "tool_type": "openapi",
+			"method": "GET", "path": "/pets", "base_url": "https://api.example.com",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildEndpointTool: %v", err)
+	}
+	if tl.Name() != "petstore__list_pets" {
+		t.Fatalf("unexpected tool name: %q", tl.Name())
+	}
+	if !strings.Contains(tl.Description(), "GET") || !strings.Contains(tl.Description(), "/pets") {
+		t.Fatalf("expected the description to name the method/path, got %q", tl.Description())
 	}
 }
 

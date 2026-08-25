@@ -11,13 +11,25 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
 
+// txBeginner is the one pgxpool.Pool capability CreateBatch needs — a real
+// transaction spanning multiple inserts — narrowed to just Begin so this
+// file doesn't need the full pgxpool API surface.
+type txBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
 // ResourceRepository implements resource.Repository. The four kinds live in
 // four tables (spec-05 "分表设计"), so every method dispatches on Kind — that
 // fan-out is exactly the storage detail the port exists to hide, and it now
 // lives here instead of in a map of stores held by the HTTP handler.
-type ResourceRepository struct{ q store.Querier }
+type ResourceRepository struct {
+	q    store.Querier
+	pool txBeginner
+}
 
-func NewResourceRepository(q store.Querier) *ResourceRepository { return &ResourceRepository{q: q} }
+func NewResourceRepository(q store.Querier, pool txBeginner) *ResourceRepository {
+	return &ResourceRepository{q: q, pool: pool}
+}
 
 var _ resource.Repository = (*ResourceRepository)(nil)
 
@@ -35,6 +47,42 @@ func marshalResource(r resource.Resource) (config, displayMeta []byte, err error
 }
 
 func (r *ResourceRepository) Create(ctx context.Context, res resource.Resource) (resource.Resource, error) {
+	return createWith(ctx, r.q, res)
+}
+
+// CreateBatch creates every resource inside one real Postgres transaction
+// (OpenAPI import, spec-05a §4: a batch import must be all-or-nothing, not
+// "however many rows made it before the duplicate ref") — Begin/Commit come
+// from the pool itself since store.Querier alone can't span a transaction.
+func (r *ResourceRepository) CreateBatch(ctx context.Context, resources []resource.Resource) ([]resource.Resource, error) {
+	if r.pool == nil {
+		return nil, errors.New("resource repository: batch create requires a transaction-capable pool")
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	q := store.New(tx)
+	out := make([]resource.Resource, 0, len(resources))
+	for _, res := range resources {
+		created, err := createWith(ctx, q, res)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, created)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// createWith is Create's actual body, parameterized over the querier so
+// CreateBatch can run it against a transaction-scoped *store.Queries
+// instead of the repository's own pool-backed one.
+func createWith(ctx context.Context, q store.Querier, res resource.Resource) (resource.Resource, error) {
 	config, displayMeta, err := marshalResource(res)
 	if err != nil {
 		return resource.Resource{}, err
@@ -43,31 +91,31 @@ func (r *ResourceRepository) Create(ctx context.Context, res resource.Resource) 
 	var out resource.Resource
 	switch res.Kind {
 	case resource.KindTool:
-		got, e := r.q.CreateTool(ctx, store.CreateToolParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta})
+		got, e := q.CreateTool(ctx, store.CreateToolParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta})
 		if e != nil {
 			return resource.Resource{}, translateResourceErr(e)
 		}
 		out = fromTool(got)
 	case resource.KindSkill:
-		got, e := r.q.CreateSkill(ctx, store.CreateSkillParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta})
+		got, e := q.CreateSkill(ctx, store.CreateSkillParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta})
 		if e != nil {
 			return resource.Resource{}, translateResourceErr(e)
 		}
 		out = fromSkill(got)
 	case resource.KindKnowledgeBase:
-		got, e := r.q.CreateKnowledgeBase(ctx, store.CreateKnowledgeBaseParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta})
+		got, e := q.CreateKnowledgeBase(ctx, store.CreateKnowledgeBaseParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta})
 		if e != nil {
 			return resource.Resource{}, translateResourceErr(e)
 		}
 		out = fromKB(got)
 	case resource.KindMCP:
-		got, e := r.q.CreateMCPServer(ctx, store.CreateMCPServerParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta, Health: "unknown"})
+		got, e := q.CreateMCPServer(ctx, store.CreateMCPServerParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta, Health: "unknown"})
 		if e != nil {
 			return resource.Resource{}, translateResourceErr(e)
 		}
 		out = fromMCP(got)
 	case resource.KindMemory:
-		got, e := r.q.CreateMemory(ctx, store.CreateMemoryParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta})
+		got, e := q.CreateMemory(ctx, store.CreateMemoryParams{OwnerUserID: res.OwnerID, Ref: res.Ref, Version: res.Version, Config: config, DisplayMeta: displayMeta})
 		if e != nil {
 			return resource.Resource{}, translateResourceErr(e)
 		}

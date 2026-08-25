@@ -106,6 +106,8 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Patch("/resources/{id}", cfg.Resources.Update)
 				r.Get("/resources/{id}/delete-check", cfg.Resources.DeleteCheck)
 				r.Post("/resources/mcp/probe", cfg.Resources.Probe)
+				r.Post("/resources/components/import-openapi", cfg.Resources.ImportOpenAPI)
+				r.Post("/resources/components/batch", cfg.Resources.BatchCreateComponents)
 				r.Post("/resources/skills/upload", cfg.Resources.UploadSkill)
 				r.Get("/resources/skills/{id}/files", cfg.Resources.ListSkillFiles)
 				r.Get("/resources/skills/{id}/files/*", cfg.Resources.GetSkillFile)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -268,7 +269,19 @@ type toolResult struct {
 	Output string `json:"output"`
 }
 
+// buildEndpointTool builds a "tool"-kind resource's callable action.
+// config.tool_type distinguishes its two shapes (spec-05a §4): absent or
+// "http" (default, unchanged behavior — POST to config.endpoint, body
+// passed through verbatim) versus "openapi" (one operation out of an
+// imported spec — config.method/path/base_url pick the request instead).
+// Either way the Agent-facing shape is identical ({input} in, {output}
+// out) — an Agent referencing an openapi-shaped tool by ref behaves exactly
+// like referencing a hand-configured http one.
 func buildEndpointTool(spec ToolSpec) (tool.Tool, error) {
+	if toolType, _ := spec.Config[ConfigKeyToolType].(string); toolType == ToolTypeOpenAPI {
+		return buildOpenAPITool(spec)
+	}
+
 	endpoint, _ := spec.Config["endpoint"].(string)
 	description, _ := spec.Config["description"].(string)
 	if description == "" {
@@ -278,19 +291,52 @@ func buildEndpointTool(spec ToolSpec) (tool.Tool, error) {
 
 	return functiontool.New(functiontool.Config{Name: spec.Ref, Description: description},
 		func(ctx agent.ToolContext, args toolArgs) (toolResult, error) {
-			output, err := callEndpoint(ctx, client, endpoint, spec.Ref, args.Input)
+			output, err := callEndpoint(ctx, client, http.MethodPost, endpoint, spec.Ref, args.Input)
 			return toolResult{Output: output}, err
 		})
 }
 
-// callEndpoint is buildEndpointTool's HTTP call, factored out so it's
-// testable against an httptest.Server without needing a live
-// agent.ToolContext (which only ADK's own runtime can construct).
-func callEndpoint(ctx context.Context, client *http.Client, endpoint, ref, input string) (string, error) {
+// buildOpenAPITool builds one operation out of an imported OpenAPI spec —
+// config.method/path/base_url (set at import time by
+// resource.Service.CreateComponentsBatch) replace the hand-typed single
+// endpoint a plain http Tool has.
+func buildOpenAPITool(spec ToolSpec) (tool.Tool, error) {
+	method, _ := spec.Config["method"].(string)
+	if method == "" {
+		method = http.MethodGet
+	}
+	path, _ := spec.Config["path"].(string)
+	baseURL, _ := spec.Config["base_url"].(string)
+	endpoint := strings.TrimRight(baseURL, "/") + path
+
+	description, _ := spec.Config["description"].(string)
+	if description == "" {
+		description = fmt.Sprintf("Calls %s %s.", method, path)
+	}
+	client := &http.Client{Timeout: toolCallTimeout}
+
+	return functiontool.New(functiontool.Config{Name: spec.Ref, Description: description},
+		func(ctx agent.ToolContext, args toolArgs) (toolResult, error) {
+			output, err := callEndpoint(ctx, client, method, endpoint, spec.Ref, args.Input)
+			return toolResult{Output: output}, err
+		})
+}
+
+// callEndpoint is buildEndpointTool/buildOpenAPITool's HTTP call, factored
+// out so it's testable against an httptest.Server without needing a live
+// agent.ToolContext (which only ADK's own runtime can construct). A GET or
+// DELETE never sends a body — matching the HTTP methods a request body has
+// no defined meaning for — every other method passes args.Input through
+// verbatim, same as the original hand-configured http Tool always did.
+func callEndpoint(ctx context.Context, client *http.Client, method, endpoint, ref, input string) (string, error) {
 	if endpoint == "" {
 		return "", fmt.Errorf("resource %q has no endpoint configured", ref)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader([]byte(input)))
+	var body io.Reader
+	if method != http.MethodGet && method != http.MethodDelete {
+		body = bytes.NewReader([]byte(input))
+	}
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		return "", err
 	}
@@ -300,14 +346,14 @@ func callEndpoint(ctx context.Context, client *http.Client, endpoint, ref, input
 		return "", fmt.Errorf("calling %s: %w", ref, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("%s: http %d: %s", ref, resp.StatusCode, string(body))
+		return "", fmt.Errorf("%s: http %d: %s", ref, resp.StatusCode, string(respBody))
 	}
-	return string(body), nil
+	return string(respBody), nil
 }
 
 // buildSkillTool surfaces a Skill's instructions as the tool's result. A

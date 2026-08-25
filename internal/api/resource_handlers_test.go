@@ -42,6 +42,28 @@ func (f *fakeResourceRepo) Create(_ context.Context, r resource.Resource) (resou
 	return r, nil
 }
 
+// CreateBatch simulates a real transaction the same way
+// internal/domain/resource's own fakeRepo test double does: check every ref
+// is free before writing any of them.
+func (f *fakeResourceRepo) CreateBatch(ctx context.Context, resources []resource.Resource) ([]resource.Resource, error) {
+	for _, r := range resources {
+		for _, existing := range f.rows {
+			if existing.OwnerID == r.OwnerID && existing.Kind == r.Kind && existing.Ref == r.Ref {
+				return nil, resource.ErrDuplicate
+			}
+		}
+	}
+	out := make([]resource.Resource, 0, len(resources))
+	for _, r := range resources {
+		created, err := f.Create(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, created)
+	}
+	return out, nil
+}
+
 func (f *fakeResourceRepo) GetByID(_ context.Context, kind resource.Kind, id, ownerID int64) (resource.Resource, error) {
 	row, ok := f.rows[id]
 	if !ok || row.OwnerID != ownerID || row.Kind != kind {

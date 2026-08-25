@@ -21,6 +21,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
 	"github.com/marcon0203/agentic-kit/internal/adapter/milvus"
 	adaptermodelgateway "github.com/marcon0203/agentic-kit/internal/adapter/modelgateway"
+	adapteropenapi "github.com/marcon0203/agentic-kit/internal/adapter/openapi"
 	"github.com/marcon0203/agentic-kit/internal/adapter/orchestrator"
 	"github.com/marcon0203/agentic-kit/internal/adapter/oss"
 	"github.com/marcon0203/agentic-kit/internal/adapter/password"
@@ -127,11 +128,11 @@ func run() error {
 	)
 
 	resourceService := resource.NewService(
-		postgres.NewResourceRepository(queries),
+		postgres.NewResourceRepository(queries, pool),
 		adaptercrypto.NewCipher(aesKey),
 		mcp.NewReachabilityProbe(),
 		cfg.KBEnabled,
-	)
+	).WithOpenAPIImport(adapteropenapi.NewParser())
 	// Skill zip upload needs an object store; a deployment that never sets
 	// the OSS_* vars still boots cleanly (WithSkillUploads just never gets
 	// called, so UploadSkill/ListSkillFiles/GetSkillFile all return a clear

@@ -57,6 +57,30 @@ func (f *fakeRepo) Create(_ context.Context, r resource.Resource) (resource.Reso
 	return r, nil
 }
 
+// CreateBatch simulates a real transaction: it validates every ref is free
+// before writing any of them, so a duplicate anywhere in the batch leaves
+// the repo completely unchanged — the same all-or-nothing guarantee the
+// real Postgres implementation gets from wrapping the inserts in a tx.
+func (f *fakeRepo) CreateBatch(_ context.Context, resources []resource.Resource) ([]resource.Resource, error) {
+	for _, r := range resources {
+		if f.refs[refKey(r.Kind, r.OwnerID, r.Ref)] {
+			return nil, resource.ErrDuplicate
+		}
+	}
+	out := make([]resource.Resource, len(resources))
+	for i, r := range resources {
+		f.refs[refKey(r.Kind, r.OwnerID, r.Ref)] = true
+		r.ID = f.nextID
+		f.nextID++
+		if f.byKind[r.Kind] == nil {
+			f.byKind[r.Kind] = map[int64]resource.Resource{}
+		}
+		f.byKind[r.Kind][r.ID] = r
+		out[i] = r
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) GetByID(_ context.Context, kind resource.Kind, id, ownerID int64) (resource.Resource, error) {
 	r, ok := f.byKind[kind][id]
 	if !ok || r.OwnerID != ownerID {

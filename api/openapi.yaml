@@ -696,6 +696,94 @@ paths:
                           error: { type: string }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /resources/components/import-openapi:
+    post:
+      tags: [Resources]
+      summary: 解析 OpenAPI spec，返回 operation 列表（预览，不落库）
+      description: |
+        组件的 OpenAPI 导入是"预览 → 勾选 → 批量创建"三步：这一步只解析 spec（`spec_url`
+        或直接贴 `spec_content`，二选一）并列出每个 operation，供前端勾选；真正落库是
+        `POST /resources/components/batch` 的事。
+      operationId: importOpenAPI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                spec_url: { type: string }
+                spec_content: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          base_url:
+                            type: string
+                            description: spec 的 servers[0].url，可能为空
+                          operations:
+                            type: array
+                            items: { $ref: '#/components/schemas/OpenAPIOperation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /resources/components/batch:
+    post:
+      tags: [Resources]
+      summary: 批量创建勾选的 operation（单事务）
+      description: |
+        每个 operation 各建一行独立的 `tools` 资源，`ref` 形如 `{base_ref}__{operation_id}`，
+        `config` 存 `{component_type:"tool", tool_type:"openapi", method, path, base_url,
+        import_group}`——`capabilities.tools[]` 引用其中任一 ref 时和手填的 http 型 Tool
+        完全一样，Agent 层不用感知这个来源。整批在一个事务里创建，任何一个 ref 冲突都会让
+        整批失败，不会留下部分创建的状态。
+      operationId: batchCreateComponents
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [base_ref, base_url, operations]
+              properties:
+                base_ref: { type: string, pattern: '^[a-z][a-z0-9_-]*$' }
+                base_url: { type: string }
+                operations:
+                  type: array
+                  items: { $ref: '#/components/schemas/OpenAPIOperation' }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Resource' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: 批次中至少一个 ref 已存在，整批未创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
   # ────────────────────────── Agent ──────────────────────────
   /resources/{id}/delete-check:
     parameters:
@@ -2151,6 +2239,17 @@ components:
           description: MCP Server 等外部资源的健康状态
           enum: [unknown, healthy, unhealthy]
         created_at: { type: string, format: date-time }
+
+    OpenAPIOperation:
+      type: object
+      required: [operation_id, method, path]
+      properties:
+        operation_id:
+          type: string
+          description: 已消毒为 ref 安全片段（小写字母数字下划线），不一定是 spec 原始 operationId
+        method: { type: string, examples: ['GET'] }
+        path: { type: string, examples: ['/pets/{id}'] }
+        summary: { type: string }
 
     # ── Agent DSL（与 schemas/agent.schema.json 保持一致）──
     AgentDefinition:
