@@ -1,4 +1,11 @@
-.PHONY: dev dev-local dev-backend dev-frontend build test lint migrate-up migrate-down sqlc-gen openapi-lint fmt
+.PHONY: dev dev-local dev-backend dev-frontend build test lint migrate-up migrate-down migrate-clean sqlc-gen openapi-lint fmt
+
+# Load .env (DATABASE_URL, etc.) into every recipe's environment, so targets
+# like migrate-up don't each need their own `set -a; . ./.env; set +a;`.
+# `-include` is silent if .env doesn't exist yet (e.g. a fresh checkout
+# before `cp .env.example .env`).
+-include .env
+export
 
 dev:
 	docker compose up --build
@@ -38,12 +45,23 @@ fmt:
 	gofmt -w .
 
 migrate-up:
-	go run github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1 \
+	go run -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1 \
 		-path migrations -database "$${DATABASE_URL}" up
 
 migrate-down:
-	go run github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1 \
+	go run -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1 \
 		-path migrations -database "$${DATABASE_URL}" down 1
+
+# Clears a "Dirty database version N" state left by a migration that failed
+# partway through, so migrate-up can run again — golang-migrate marks the
+# version dirty and refuses to proceed until it's told which version the
+# database is actually consistent at. VERSION defaults to 12 (the state
+# just before the now-deleted pgvector migration 0013), overridable:
+# `make migrate-clean VERSION=5`.
+VERSION ?= 12
+migrate-clean:
+	go run -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1 \
+		-path migrations -database "$${DATABASE_URL}" force $(VERSION)
 
 sqlc-gen:
 	go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0 generate
