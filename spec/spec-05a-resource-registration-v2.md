@@ -232,22 +232,24 @@ CREATE TABLE skill_files (
 
 ## 九、分期计划
 
-1. **Phase 1 —— MCP**：二级页面 + Header 列表（逐项加密）+ 真实 MCP 探测/拉工具列表，替换掉现在的裸 HTTP GET 健康检查。诉求最明确、改动面最小、不依赖 OSS，优先做。
-2. **Phase 2 —— OSS + Skill 上传**：`internal/adapter/oss` 接入真实阿里云 OSS（等 AK/SK 配好 `.env`）、zip 上传/解压/建索引（只读文件树，无在线编辑）、运行时按需拉取 `SKILL.md`。
-3. **Phase 2.5 —— Skill 源同步**：系统设置"Skill 源"页 + `skill_sources`/`system_skills` 表 + `SkillSourceSyncer` 接口 + clawhub 适配器 + Agent 引用解析扩展到系统目录。依赖 Phase 2 的 OSS 基础设施，紧跟其后。
-4. **Phase 3 —— 组件/Tool 多形态**：菜单改名"组件"+ `component_type`/`tool_type` 判别字段落地为可视化多步骤新建页（沙箱环境的后端运行时已经在本轮实现，这里补的是前端"组件"两步新建 UI）、OpenAPI 导入（预览→勾选→批量创建）+ 运行时按 `tool_type` 分支请求逻辑。插件这个组件类型只留判别位，不实现。
-5. **Phase 4 —— 记忆库表单化**（体量最小，顺手做）。
+1. **Phase 1 —— MCP**（已完成）：二级页面 + Header 列表（逐项加密）+ 真实 MCP 探测/拉工具列表，替换掉现在的裸 HTTP GET 健康检查。
+2. **Phase 2 —— OSS + Skill 上传**（已完成）：`internal/adapter/oss` 接入真实阿里云 OSS、zip 上传/解压/建索引（只读文件树，无在线编辑）、运行时按需拉取 `SKILL.md`（带 5 分钟 TTL 缓存）。
+3. **Phase 2.5 —— Skill 源同步**（本轮未做，按原计划推迟）：系统设置"Skill 源"页 + `skill_sources`/`system_skills` 表 + `SkillSourceSyncer` 接口 + clawhub 适配器 + Agent 引用解析扩展到系统目录。
+4. **Phase 3 —— 组件/Tool 多形态**（已完成）：菜单改名"组件"+ `component_type`/`tool_type` 判别字段、`/apps/tool/new` 两步新建向导（Tool/沙箱环境可选，插件禁用态；Tool 再分 http/OpenAPI）、OpenAPI 导入（预览→勾选→批量创建，单事务）+ 运行时 `buildEndpointTool` 按 `tool_type` 分支请求逻辑。插件这个组件类型仍只留判别位，不实现。
+5. **Phase 4 —— 记忆库表单化**（本轮未做）。
 
-**已完成（提前于计划）**：沙箱环境（`component_type = "sandbox"`）运行时——`internal/orchestrator/adk/sandbox.go` + `agent_compiler.go` 的 `compileTools` 分支 + `ResourceMultiSelect` 的组件类型徽标。资源注册暂时还是走现有弹窗（手填 JSON config），Phase 3 的"组件"多步骤新建页会给它一个更好的表单，但不是运行时能力的前提。
+**提前于计划完成**：沙箱环境（`component_type = "sandbox"`）运行时——`internal/orchestrator/adk/sandbox.go` + `agent_compiler.go` 的 `compileTools` 分支 + `ResourceMultiSelect` 的组件类型徽标——在 Phase 3 的向导 UI 落地之前就已经能通过（当时的）通用弹窗手填 JSON config 注册并跑起来；Phase 3 完成后，`/apps/tool/new` 的沙箱表单是它的正式注册入口。
 
 ## 验收清单（草案，实现阶段按 Phase 拆分为独立任务时再细化）
 
-- [ ] MCP 检测按钮返回真实工具列表，不是"能不能连上"
-- [ ] MCP Header 的 value 在任何 GET 响应里都不出现，加密落库
-- [ ] Skill 上传 zip 后能在文件树里看到全部文件、能下载核对，没有编辑入口
-- [ ] 未配置 OSS 时，Skill 的纯文本旧路径（`config.instructions`）不受影响，只有"上传"入口置灰
-- [ ] 管理员在系统设置登记一个 Skill 源并同步后，应用广场的 Skill 列表能看到"系统提供"角标的条目，普通用户看不到编辑/删除按钮
-- [ ] Agent 引用一个只存在于 `system_skills` 而不在自己 `skills` 表里的 ref 时，编译期能正确解析
-- [ ] OpenAPI 导入后，Agent 的 `capabilities.tools[]` 引用其中任一 operation 的 ref 时行为和手填的 `http` 型 tool 完全一致（对 Agent 层透明）
-- [ ] 侧栏菜单显示"组件"而不是"Tool"，路由 `/apps/tool` 不变
+- [x] MCP 检测按钮返回真实工具列表，不是"能不能连上"
+- [x] MCP Header 的 value 在任何 GET 响应里都不出现，加密落库
+- [x] Skill 上传 zip 后能在文件树里看到全部文件、能下载核对，没有编辑入口
+- [x] 未配置 OSS 时，Skill 的纯文本旧路径（`config.instructions`）不受影响，只有"上传"入口置灰
+- [ ] 管理员在系统设置登记一个 Skill 源并同步后，应用广场的 Skill 列表能看到"系统提供"角标的条目，普通用户看不到编辑/删除按钮（Phase 2.5，本轮未做）
+- [ ] Agent 引用一个只存在于 `system_skills` 而不在自己 `skills` 表里的 ref 时，编译期能正确解析（Phase 2.5，本轮未做）
+- [x] OpenAPI 导入后，Agent 的 `capabilities.tools[]` 引用其中任一 operation 的 ref 时行为和手填的 `http` 型 tool 完全一致（对 Agent 层透明）——`buildEndpointTool` 按 `config.tool_type` 分支，Agent 侧的 `{input}`/`{output}` 形状不变
+- [x] 侧栏菜单显示"组件"而不是"Tool"，路由 `/apps/tool` 不变
 - [x] 注册一个 `component_type: "sandbox"` 资源后，Agent 的能力白名单里能选中它（`ResourceMultiSelect` 显示"沙箱"徽标），运行时会拿到 `{ref}_run_code`/`{ref}_execute_command` 两个可调用工具
+- [x] `/apps/tool/new` 两步向导：Step 1 选组件类型（Tool、沙箱环境可选，插件禁用态），Step 2 按类型给出对应表单（Tool 再分 http / OpenAPI 导入）
+- [x] OpenAPI spec 解析预览（`POST /resources/components/import-openapi`）+ 批量创建（`POST /resources/components/batch`，单事务，一个 ref 冲突整批失败）
