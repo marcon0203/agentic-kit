@@ -12,3 +12,6 @@ var AgentSchemaJSON []byte
 
 //go:embed bundle.schema.json
 var BundleSchemaJSON []byte
+
+//go:embed plugin.schema.json
+var PluginSchemaJSON []byte

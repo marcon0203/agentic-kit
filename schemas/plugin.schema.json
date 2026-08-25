@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/plugin.schema.json",
+  "title": "Plugin Manifest",
+  "description": "一个插件包（.akp，zip 格式）根目录下 plugin.json 的形状（spec-20）。宿主按 manifest_version 决定怎么解析后续字段；extensions 下未知的扩展点类型直接忽略，不拒绝整份清单——这是留给以后加扩展点（如 providers）不必让老插件重新打包的口子。",
+  "type": "object",
+  "required": ["manifest_version", "id", "version", "display_name", "requires"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_version": {
+      "type": "integer",
+      "description": "规范版本，当前只有 1",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "description": "全局唯一，反向域名式，发布后不可改",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)+$",
+      "examples": ["acme.charts", "acme.sql-connector"]
+    },
+    "version": {
+      "type": "string",
+      "description": "语义化版本号",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "url": { "type": "string", "format": "uri" }
+      }
+    },
+    "license": { "type": "string" },
+    "icon": { "type": "string", "description": "包内相对路径" },
+
+    "requires": {
+      "type": "object",
+      "description": "依赖声明——宿主只按这里写的授权，没声明的一律没有",
+      "additionalProperties": false,
+      "required": ["host_api"],
+      "properties": {
+        "host_api": {
+          "type": "string",
+          "description": "宿主 API 版本区间，如 \">=1.0 <2.0\"",
+          "pattern": "^>=\\d+\\.\\d+ <\\d+\\.\\d+$"
+        },
+        "services": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["sql", "kv", "log", "http"] },
+          "uniqueItems": true
+        },
+        "network": {
+          "type": "array",
+          "description": "允许访问的域名白名单，其余一律拒绝",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "permissions": {
+          "type": "array",
+          "description": "细粒度权限，用户安装时可见；hooks 扩展点的读写范围也从这里声明",
+          "items": {
+            "type": "string",
+            "pattern": "^(read|write):[a-z_]+$",
+            "examples": ["read:run_output", "read:tool_input", "write:response"]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+
+    "extensions": {
+      "type": "object",
+      "description": "一个插件可以同时声明多种扩展点；未知的扩展点类型（如未来的 providers）原样保留，宿主解析不认识就跳过，不报错",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "entry"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "description": { "type": "string" },
+              "input_schema": { "type": "object" },
+              "entry": { "type": "string", "description": "plugin.wasm#导出函数名" },
+              "ui": { "type": "string", "description": "可选：返回 UI resource（MCP Apps）时的 HTML 入口，包内相对路径" }
+            }
+          }
+        },
+        "renderers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "entry"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "entry": { "type": "string", "description": "包内相对路径（静态 HTML/JS）" },
+              "auto_render": {
+                "type": "object",
+                "description": "命中即接管渲染，不需要模型显式调用",
+                "additionalProperties": false,
+                "properties": {
+                  "fenced_lang": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "uniqueItems": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "connectors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "kind", "entry"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+              "kind": { "type": "string", "enum": ["sql"] },
+              "entry": { "type": "string", "description": "plugin.wasm#导出函数名，只做方言/schema 映射" },
+              "config_schema": { "type": "object", "description": "建连接时要用户填什么（含 allow_write 由宿主统一注入，不由插件声明）" }
+            }
+          }
+        },
+        "hooks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["point", "entry"],
+            "properties": {
+              "point": {
+                "type": "string",
+                "enum": ["before_tool_call", "after_tool_call", "before_response", "after_response", "on_error"],
+                "description": "对应 Agent DSL capabilities.hooks 的同名字段"
+              },
+              "entry": { "type": "string", "description": "plugin.wasm#导出函数名" }
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

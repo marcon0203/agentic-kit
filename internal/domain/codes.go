@@ -71,4 +71,12 @@ const (
 	// 90xxx — 用户管理与角色权限（RBAC）
 	CodeRoleNotFound     = 90001
 	CodeRoleKeyDuplicate = 90002
+
+	// 100xxx — 插件体系（spec-20）
+	CodePluginNotFound         = 100001
+	CodePluginVersionDuplicate = 100002
+	CodePluginSignatureInvalid = 100003
+	CodePluginManifestInvalid  = 100004
+	CodePluginNotInstalled     = 100005
+	CodePluginNoSigningKey     = 100006
 )

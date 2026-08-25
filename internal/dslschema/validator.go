@@ -30,6 +30,11 @@ func NewBundleValidator() (*Validator, error) {
 	return newValidator("bundle.schema.json", schemas.BundleSchemaJSON)
 }
 
+// NewPluginValidator compiles schemas/plugin.schema.json (spec-20).
+func NewPluginValidator() (*Validator, error) {
+	return newValidator("plugin.schema.json", schemas.PluginSchemaJSON)
+}
+
 func newValidator(name string, raw []byte) (*Validator, error) {
 	compiler := jsonschema.NewCompiler()
 	if err := compiler.AddResource(name, bytes.NewReader(raw)); err != nil {

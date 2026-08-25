@@ -205,6 +205,38 @@ type Permission struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type Plugin struct {
+	ID           int64              `json:"id"`
+	PluginID     string             `json:"plugin_id"`
+	Version      string             `json:"version"`
+	Manifest     []byte             `json:"manifest"`
+	OssPrefix    string             `json:"oss_prefix"`
+	PublisherID  pgtype.Int8        `json:"publisher_id"`
+	Signature    string             `json:"signature"`
+	Visibility   string             `json:"visibility"`
+	ReviewStatus string             `json:"review_status"`
+	Status       int16              `json:"status"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type PluginInstallation struct {
+	ID          int64              `json:"id"`
+	OwnerUserID int64              `json:"owner_user_id"`
+	PluginID    string             `json:"plugin_id"`
+	Version     string             `json:"version"`
+	Resolution  string             `json:"resolution"`
+	Config      []byte             `json:"config"`
+	Granted     []byte             `json:"granted"`
+	Status      int16              `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type PluginPublisherKey struct {
+	UserID    int64              `json:"user_id"`
+	PublicKey []byte             `json:"public_key"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Report struct {
 	ID             int64              `json:"id"`
 	ListingID      int64              `json:"listing_id"`

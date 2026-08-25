@@ -6,6 +6,8 @@ package store
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -40,6 +42,8 @@ type Querier interface {
 	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
 	CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error)
 	CreateModelProvider(ctx context.Context, arg CreateModelProviderParams) (CreateModelProviderRow, error)
+	CreatePlugin(ctx context.Context, arg CreatePluginParams) (Plugin, error)
+	CreatePluginInstallation(ctx context.Context, arg CreatePluginInstallationParams) (PluginInstallation, error)
 	CreateReport(ctx context.Context, arg CreateReportParams) (Report, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error)
@@ -56,6 +60,7 @@ type Querier interface {
 	DeleteCatalogModel(ctx context.Context, id int64) error
 	DeleteCatalogProvider(ctx context.Context, id int64) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
+	DeletePluginInstallation(ctx context.Context, arg DeletePluginInstallationParams) error
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
@@ -115,6 +120,9 @@ type Querier interface {
 	GetKnowledgeBaseByIDForOwner(ctx context.Context, arg GetKnowledgeBaseByIDForOwnerParams) (KnowledgeBasis, error)
 	GetKnowledgeBaseLatestByRef(ctx context.Context, arg GetKnowledgeBaseLatestByRefParams) (KnowledgeBasis, error)
 	GetKnowledgeBaseLatestStatusByRef(ctx context.Context, arg GetKnowledgeBaseLatestStatusByRefParams) (int16, error)
+	// 未指定版本时用的"最新" — 按 created_at 取最近发布的一个版本，
+	// 和 GetBundleLatestByRef 的既有约定一致。
+	GetLatestPluginVersion(ctx context.Context, pluginID string) (Plugin, error)
 	GetListingByID(ctx context.Context, id int64) (MarketplaceListing, error)
 	GetListingByListingRefAndVersion(ctx context.Context, arg GetListingByListingRefAndVersionParams) (MarketplaceListing, error)
 	GetListingByListingRefLatestPublished(ctx context.Context, listingRef string) (MarketplaceListing, error)
@@ -135,6 +143,9 @@ type Querier interface {
 	// for that run+node — the one actually blocking right now.
 	GetPendingHumanGateForRunNode(ctx context.Context, arg GetPendingHumanGateForRunNodeParams) (HumanGate, error)
 	GetPermissionIDsByKeys(ctx context.Context, keys []string) ([]int64, error)
+	GetPluginInstallation(ctx context.Context, arg GetPluginInstallationParams) (PluginInstallation, error)
+	GetPluginVersion(ctx context.Context, arg GetPluginVersionParams) (Plugin, error)
+	GetPublisherKey(ctx context.Context, userID int64) (PluginPublisherKey, error)
 	GetReportByID(ctx context.Context, id int64) (Report, error)
 	GetRole(ctx context.Context, id int64) (Role, error)
 	GetSkillByIDForOwner(ctx context.Context, arg GetSkillByIDForOwnerParams) (Skill, error)
@@ -206,14 +217,20 @@ type Querier interface {
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
 	ListListingVersionHistory(ctx context.Context, listingRef string) ([]ListListingVersionHistoryRow, error)
 	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)
+	// 组件广场"插件" Tab 用的市场列表：只列公开且审核通过的，每个 plugin_id 一行（最新版本）。
+	ListMarketPlugins(ctx context.Context) ([]Plugin, error)
 	ListMemoriesForOwnerPage(ctx context.Context, arg ListMemoriesForOwnerPageParams) ([]Memory, error)
 	ListModelProvidersForOwner(ctx context.Context, ownerUserID int64) ([]ListModelProvidersForOwnerRow, error)
 	// Backs the timeout-scanning job (spec-11): a pending gate with a
 	// timeout_seconds set, whose deadline has passed.
 	ListPendingHumanGatesPastTimeout(ctx context.Context) ([]HumanGate, error)
 	ListPendingReportsPage(ctx context.Context, arg ListPendingReportsPageParams) ([]Report, error)
+	ListPendingReviewPlugins(ctx context.Context) ([]Plugin, error)
 	ListPermissionKeysForUser(ctx context.Context, userID int64) ([]string, error)
 	ListPermissions(ctx context.Context) ([]Permission, error)
+	ListPluginInstallations(ctx context.Context, ownerUserID int64) ([]PluginInstallation, error)
+	ListPluginVersions(ctx context.Context, pluginID string) ([]Plugin, error)
+	ListPluginsByPublisher(ctx context.Context, publisherID pgtype.Int8) ([]Plugin, error)
 	// ── Browse / detail (blackbox: display_meta only, never definition) ────
 	ListPublishedAgentListingsPage(ctx context.Context, arg ListPublishedAgentListingsPageParams) ([]ListPublishedAgentListingsPageRow, error)
 	ListPublishedBundleListingsPage(ctx context.Context, arg ListPublishedBundleListingsPageParams) ([]ListPublishedBundleListingsPageRow, error)
@@ -250,6 +267,8 @@ type Querier interface {
 	SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerDisplayMetaParams) error
 	SetMCPServerStatusByID(ctx context.Context, arg SetMCPServerStatusByIDParams) error
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error
+	SetPluginReviewStatus(ctx context.Context, arg SetPluginReviewStatusParams) (Plugin, error)
+	SetPluginVisibility(ctx context.Context, arg SetPluginVisibilityParams) (Plugin, error)
 	SetSkillDisplayMeta(ctx context.Context, arg SetSkillDisplayMetaParams) error
 	SetSkillStatusByID(ctx context.Context, arg SetSkillStatusByIDParams) error
 	SetUserStatus(ctx context.Context, arg SetUserStatusParams) error
@@ -260,9 +279,11 @@ type Querier interface {
 	UpdateMCPServer(ctx context.Context, arg UpdateMCPServerParams) (McpServer, error)
 	UpdateMCPServerHealth(ctx context.Context, arg UpdateMCPServerHealthParams) error
 	UpdateMemory(ctx context.Context, arg UpdateMemoryParams) (Memory, error)
+	UpdatePluginInstallation(ctx context.Context, arg UpdatePluginInstallationParams) (PluginInstallation, error)
 	UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill, error)
 	UpdateSubscriptionListing(ctx context.Context, arg UpdateSubscriptionListingParams) (Subscription, error)
 	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)
+	UpsertPublisherKey(ctx context.Context, arg UpsertPublisherKeyParams) (PluginPublisherKey, error)
 	UserHasPermission(ctx context.Context, arg UserHasPermissionParams) (bool, error)
 }
 
