@@ -28,12 +28,12 @@ export const RESOURCE_KINDS: {
 }[] = [
   {
     value: 'tool',
-    label: 'Tool',
+    label: '组件',
     blank: {
       title: '给 Agent 一件能用的工具',
       description:
-        'Tool 是 Agent 能调用的外部能力：一个检索接口、一个内部服务。注册后才能写进 Agent 的能力白名单。',
-      cta: '注册 Tool',
+        '组件是 Agent 能调用的外部能力：一个检索接口、一个内部服务、一个沙箱环境……注册后才能写进 Agent 的能力白名单。',
+      cta: '注册组件',
     },
   },
   {

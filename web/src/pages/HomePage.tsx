@@ -76,7 +76,7 @@ const CENTRES = [
 const STEPS = [
   {
     label: '接入资源',
-    line: '注册 Tool / Skill / MCP / 知识库，接入模型 Provider。',
+    line: '注册组件 / Skill / MCP / 知识库，接入模型 Provider。',
     icon: Database,
   },
   {

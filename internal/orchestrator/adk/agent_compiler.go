@@ -159,7 +159,7 @@ func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAu
 		// "tool", registered the same way any other 组件 is) exposes two
 		// tools (run_code, execute_command) off one Daytona sandbox, not
 		// one — same reason MCP gets its own branch above.
-		if componentType, _ := spec.Config["component_type"].(string); componentType == "sandbox" {
+		if componentType, _ := spec.Config[ConfigKeyComponentType].(string); componentType == ComponentTypeSandbox {
 			sandboxTools, err := BuildSandboxTools(spec)
 			if err != nil {
 				return nil, nil, fmt.Errorf("build sandbox tools %q: %w", ref, err)

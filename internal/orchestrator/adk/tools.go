@@ -68,6 +68,25 @@ const (
 	KindKnowledgeBase ResourceKind = "knowledge_base"
 )
 
+// A "tool"-kind resource's config carries two discriminator fields
+// (spec-05a §4), not one — 组件 ("Components") is the umbrella menu name;
+// component_type picks which kind of component a "tool" row actually is,
+// and tool_type (only meaningful when component_type is "tool") picks
+// which shape that Tool takes. Neither adds a new Resource Kind or table —
+// both live in the existing config JSONB, so a new component/tool shape is
+// one more enum value, not a new CRUD surface.
+const (
+	ConfigKeyComponentType = "component_type"
+	ConfigKeyToolType      = "tool_type"
+
+	ComponentTypeTool    = "tool" // default when component_type is absent (pre-spec-05a data)
+	ComponentTypeSandbox = "sandbox"
+	ComponentTypePlugin  = "plugin" // reserved; not implemented (spec-05a §4: "业务梳理清楚后再做")
+
+	ToolTypeHTTP    = "http" // default when tool_type is absent — a single hand-configured endpoint
+	ToolTypeOpenAPI = "openapi"
+)
+
 // ToolSpec is what an authorized capabilities.tools/skills ref resolves
 // to — everything BuildTool needs to construct the ADK tool.Tool, already
 // scoped to the requesting owner (the caller did that check). OwnerID and

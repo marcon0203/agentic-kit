@@ -18,7 +18,7 @@ import type { components } from '@/lib/api/schema'
 type ResourceType = components['schemas']['ResourceType']
 
 const TYPE_LABEL: Record<ResourceType, string> = {
-  tool: 'Tool',
+  tool: '组件',
   skill: 'Skill',
   mcp: 'MCP Server',
   knowledge_base: '知识库',

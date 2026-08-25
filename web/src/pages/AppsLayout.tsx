@@ -30,7 +30,7 @@ function sectionGroups(knowledgeBaseEnabled: boolean): SectionSidebarGroup[] {
     {
       label: '资源',
       items: [
-        { value: 'tool', label: 'Tool', icon: Wrench },
+        { value: 'tool', label: '组件', icon: Wrench },
         { value: 'skill', label: 'Skill', icon: Puzzle },
         { value: 'mcp', label: 'MCP Server', icon: Plug },
         // 知识库依赖 Milvus + Elasticsearch（多路召回）；未部署时
@@ -57,7 +57,7 @@ const SECTION_TITLE: Record<Section, string> = {
   browse: '应用广场',
   bundles: '应用管理',
   agents: '智能体管理',
-  tool: 'Tool',
+  tool: '组件',
   skill: 'Skill',
   mcp: 'MCP Server',
   knowledge_base: '知识库',
