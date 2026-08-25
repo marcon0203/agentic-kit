@@ -1,11 +1,14 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"mime"
+	"path/filepath"
 	"strings"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
@@ -28,10 +31,22 @@ type Service struct {
 	// check — so the domain package stays testable and wireable before
 	// internal/adapter/extism exists in a given deployment path.
 	wasm WasmValidator
+	// objectStore backs Upload's file storage (spec-20 §3.1's .akp
+	// contents besides plugin.json). Set via WithObjectStore — a separate
+	// opt-in step, same shape as resource.Service.WithSkillUploads, since
+	// OSS is genuinely optional infrastructure rather than a required
+	// collaborator every deployment has.
+	objectStore ObjectStore
 }
 
 func NewService(repo Repository, keys PublisherKeys, validator ManifestValidator, admins AdminDirectory, cipher CredentialCipher, wasm WasmValidator) *Service {
 	return &Service{repo: repo, keys: keys, validator: validator, admins: admins, cipher: cipher, wasm: wasm}
+}
+
+// WithObjectStore enables Upload's file storage.
+func (s *Service) WithObjectStore(store ObjectStore) *Service {
+	s.objectStore = store
+	return s
 }
 
 // RegisterSigningKey stores a publisher's Ed25519 public verification key,
@@ -54,16 +69,20 @@ type UploadCommand struct {
 	PluginID  string
 	Version   string
 	Manifest  map[string]any
-	OSSPrefix string
 	Package   []byte // raw .akp bytes, hashed here to verify Signature
 	Signature []byte
-	// WasmBytes is the package's extracted plugin.wasm content (spec-20
-	// §3.1's .akp layout) — nil for a frontend-only plugin whose manifest
-	// declares no tools/connectors/hooks entries. Extracting it from the
-	// uploaded .akp zip is the caller's job (transport-layer file-format
-	// work); the domain layer only ever sees the bytes it needs to check.
-	WasmBytes []byte
+	// Files is every non-manifest entry the .akp zip contained (spec-20
+	// §3.1's layout: plugin.wasm, ui/*, assets/*, README.md), keyed by its
+	// path inside the archive. Extracting the zip is the caller's job
+	// (transport-layer file-format work); Upload only ever sees a clean
+	// path->content map, same convention as resource.UploadSkillCommand.
+	Files map[string][]byte
 }
+
+// wasmFileName is the .akp layout's fixed name for a plugin's backend
+// WASM module (spec-20 §3.1) — absent for a frontend-only (renderers-only)
+// plugin.
+const wasmFileName = "plugin.wasm"
 
 // Upload validates the manifest, verifies the publisher's signature over
 // the package, and creates a new private/pending-review version. A
@@ -71,6 +90,9 @@ type UploadCommand struct {
 // visibility needs no review); entering the market queue is a separate,
 // deliberate SetVisibility(Public) call.
 func (s *Service) Upload(ctx context.Context, publisherID int64, cmd UploadCommand) (Plugin, error) {
+	if s.objectStore == nil {
+		return Plugin{}, domain.Invalid(domain.CodeValidationFailed, "plugin upload is not configured on this deployment (OSS)")
+	}
 	if len(cmd.Package) > MaxPackageBytes {
 		return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, fmt.Sprintf("package exceeds the %d byte limit", MaxPackageBytes))
 	}
@@ -105,26 +127,35 @@ func (s *Service) Upload(ctx context.Context, publisherID int64, cmd UploadComma
 	// tools/connectors/hooks entries exist — only actually resolving them
 	// against the compiled module proves it, catching a broken package at
 	// upload time instead of the first time an agent tries to call it.
+	wasmBytes := cmd.Files[wasmFileName]
 	funcNames, err := wasmEntryFuncNames(cmd.Manifest)
 	if err != nil {
 		return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, err.Error())
 	}
 	if len(funcNames) > 0 {
-		if len(cmd.WasmBytes) == 0 {
+		if len(wasmBytes) == 0 {
 			return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, "manifest declares tools/connectors/hooks entries but no plugin.wasm was provided")
 		}
 		if s.wasm != nil {
 			wasmKey := cmd.PluginID + "@" + cmd.Version
-			if err := s.wasm.ValidateEntries(ctx, wasmKey, cmd.WasmBytes, funcNames); err != nil {
+			if err := s.wasm.ValidateEntries(ctx, wasmKey, wasmBytes, funcNames); err != nil {
 				return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, "wasm module failed automated validation: "+err.Error())
 			}
+		}
+	}
+
+	prefix := pluginOSSPrefix(cmd.PluginID, cmd.Version)
+	for path, content := range cmd.Files {
+		key := prefix + "/" + path
+		if err := s.objectStore.Put(ctx, key, bytes.NewReader(content), contentTypeFor(path)); err != nil {
+			return Plugin{}, domain.Internal(fmt.Errorf("upload %q: %w", path, err))
 		}
 	}
 
 	owner := publisherID
 	created, err := s.repo.CreateVersion(ctx, Plugin{
 		PluginID: cmd.PluginID, Version: cmd.Version, Manifest: cmd.Manifest,
-		OSSPrefix: cmd.OSSPrefix, PublisherID: &owner, Signature: encodeSignature(cmd.Signature),
+		OSSPrefix: prefix, PublisherID: &owner, Signature: encodeSignature(cmd.Signature),
 		Visibility: VisibilityPrivate, ReviewStatus: ReviewPending, Status: StatusEnabled,
 	})
 	if err != nil {
@@ -459,6 +490,27 @@ func (s *Service) DecryptConfig(config Config) (Config, error) {
 		out[k] = plaintext
 	}
 	return out, nil
+}
+
+// pluginOSSPrefix is where one plugin version's files live in the bucket —
+// one prefix per (plugin_id, version), matching the UNIQUE constraint on
+// the plugins table: a version's contents never change after upload, so
+// its prefix never needs to either.
+func pluginOSSPrefix(pluginID, version string) string {
+	return fmt.Sprintf("plugins/%s/%s", pluginID, version)
+}
+
+// contentTypeFor guesses a content type from a file's extension, mirroring
+// resource.contentTypeFor — good enough for OSS metadata, not sniffed from
+// content and doesn't need to be exact.
+func contentTypeFor(path string) string {
+	if ct := mime.TypeByExtension(filepath.Ext(path)); ct != "" {
+		return ct
+	}
+	if strings.HasSuffix(path, ".md") {
+		return "text/markdown"
+	}
+	return "application/octet-stream"
 }
 
 func encodeSignature(sig []byte) string {

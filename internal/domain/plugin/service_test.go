@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
@@ -217,6 +218,26 @@ type fakeWasmValidator struct {
 	err     error
 }
 
+type fakeObjectStore struct {
+	puts map[string][]byte
+	err  error
+}
+
+func (f *fakeObjectStore) Put(_ context.Context, key string, r io.Reader, _ string) error {
+	if f.err != nil {
+		return f.err
+	}
+	if f.puts == nil {
+		f.puts = map[string][]byte{}
+	}
+	content, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	f.puts[key] = content
+	return nil
+}
+
 func (f *fakeWasmValidator) ValidateEntries(_ context.Context, wasmKey string, _ []byte, funcNames []string) error {
 	f.calls++
 	f.wasmKey, f.fns = wasmKey, funcNames
@@ -232,16 +253,15 @@ func signedUpload(t *testing.T, priv ed25519.PrivateKey, pluginID, version strin
 	sig := ed25519.Sign(priv, digest[:])
 	return plugin.UploadCommand{
 		PluginID: pluginID, Version: version,
-		Manifest:  map[string]any{"id": pluginID, "version": version, "manifest_version": float64(1)},
-		OSSPrefix: "plugins/" + pluginID + "/" + version,
-		Package:   pkg, Signature: sig,
+		Manifest: map[string]any{"id": pluginID, "version": version, "manifest_version": float64(1)},
+		Package:  pkg, Signature: sig,
 	}
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
 
 func TestUpload_RejectsUnregisteredPublisher(t *testing.T) {
-	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	_ = pub
 
@@ -258,7 +278,7 @@ func TestUpload_RejectsBadSignature(t *testing.T) {
 	keys.byUser[1] = pub
 	_, otherPriv, _ := ed25519.GenerateKey(nil)
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	_, err := svc.Upload(context.Background(), 1, signedUpload(t, otherPriv, "acme.charts", "1.0.0"))
 	de, ok := domain.AsError(err)
 	if !ok || de.Code != domain.CodePluginSignatureInvalid {
@@ -271,7 +291,7 @@ func TestUpload_RejectsManifestSchemaFailure(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, failValidator{errs: []domain.FieldError{{Field: "id", Reason: "bad"}}}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), keys, failValidator{errs: []domain.FieldError{{Field: "id", Reason: "bad"}}}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	_, err := svc.Upload(context.Background(), 1, signedUpload(t, priv, "acme.charts", "1.0.0"))
 	de, ok := domain.AsError(err)
 	if !ok || de.Code != domain.CodePluginManifestInvalid {
@@ -284,7 +304,7 @@ func TestUpload_SucceedsAsPrivatePending(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	p, err := svc.Upload(context.Background(), 1, signedUpload(t, priv, "acme.charts", "1.0.0"))
 	if err != nil {
 		t.Fatalf("Upload: %v", err)
@@ -299,7 +319,7 @@ func TestUpload_RejectsDuplicateVersion(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	ctx := context.Background()
 	if _, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0")); err != nil {
 		t.Fatalf("first Upload: %v", err)
@@ -316,7 +336,7 @@ func TestInstall_OwnerCanInstallOwnPrivateUpload(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	ctx := context.Background()
 	if _, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0")); err != nil {
 		t.Fatalf("Upload: %v", err)
@@ -336,7 +356,7 @@ func TestInstall_RejectsUnpublishedPluginForOtherUsers(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	ctx := context.Background()
 	if _, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0")); err != nil {
 		t.Fatalf("Upload: %v", err)
@@ -355,7 +375,7 @@ func TestInstall_EncryptsCredentialConfig(t *testing.T) {
 	keys.byUser[1] = pub
 
 	repo := newFakeRepo()
-	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	ctx := context.Background()
 	if _, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0")); err != nil {
 		t.Fatalf("Upload: %v", err)
@@ -388,7 +408,7 @@ func TestReview_RequiresAdmin(t *testing.T) {
 	keys.byUser[1] = pub
 
 	repo := newFakeRepo()
-	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{admins: map[int64]bool{}}, fakeCipher{}, nil)
+	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{admins: map[int64]bool{}}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	ctx := context.Background()
 	created, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0"))
 	if err != nil {
@@ -411,7 +431,7 @@ func TestReview_ApprovePutsVersionInMarket(t *testing.T) {
 	keys.byUser[1] = pub
 
 	repo := newFakeRepo()
-	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{admins: map[int64]bool{42: true}}, fakeCipher{}, nil)
+	svc := plugin.NewService(repo, keys, passValidator{}, &fakeAdmins{admins: map[int64]bool{42: true}}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	ctx := context.Background()
 	created, err := svc.Upload(ctx, 1, signedUpload(t, priv, "acme.charts", "1.0.0"))
 	if err != nil {
@@ -442,11 +462,49 @@ func TestReview_ApprovePutsVersionInMarket(t *testing.T) {
 }
 
 func TestUninstall_NotInstalledReturnsNotFound(t *testing.T) {
-	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	err := svc.Uninstall(context.Background(), 1, "acme.charts")
 	de, ok := domain.AsError(err)
 	if !ok || de.Code != domain.CodePluginNotInstalled {
 		t.Fatalf("expected CodePluginNotInstalled, got %v", err)
+	}
+}
+
+func TestUpload_RequiresObjectStore(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil) // no WithObjectStore
+	_, err := svc.Upload(context.Background(), 1, signedUpload(t, priv, "acme.charts", "1.0.0"))
+	de, ok := domain.AsError(err)
+	if !ok || de.Code != domain.CodeValidationFailed {
+		t.Fatalf("expected CodeValidationFailed when no ObjectStore is configured, got %v", err)
+	}
+}
+
+func TestUpload_StoresFilesUnderPluginPrefix(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	store := &fakeObjectStore{}
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(store)
+	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
+	cmd.Files = map[string][]byte{"README.md": []byte("# hi"), "ui/chart.html": []byte("<html></html>")}
+
+	created, err := svc.Upload(context.Background(), 1, cmd)
+	if err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if created.OSSPrefix != "plugins/acme.charts/1.0.0" {
+		t.Fatalf("unexpected OSSPrefix: %q", created.OSSPrefix)
+	}
+	if string(store.puts["plugins/acme.charts/1.0.0/README.md"]) != "# hi" {
+		t.Fatalf("expected README.md stored under the plugin prefix, got %+v", store.puts)
+	}
+	if string(store.puts["plugins/acme.charts/1.0.0/ui/chart.html"]) != "<html></html>" {
+		t.Fatalf("expected ui/chart.html stored under the plugin prefix, got %+v", store.puts)
 	}
 }
 
@@ -455,7 +513,7 @@ func TestUpload_RejectsOversizedPackage(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
 	cmd.Package = make([]byte, plugin.MaxPackageBytes+1)
 	// Re-sign over the (now oversized) package so this fails on size, not
@@ -475,7 +533,7 @@ func TestUpload_RejectsToolsEntryWithNoWasm(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
 	cmd.Manifest["extensions"] = map[string]any{
 		"tools": []any{map[string]any{"name": "render_chart", "entry": "plugin.wasm#render_chart"}},
@@ -493,7 +551,7 @@ func TestUpload_RejectsMalformedEntryFormat(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	keys.byUser[1] = pub
 
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
 	cmd.Manifest["extensions"] = map[string]any{
 		"tools": []any{map[string]any{"name": "render_chart", "entry": "plugin.wasm"}}, // missing "#function"
@@ -512,12 +570,12 @@ func TestUpload_RunsWasmValidatorWhenToolsDeclared(t *testing.T) {
 	keys.byUser[1] = pub
 
 	wasm := &fakeWasmValidator{}
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, wasm)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, wasm).WithObjectStore(&fakeObjectStore{})
 	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
 	cmd.Manifest["extensions"] = map[string]any{
 		"tools": []any{map[string]any{"name": "render_chart", "entry": "plugin.wasm#render_chart"}},
 	}
-	cmd.WasmBytes = []byte{0x00, 0x61, 0x73, 0x6d}
+	cmd.Files = map[string][]byte{"plugin.wasm": {0x00, 0x61, 0x73, 0x6d}}
 
 	if _, err := svc.Upload(context.Background(), 1, cmd); err != nil {
 		t.Fatalf("Upload: %v", err)
@@ -539,12 +597,12 @@ func TestUpload_RejectsWhenWasmValidatorFails(t *testing.T) {
 	keys.byUser[1] = pub
 
 	wasm := &fakeWasmValidator{err: errValidationFailed}
-	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, wasm)
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, wasm).WithObjectStore(&fakeObjectStore{})
 	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
 	cmd.Manifest["extensions"] = map[string]any{
 		"tools": []any{map[string]any{"name": "render_chart", "entry": "plugin.wasm#render_chart"}},
 	}
-	cmd.WasmBytes = []byte{0x00, 0x61, 0x73, 0x6d}
+	cmd.Files = map[string][]byte{"plugin.wasm": {0x00, 0x61, 0x73, 0x6d}}
 
 	_, err := svc.Upload(context.Background(), 1, cmd)
 	de, ok := domain.AsError(err)

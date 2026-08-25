@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"errors"
+	"io"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
 )
@@ -79,4 +80,14 @@ var ErrNoSigningKey = errors.New("plugin: no signing key registered")
 // Implementations live in internal/adapter/extism.
 type WasmValidator interface {
 	ValidateEntries(ctx context.Context, wasmKey string, wasmBytes []byte, funcNames []string) error
+}
+
+// ObjectStore is where a plugin package's non-manifest files
+// (plugin.wasm, ui/, assets/, README.md — spec-20 §3.1's .akp layout)
+// live, one object per file. Same shape as the resource context's Skill
+// upload store (internal/adapter/oss already satisfies both — the two
+// bounded contexts don't need separate adapter code for identical
+// infrastructure).
+type ObjectStore interface {
+	Put(ctx context.Context, key string, r io.Reader, contentType string) error
 }
