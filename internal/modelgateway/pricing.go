@@ -10,35 +10,24 @@ import (
 )
 
 // modelPrice is USD per 1,000 tokens, input and output priced separately
-// since most providers charge output at a multiple of input.
+// since most providers charge output at a multiple of input. Each
+// provider's pricing table lives on its ProviderDefinition in registry.go
+// now, not in a second map here — a model absent from it prices at $0,
+// cost tracking degrading gracefully rather than guessing (the model
+// itself, from spec-09's usage table, is always visible even when cost
+// isn't).
 type modelPrice struct {
 	InputPer1K  float64
 	OutputPer1K float64
 }
 
-// pricingTable holds the handful of models the platform ships pricing for.
-// An unlisted model prices at $0 — cost tracking degrades gracefully
-// rather than guessing, and the model itself (from spec-09's usage table)
-// is always visible even when cost isn't.
-var pricingTable = map[string]map[string]modelPrice{
-	"anthropic": {
-		"claude-sonnet-5":  {InputPer1K: 0.003, OutputPer1K: 0.015},
-		"claude-opus-5":    {InputPer1K: 0.015, OutputPer1K: 0.075},
-		"claude-haiku-4-5": {InputPer1K: 0.0008, OutputPer1K: 0.004},
-	},
-	"openai": {
-		"gpt-4o":      {InputPer1K: 0.0025, OutputPer1K: 0.01},
-		"gpt-4o-mini": {InputPer1K: 0.00015, OutputPer1K: 0.0006},
-	},
-	"google": {
-		"gemini-1.5-pro":   {InputPer1K: 0.00125, OutputPer1K: 0.005},
-		"gemini-1.5-flash": {InputPer1K: 0.000075, OutputPer1K: 0.0003},
-	},
-}
-
 // EstimateCost computes USD cost for a completion from its token counts.
 func EstimateCost(provider, model string, inputTokens, outputTokens int64) float64 {
-	price, ok := pricingTable[provider][model]
+	def, ok := providerByName(provider)
+	if !ok {
+		return 0
+	}
+	price, ok := def.Pricing[model]
 	if !ok {
 		return 0
 	}

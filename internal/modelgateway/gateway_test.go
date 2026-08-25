@@ -22,7 +22,7 @@ func TestAnthropicValidator_ValidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("anthropic", "", providerEndpoints{AnthropicBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("anthropic", "", providerOverrides{"anthropic": srv.URL})
 	if err := v.Validate(context.Background(), "good-key"); err != nil {
 		t.Fatalf("expected valid key to pass, got %v", err)
 	}
@@ -34,7 +34,7 @@ func TestAnthropicValidator_InvalidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("anthropic", "", providerEndpoints{AnthropicBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("anthropic", "", providerOverrides{"anthropic": srv.URL})
 	err := v.Validate(context.Background(), "bad-key")
 	if err != ErrCredentialsInvalid {
 		t.Fatalf("expected ErrCredentialsInvalid, got %v", err)
@@ -50,7 +50,7 @@ func TestOpenAIValidator_ValidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("openai", "", providerEndpoints{OpenAIBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("openai", "", providerOverrides{"openai": srv.URL})
 	if err := v.Validate(context.Background(), "good-key"); err != nil {
 		t.Fatalf("expected valid key to pass, got %v", err)
 	}
@@ -65,7 +65,7 @@ func TestDeepSeekValidator_ValidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("deepseek", "", providerEndpoints{DeepSeekBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("deepseek", "", providerOverrides{"deepseek": srv.URL})
 	if err := v.Validate(context.Background(), "good-key"); err != nil {
 		t.Fatalf("expected valid key to pass, got %v", err)
 	}
@@ -77,7 +77,7 @@ func TestQwenValidator_InvalidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("qwen", "", providerEndpoints{QwenBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("qwen", "", providerOverrides{"qwen": srv.URL})
 	if err := v.Validate(context.Background(), "bad-key"); err != ErrCredentialsInvalid {
 		t.Fatalf("expected ErrCredentialsInvalid, got %v", err)
 	}
@@ -89,14 +89,14 @@ func TestGoogleValidator_InvalidKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v := newValidatorWithEndpoints("google", "", providerEndpoints{GoogleBaseURL: srv.URL})
+	v := newValidatorWithEndpoints("google", "", providerOverrides{"google": srv.URL})
 	if err := v.Validate(context.Background(), "bad-key"); err != ErrCredentialsInvalid {
 		t.Fatalf("expected ErrCredentialsInvalid, got %v", err)
 	}
 }
 
 func TestValidator_Unreachable(t *testing.T) {
-	v := newValidatorWithEndpoints("anthropic", "", providerEndpoints{AnthropicBaseURL: "http://127.0.0.1:1"})
+	v := newValidatorWithEndpoints("anthropic", "", providerOverrides{"anthropic": "http://127.0.0.1:1"})
 	err := v.Validate(context.Background(), "any-key")
 	if err == nil || err == ErrCredentialsInvalid {
 		t.Fatalf("expected a network error distinct from ErrCredentialsInvalid, got %v", err)
@@ -447,5 +447,49 @@ func TestEstimateCost_KnownModel(t *testing.T) {
 func TestEstimateCost_UnknownModel_ReturnsZero(t *testing.T) {
 	if cost := EstimateCost("anthropic", "does-not-exist", 1000, 1000); cost != 0 {
 		t.Fatalf("expected 0 for unknown model, got %v", cost)
+	}
+}
+
+// ── registry ─────────────────────────────────────────────────────────
+
+// Locks in the point of the registry: NewGateway, NewValidator and
+// EstimateCost must all recognize every provider ProviderNames() reports,
+// with no per-provider case needed anywhere outside registry.go.
+func TestRegistry_EveryProviderIsWiredEverywhere(t *testing.T) {
+	gw := NewGateway(nil)
+	for _, name := range ProviderNames() {
+		if _, ok := gw.clients[name]; !ok {
+			t.Errorf("provider %q registered in ProviderNames() but missing from Gateway.clients", name)
+		}
+		if name == "custom" {
+			// "custom" has no default endpoint — NewValidator("custom", "")
+			// legitimately returns a Validator whose Validate always fails,
+			// not a nil Validator, so it's covered by
+			// TestNewValidator_CustomWithoutBaseURLFails above instead.
+			continue
+		}
+		if NewValidator(name, "") == nil {
+			t.Errorf("provider %q registered in ProviderNames() but NewValidator returned nil", name)
+		}
+	}
+}
+
+func TestProviderNames_IncludesEveryBuiltInProvider(t *testing.T) {
+	want := []string{"anthropic", "openai", "google", "deepseek", "qwen", "custom"}
+	got := ProviderNames()
+	if len(got) != len(want) {
+		t.Fatalf("expected %d providers, got %d: %v", len(want), len(got), got)
+	}
+	for _, name := range want {
+		found := false
+		for _, g := range got {
+			if g == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %q in ProviderNames(), got %v", name, got)
+		}
 	}
 }

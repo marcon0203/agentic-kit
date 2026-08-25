@@ -9,7 +9,11 @@
 // again, and usage belongs to whoever triggered the run.
 package modelcenter
 
-import "time"
+import (
+	"time"
+
+	"github.com/marcon0203/agentic-kit/internal/modelgateway"
+)
 
 // Provider is one registered model-provider credential. There is no field
 // for the credential itself: this type is what read paths return, and the
@@ -24,11 +28,13 @@ type Provider struct {
 	CreatedAt time.Time
 }
 
-// KnownProviders are the provider names the platform can validate against.
-// DeepSeek and Qwen (via DashScope's OpenAI-compatible mode) are both
-// OpenAI-wire-compatible, like "custom", which is accepted so a
-// self-hosted, OpenAI-compatible endpoint can be registered too.
-var KnownProviders = []string{"anthropic", "openai", "google", "deepseek", "qwen", "custom"}
+// KnownProviders are the provider names the platform can validate against —
+// read from modelgateway's provider registry rather than a second
+// hardcoded list, so the two can never drift apart. DeepSeek and Qwen (via
+// DashScope's OpenAI-compatible mode) are both OpenAI-wire-compatible,
+// like "custom", which is accepted so a self-hosted, OpenAI-compatible
+// endpoint can be registered too.
+func KnownProviders() []string { return modelgateway.ProviderNames() }
 
 // Period is the window a usage report covers.
 type Period string

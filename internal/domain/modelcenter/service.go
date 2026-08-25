@@ -3,6 +3,7 @@ package modelcenter
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
@@ -94,7 +95,7 @@ func (s *Service) Register(ctx context.Context, ownerID int64, provider, apiKey,
 	if err := s.check.Check(ctx, provider, apiKey, baseURL); err != nil {
 		if errors.Is(err, ErrUnknownProvider) {
 			return Provider{}, domain.Invalid(domain.CodeValidationFailed, "invalid request").
-				WithDetails(domain.FieldError{Field: "provider", Reason: "must be one of anthropic, openai, google, deepseek, qwen, custom"})
+				WithDetails(domain.FieldError{Field: "provider", Reason: "must be one of " + strings.Join(KnownProviders(), ", ")})
 		}
 		// The checker's message describes the rejection, not the key —
 		// it is written to be safe to show.

@@ -132,33 +132,21 @@ type Gateway struct {
 	sink    EventSink
 }
 
-// NewGateway builds a Gateway against the real Anthropic/OpenAI/DeepSeek/
-// Qwen/Google APIs, plus a slot for a caller-supplied "custom"
-// OpenAI-compatible endpoint. sink may be nil (no fallback events emitted,
-// e.g. in tests that don't care).
+// NewGateway builds a Gateway with every provider in the registry
+// (registry.go) — currently Anthropic/OpenAI/DeepSeek/Qwen/Google, plus a
+// slot for a caller-supplied "custom" OpenAI-compatible endpoint. sink may
+// be nil (no fallback events emitted, e.g. in tests that don't care).
 func NewGateway(sink EventSink) *Gateway {
-	return newGatewayWithEndpoints(sink, providerEndpoints{})
+	return newGatewayWithEndpoints(sink, providerOverrides{})
 }
 
-func newGatewayWithEndpoints(sink EventSink, ep providerEndpoints) *Gateway {
+func newGatewayWithEndpoints(sink EventSink, ep providerOverrides) *Gateway {
 	httpClient := &http.Client{Timeout: completionTimeout}
-	return &Gateway{
-		sink: sink,
-		clients: map[string]Client{
-			"anthropic": &anthropicClient{client: httpClient, baseURL: ep.anthropicBase()},
-			"google":    &googleClient{client: httpClient, baseURL: ep.googleBase()},
-			// OpenAI, DeepSeek and Qwen (DashScope's OpenAI-compatible
-			// mode) all speak the same chat-completions wire format, so
-			// one Client type serves all three plus "custom" — only the
-			// default base URL differs, and "custom" has none: a Credential
-			// with an empty BaseURL there is a configuration error, caught
-			// at registration by the connectivity check rather than here.
-			"openai":   &openAICompatibleClient{httpClient: httpClient, defaultBaseURL: ep.openaiBase(), label: "openai"},
-			"deepseek": &openAICompatibleClient{httpClient: httpClient, defaultBaseURL: ep.deepseekBase(), label: "deepseek"},
-			"qwen":     &openAICompatibleClient{httpClient: httpClient, defaultBaseURL: ep.qwenBase(), label: "qwen"},
-			"custom":   &openAICompatibleClient{httpClient: httpClient, defaultBaseURL: "", label: "custom"},
-		},
+	clients := make(map[string]Client, len(providers))
+	for _, def := range providers {
+		clients[def.Name] = def.NewClient(httpClient, ep.baseFor(def))
 	}
+	return &Gateway{sink: sink, clients: clients}
 }
 
 // NewGatewayWithClients builds a Gateway against caller-supplied Clients —

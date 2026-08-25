@@ -26,101 +26,28 @@ type Validator interface {
 	Validate(ctx context.Context, apiKey string) error
 }
 
-// providerEndpoints lets tests point a Validator/Client at an httptest
-// server instead of the real vendor API; zero value uses the real one.
-type providerEndpoints struct {
-	AnthropicBaseURL string
-	OpenAIBaseURL    string
-	GoogleBaseURL    string
-	DeepSeekBaseURL  string
-	QwenBaseURL      string
-}
-
-func (e providerEndpoints) anthropicBase() string {
-	if e.AnthropicBaseURL != "" {
-		return e.AnthropicBaseURL
-	}
-	return "https://api.anthropic.com"
-}
-
-func (e providerEndpoints) openaiBase() string {
-	if e.OpenAIBaseURL != "" {
-		return e.OpenAIBaseURL
-	}
-	return "https://api.openai.com"
-}
-
-func (e providerEndpoints) googleBase() string {
-	if e.GoogleBaseURL != "" {
-		return e.GoogleBaseURL
-	}
-	return "https://generativelanguage.googleapis.com"
-}
-
-func (e providerEndpoints) deepseekBase() string {
-	if e.DeepSeekBaseURL != "" {
-		return e.DeepSeekBaseURL
-	}
-	return "https://api.deepseek.com/v1"
-}
-
-func (e providerEndpoints) qwenBase() string {
-	if e.QwenBaseURL != "" {
-		return e.QwenBaseURL
-	}
-	return "https://dashscope.aliyuncs.com/compatible-mode/v1"
-}
-
 // NewValidator returns the Validator for a components.schemas.ProviderName
-// value ("anthropic", "openai", "google", "deepseek", "qwen", "custom"), or
-// nil if the name is unrecognized. baseURL overrides the provider's
-// documented default endpoint; for "custom" there is no default, so an
-// empty baseURL there yields a Validator whose Validate call always fails
-// (the domain Service is expected to reject a base_url-less "custom"
-// registration before ever reaching here, but the Validator stays safe on
-// its own).
+// value ("anthropic", "openai", "google", "deepseek", "qwen", "custom", or
+// any provider appended to registry.go's providers), or nil if the name
+// isn't registered. baseURL overrides the provider's documented default
+// endpoint; for "custom" there is no default, so an empty baseURL there
+// yields a Validator whose Validate call always fails (the domain Service
+// is expected to reject a base_url-less "custom" registration before ever
+// reaching here, but the Validator stays safe on its own).
 func NewValidator(provider, baseURL string) Validator {
-	return newValidatorWithEndpoints(provider, baseURL, providerEndpoints{})
+	return newValidatorWithEndpoints(provider, baseURL, providerOverrides{})
 }
 
-func newValidatorWithEndpoints(provider, baseURL string, ep providerEndpoints) Validator {
-	client := &http.Client{Timeout: connectivityTimeout}
-	switch provider {
-	case "anthropic":
-		base := ep.anthropicBase()
-		if baseURL != "" {
-			base = baseURL
-		}
-		return &anthropicValidator{client: client, baseURL: base}
-	case "openai":
-		return &openAICompatibleValidator{client: client, baseURL: firstNonEmpty(baseURL, ep.openaiBase())}
-	case "deepseek":
-		return &openAICompatibleValidator{client: client, baseURL: firstNonEmpty(baseURL, ep.deepseekBase())}
-	case "qwen":
-		return &openAICompatibleValidator{client: client, baseURL: firstNonEmpty(baseURL, ep.qwenBase())}
-	case "google":
-		base := ep.googleBase()
-		if baseURL != "" {
-			base = baseURL
-		}
-		return &googleValidator{client: client, baseURL: base}
-	case "custom":
-		// "custom" has no documented default endpoint — the caller must
-		// supply one. If it didn't, Validate deliberately fails rather than
-		// silently probing nothing.
-		return &openAICompatibleValidator{client: client, baseURL: baseURL}
-	default:
+func newValidatorWithEndpoints(provider, baseURL string, ep providerOverrides) Validator {
+	def, ok := providerByName(provider)
+	if !ok {
 		return nil
 	}
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if v != "" {
-			return v
-		}
+	base := ep.baseFor(def)
+	if baseURL != "" {
+		base = baseURL
 	}
-	return ""
+	return def.NewValidator(&http.Client{Timeout: connectivityTimeout}, base)
 }
 
 // anthropicValidator probes GET /v1/models, which Anthropic's API accepts
