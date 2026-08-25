@@ -809,6 +809,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/plugins/signing-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 注册/轮换发布者签名公钥
+         * @description 发布者本地生成 Ed25519 密钥对，私钥不上传，只把公钥（32 字节，base64）注册在这里。
+         *     上传插件包（`POST /plugins`）时用这把公钥验签；再次调用会轮换（覆盖）已注册的公钥。
+         */
+        post: operations["registerPluginSigningKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我上传过的插件版本
+         * @description 只返回调用者自己发布过的每个版本；插件广场的公开市场列表（visibility=public 且
+         *     review_status=passed）是 P5 才做的独立入口，不是这个接口。
+         */
+        get: operations["listMyPlugins"];
+        put?: never;
+        /**
+         * 上传插件包（.akp）
+         * @description multipart/form-data：`signature`（对 `zip` 原始字节 SHA-256 摘要的 Ed25519 签名，
+         *     base64）、`zip`（.akp 包本身，spec-20 §3.1：`plugin.json` + 可选
+         *     `plugin.wasm`/`ui/`/`assets/`/`README.md`）。plugin_id/version 从包内
+         *     `plugin.json` 读取，不作为单独表单字段传。
+         *
+         *     校验链路（spec-20 §5.3）：manifest 过 JSON Schema → 签名验证（未注册签名公钥则
+         *     400/100006，验签失败 400/100003）→ 体积上限（50MiB，超出 400/100004）→
+         *     tools/connectors/hooks 每个 entry 的导出函数名在编译后的 wasm 里实际存在
+         *     （不存在 400/100004）。全部通过后建版本，`visibility=private`、
+         *     `review_status=pending` —— 发布者立刻能自己安装试用，公开上架是另一个
+         *     单独的动作（P5）。
+         */
+        post: operations["uploadPlugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plugins/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description plugin_id（反向域名式 ref，如 `acme.charts`） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** 插件详情（最新已启用版本） */
+        get: operations["getPlugin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plugins/{id}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description plugin_id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 安装插件到自己账号
+         * @description 不指定 `version` 时安装最新版本。私有（未公开上架）插件只有发布者自己能安装，用于
+         *     自测；公开上架的插件要求 `review_status=passed`（100003 之外的这条权限校验用
+         *     20003 表达）。
+         */
+        post: operations["installPlugin"];
+        /** 卸载插件 */
+        delete: operations["uninstallPlugin"];
+        options?: never;
+        head?: never;
+        /**
+         * 更新安装配置（切换版本/resolution/config/granted）
+         * @description 未出现在请求体里的字段保持不变（PATCH 语义，同其它上下文的 Update）。
+         */
+        patch: operations["updatePluginInstallation"];
+        trace?: never;
+    };
     "/model-catalog": {
         parameters: {
             query?: never;
@@ -1545,6 +1651,41 @@ export interface components {
             content: string;
             /** @description 1 - 余弦距离，越大越相关 */
             score: number;
+        };
+        /** @description 一个插件包的一个版本；上传即建版本，visibility=private 时无需审核即可自己安装/试用 */
+        Plugin: {
+            id: string;
+            /** @example acme.charts */
+            plugin_id: string;
+            /** @example 1.0.0 */
+            version: string;
+            display_name?: string;
+            /** @description plugin.json 原文（schemas/plugin.schema.json 校验过的） */
+            manifest: Record<string, never>;
+            /** @enum {string} */
+            visibility: "private" | "public";
+            /** @enum {string} */
+            review_status: "pending" | "passed" | "rejected";
+            status: components["schemas"]["Status"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        PluginInstallation: {
+            plugin_id: string;
+            /** @description 安装时锁定的版本 */
+            version: string;
+            /**
+             * @description pinned（默认，P1 唯一支持）在运行开始时解析一次；live 预留给 P7
+             * @enum {string}
+             */
+            resolution: "pinned" | "live";
+            /** @description 插件自己的配置，凭证字段永不出现在响应里（同资源中心的 Redact 约定） */
+            config: Record<string, never>;
+            /** @description 实际授予的 requires.permissions 子集 */
+            granted: string[];
+            status: components["schemas"]["Status"];
+            /** Format: date-time */
+            created_at: string;
         };
     };
     responses: {
@@ -3156,6 +3297,273 @@ export interface operations {
             };
             /** @description 该举报已处理（80002） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    registerPluginSigningKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Ed25519 公钥，32 字节，base64 编码 */
+                    public_key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 注册成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listMyPlugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items?: components["schemas"]["Plugin"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    uploadPlugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** @description 对 zip 原始字节 SHA-256 摘要的 Ed25519 签名，base64 */
+                    signature: string;
+                    /** Format: binary */
+                    zip: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Plugin"];
+                    };
+                };
+            };
+            /** @description manifest 校验失败（100004）、签名无效（100003）、未注册签名公钥（100006） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 该 plugin_id + version 已存在（100002） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    getPlugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description plugin_id（反向域名式 ref，如 `acme.charts`） */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Plugin"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 插件不存在（100001） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    installPlugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description plugin_id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    version?: string;
+                    /** @description 插件配置/凭证，凭证字段按既有约定加密存储 */
+                    config?: Record<string, never>;
+                    /** @description 实际授予的 requires.permissions 子集 */
+                    granted?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description 安装成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PluginInstallation"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 该版本尚未公开上架/审核通过，且调用者不是发布者本人（20003） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description 插件版本不存在（100001） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    uninstallPlugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description plugin_id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 卸载成功 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 尚未安装该插件（100005） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    updatePluginInstallation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description plugin_id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    version?: string;
+                    /** @enum {string} */
+                    resolution?: "pinned" | "live";
+                    config?: Record<string, never>;
+                    granted?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description 更新成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["PluginInstallation"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 尚未安装该插件（100005） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -44,6 +44,8 @@ tags:
     description: 模型广场 — Provider 接入
   - name: Operations
     description: 运营中心 — 审计日志、举报处理
+  - name: Plugins
+    description: 插件体系 — 上传（签名校验+自动化门槛）、私有安装/卸载/更新配置
 
 security:
   - BearerAuth: []
@@ -1594,6 +1596,236 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
 
+  # ────────────────────────── 插件体系（spec-20，P1）──────────────────────────
+  /plugins/signing-key:
+    post:
+      tags: [Plugins]
+      summary: 注册/轮换发布者签名公钥
+      description: |
+        发布者本地生成 Ed25519 密钥对，私钥不上传，只把公钥（32 字节，base64）注册在这里。
+        上传插件包（`POST /plugins`）时用这把公钥验签；再次调用会轮换（覆盖）已注册的公钥。
+      operationId: registerPluginSigningKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [public_key]
+              properties:
+                public_key: { type: string, description: 'Ed25519 公钥，32 字节，base64 编码' }
+      responses:
+        '204':
+          description: 注册成功
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /plugins:
+    get:
+      tags: [Plugins]
+      summary: 我上传过的插件版本
+      description: |
+        只返回调用者自己发布过的每个版本；插件广场的公开市场列表（visibility=public 且
+        review_status=passed）是 P5 才做的独立入口，不是这个接口。
+      operationId: listMyPlugins
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Plugin' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+    post:
+      tags: [Plugins]
+      summary: 上传插件包（.akp）
+      description: |
+        multipart/form-data：`signature`（对 `zip` 原始字节 SHA-256 摘要的 Ed25519 签名，
+        base64）、`zip`（.akp 包本身，spec-20 §3.1：`plugin.json` + 可选
+        `plugin.wasm`/`ui/`/`assets/`/`README.md`）。plugin_id/version 从包内
+        `plugin.json` 读取，不作为单独表单字段传。
+
+        校验链路（spec-20 §5.3）：manifest 过 JSON Schema → 签名验证（未注册签名公钥则
+        400/100006，验签失败 400/100003）→ 体积上限（50MiB，超出 400/100004）→
+        tools/connectors/hooks 每个 entry 的导出函数名在编译后的 wasm 里实际存在
+        （不存在 400/100004）。全部通过后建版本，`visibility=private`、
+        `review_status=pending` —— 发布者立刻能自己安装试用，公开上架是另一个
+        单独的动作（P5）。
+      operationId: uploadPlugin
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [signature, zip]
+              properties:
+                signature: { type: string, description: '对 zip 原始字节 SHA-256 摘要的 Ed25519 签名，base64' }
+                zip: { type: string, format: binary }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Plugin' }
+        '400':
+          description: |
+            manifest 校验失败（100004）、签名无效（100003）、未注册签名公钥（100006）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: 该 plugin_id + version 已存在（100002）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /plugins/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: plugin_id（反向域名式 ref，如 `acme.charts`）
+        schema: { type: string }
+    get:
+      tags: [Plugins]
+      summary: 插件详情（最新已启用版本）
+      operationId: getPlugin
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Plugin' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 插件不存在（100001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /plugins/{id}/install:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: plugin_id
+        schema: { type: string }
+    post:
+      tags: [Plugins]
+      summary: 安装插件到自己账号
+      description: |
+        不指定 `version` 时安装最新版本。私有（未公开上架）插件只有发布者自己能安装，用于
+        自测；公开上架的插件要求 `review_status=passed`（100003 之外的这条权限校验用
+        20003 表达）。
+      operationId: installPlugin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: string }
+                config:
+                  type: object
+                  description: 插件配置/凭证，凭证字段按既有约定加密存储
+                granted:
+                  type: array
+                  items: { type: string }
+                  description: 实际授予的 requires.permissions 子集
+      responses:
+        '201':
+          description: 安装成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PluginInstallation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 该版本尚未公开上架/审核通过，且调用者不是发布者本人（20003）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '404':
+          description: 插件版本不存在（100001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+    patch:
+      tags: [Plugins]
+      summary: 更新安装配置（切换版本/resolution/config/granted）
+      description: 未出现在请求体里的字段保持不变（PATCH 语义，同其它上下文的 Update）。
+      operationId: updatePluginInstallation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: string }
+                resolution: { type: string, enum: [pinned, live] }
+                config: { type: object }
+                granted:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PluginInstallation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 尚未安装该插件（100005）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+    delete:
+      tags: [Plugins]
+      summary: 卸载插件
+      operationId: uninstallPlugin
+      responses:
+        '204':
+          description: 卸载成功
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 尚未安装该插件（100005）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
   # ────────────────────────── 模型广场 ──────────────────────────
   /model-catalog:
     get:
@@ -2832,3 +3064,43 @@ components:
         score:
           type: number
           description: 1 - 余弦距离，越大越相关
+
+    # ── 插件体系（spec-20）──
+    Plugin:
+      type: object
+      description: 一个插件包的一个版本；上传即建版本，visibility=private 时无需审核即可自己安装/试用
+      required: [id, plugin_id, version, manifest, visibility, review_status, status, created_at]
+      properties:
+        id: { type: string }
+        plugin_id: { type: string, examples: ['acme.charts'] }
+        version: { type: string, examples: ['1.0.0'] }
+        display_name: { type: string }
+        manifest:
+          type: object
+          description: plugin.json 原文（schemas/plugin.schema.json 校验过的）
+        visibility: { type: string, enum: [private, public] }
+        review_status: { type: string, enum: [pending, passed, rejected] }
+        status: { $ref: '#/components/schemas/Status' }
+        created_at: { type: string, format: date-time }
+
+    PluginInstallation:
+      type: object
+      required: [plugin_id, version, resolution, config, granted, status, created_at]
+      properties:
+        plugin_id: { type: string }
+        version:
+          type: string
+          description: 安装时锁定的版本
+        resolution:
+          type: string
+          enum: [pinned, live]
+          description: pinned（默认，P1 唯一支持）在运行开始时解析一次；live 预留给 P7
+        config:
+          type: object
+          description: 插件自己的配置，凭证字段永不出现在响应里（同资源中心的 Redact 约定）
+        granted:
+          type: array
+          items: { type: string }
+          description: 实际授予的 requires.permissions 子集
+        status: { $ref: '#/components/schemas/Status' }
+        created_at: { type: string, format: date-time }

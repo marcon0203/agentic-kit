@@ -45,6 +45,7 @@ type RouterConfig struct {
 	Runs              *RunHandlers
 	Operations        *OperationHandlers
 	RBAC              *RBACHandlers
+	Plugins           *PluginHandlers
 	Features          FeaturesConfig
 }
 
@@ -172,6 +173,15 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Get("/users", cfg.RBAC.ListUsers)
 				r.Patch("/users/{id}/status", cfg.RBAC.UpdateUserStatus)
 				r.Patch("/users/{id}/roles", cfg.RBAC.UpdateUserRoles)
+			}
+			if cfg.Plugins != nil {
+				r.Post("/plugins/signing-key", cfg.Plugins.RegisterSigningKey)
+				r.Get("/plugins", cfg.Plugins.List)
+				r.Post("/plugins", cfg.Plugins.Upload)
+				r.Get("/plugins/{id}", cfg.Plugins.Get)
+				r.Post("/plugins/{id}/install", cfg.Plugins.Install)
+				r.Patch("/plugins/{id}/install", cfg.Plugins.UpdateInstall)
+				r.Delete("/plugins/{id}/install", cfg.Plugins.Uninstall)
 			}
 			r.Get("/features", FeaturesHandler(cfg.Features))
 			if cfg.Usage != nil {
