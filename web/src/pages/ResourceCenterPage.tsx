@@ -104,6 +104,10 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
       navigate('/apps/skill/new')
       return
     }
+    if (type === 'tool') {
+      navigate('/apps/tool/new')
+      return
+    }
     setRegisterOpen(true)
   }
 

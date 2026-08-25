@@ -747,6 +747,8 @@ paths:
         完全一样，Agent 层不用感知这个来源。整批在一个事务里创建，任何一个 ref 冲突都会让
         整批失败，不会留下部分创建的状态。
       operationId: batchCreateComponents
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:

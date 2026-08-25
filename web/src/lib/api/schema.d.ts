@@ -2271,7 +2271,10 @@ export interface operations {
     batchCreateComponents: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description 客户端生成的 UUID，24h 内相同 Key 重复请求直接返回首次结果 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
             path?: never;
             cookie?: never;
         };
