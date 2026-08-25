@@ -1,2 +1,0 @@
-DROP TABLE kb_chunks;
-DROP EXTENSION IF EXISTS vector;
