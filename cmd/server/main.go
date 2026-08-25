@@ -245,7 +245,7 @@ func run() error {
 		Auth:              api.NewAuthHandlers(iamService),
 		Tokens:            auth.NewTokenIssuer(cfg.JWTSecret),
 		APIKeys:           api.NewPostgresAPIKeyLookup(queries),
-		Resources:         api.NewResourceHandlers(resourceService),
+		Resources:         api.NewResourceHandlers(resourceService, mcp.NewProber()),
 		KnowledgeBases:    kbHandlers,
 		Agents:            api.NewAgentHandlers(agentService),
 		Bundles:           api.NewBundleHandlers(bundleService),

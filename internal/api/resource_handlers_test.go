@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -92,9 +93,26 @@ func (healthyProbe) Check(context.Context, resource.Config) resource.Health {
 	return resource.HealthHealthy
 }
 
+// fakeToolProbe stands in for a real MCP handshake in transport tests —
+// what a probe actually does (speak MCP, list tools) is tested against
+// internal/adapter/mcp; this only needs to exercise the handler's request
+// parsing and response shape.
+type fakeToolProbe struct {
+	tools []resource.ProbedTool
+	err   error
+}
+
+func (f fakeToolProbe) Probe(context.Context, string, map[string]string) ([]resource.ProbedTool, error) {
+	return f.tools, f.err
+}
+
 func newResourceHandlersForTest() (*ResourceHandlers, *fakeResourceRepo) {
 	repo := newFakeResourceRepo()
-	return NewResourceHandlers(resource.NewService(repo, passthroughCipher{}, healthyProbe{}, true)), repo
+	return newResourceHandlersForTestWithProbe(repo, fakeToolProbe{}), repo
+}
+
+func newResourceHandlersForTestWithProbe(repo *fakeResourceRepo, probe resource.ToolProbe) *ResourceHandlers {
+	return NewResourceHandlers(resource.NewService(repo, passthroughCipher{}, healthyProbe{}, true), probe)
 }
 
 func doResourceRequest(t *testing.T, handler http.HandlerFunc, method, path string, userID int64, body any, urlParams map[string]string) *httptest.ResponseRecorder {
@@ -369,5 +387,94 @@ func TestListResources_UnknownTypeReturns400(t *testing.T) {
 	w := doResourceRequest(t, h.List, http.MethodGet, "/api/v1/resources?type=wormhole", 1, nil, nil)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+// ── MCP probe ──────────────────────────────────────────────────────────
+
+func decodeProbeMCPResponse(t *testing.T, w *httptest.ResponseRecorder) probeMCPResponse {
+	t.Helper()
+	var env Envelope
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("unmarshal envelope: %v", err)
+	}
+	dataBytes, _ := json.Marshal(env.Data)
+	var resp probeMCPResponse
+	if err := json.Unmarshal(dataBytes, &resp); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	return resp
+}
+
+func TestProbeMCPServer_Success_ReturnsTools(t *testing.T) {
+	repo := newFakeResourceRepo()
+	h := newResourceHandlersForTestWithProbe(repo, fakeToolProbe{
+		tools: []resource.ProbedTool{{Name: "search", Description: "Searches things"}},
+	})
+
+	w := doResourceRequest(t, h.Probe, http.MethodPost, "/api/v1/resources/mcp/probe", 1,
+		probeMCPRequest{URL: "https://mcp.example.com"}, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeProbeMCPResponse(t, w)
+	if !resp.OK || len(resp.Tools) != 1 || resp.Tools[0].Name != "search" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+// A failed probe (wrong URL, server rejected the handshake) is still a 200
+// — "the server said no" is a normal answer for this endpoint, not a
+// transport-level failure the client needs to special-case.
+func TestProbeMCPServer_Failure_Returns200WithOKFalse(t *testing.T) {
+	repo := newFakeResourceRepo()
+	h := newResourceHandlersForTestWithProbe(repo, fakeToolProbe{err: errors.New("connect: connection refused")})
+
+	w := doResourceRequest(t, h.Probe, http.MethodPost, "/api/v1/resources/mcp/probe", 1,
+		probeMCPRequest{URL: "https://dead.example.com"}, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	resp := decodeProbeMCPResponse(t, w)
+	if resp.OK || resp.Error == "" {
+		t.Fatalf("expected ok:false with an error message, got %+v", resp)
+	}
+}
+
+func TestProbeMCPServer_RequiresAuth(t *testing.T) {
+	h, _ := newResourceHandlersForTest()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/resources/mcp/probe", bytes.NewReader([]byte(`{"url":"https://x"}`)))
+	w := httptest.NewRecorder()
+	h.Probe(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProbeMCPServer_MalformedBodyReturns400(t *testing.T) {
+	h, _ := newResourceHandlersForTest()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/resources/mcp/probe", bytes.NewReader([]byte("{not json")))
+	r = r.WithContext(WithUserID(r.Context(), 1))
+	w := httptest.NewRecorder()
+	h.Probe(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProbeMCPServer_NoProbeConfigured_ReturnsOKFalse(t *testing.T) {
+	repo := newFakeResourceRepo()
+	h := newResourceHandlersForTestWithProbe(repo, nil)
+
+	w := doResourceRequest(t, h.Probe, http.MethodPost, "/api/v1/resources/mcp/probe", 1,
+		probeMCPRequest{URL: "https://x"}, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	resp := decodeProbeMCPResponse(t, w)
+	if resp.OK {
+		t.Fatalf("expected ok:false when no prober is wired, got %+v", resp)
 	}
 }

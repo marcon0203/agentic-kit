@@ -40,6 +40,21 @@ type HealthProbe interface {
 	Check(ctx context.Context, config Config) Health
 }
 
+// ProbedTool is one tool an MCP server advertised during a ToolProbe call.
+type ProbedTool struct {
+	Name        string
+	Description string
+}
+
+// ToolProbe answers "what tools does this MCP endpoint actually advertise"
+// without persisting anything — the preview check a Bundle/component
+// registration page runs before the resource is ever saved (spec-05a),
+// distinct from HealthProbe's "is it reachable" check that runs at Create
+// time and again on a schedule.
+type ToolProbe interface {
+	Probe(ctx context.Context, endpoint string, headers map[string]string) ([]ProbedTool, error)
+}
+
 // refPattern is the ref format the API contract publishes.
 var refPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
@@ -61,10 +76,20 @@ func NewService(repo Repository, cipher CredentialCipher, probe HealthProbe, kbE
 
 // encryptCredentials returns a copy of config with every credential value
 // replaced by its ciphertext. Non-credential values pass through unchanged so
-// the rest of the config stays inspectable.
+// the rest of the config stays inspectable. See Config.Redact for why a
+// "headers" list's values are treated as credentials unconditionally,
+// unlike every other field which goes through IsCredentialKey.
 func (s *Service) encryptCredentials(config Config) (Config, error) {
 	out := make(Config, len(config))
 	for k, v := range config {
+		if k == headersConfigKey {
+			encrypted, err := transformHeaderList(v, s.cipher.Encrypt)
+			if err != nil {
+				return nil, fmt.Errorf("resource config: encrypt headers: %w", err)
+			}
+			out[k] = encrypted
+			continue
+		}
 		if !IsCredentialKey(k) {
 			out[k] = v
 			continue
@@ -97,6 +122,14 @@ func (s *Service) DecryptCredentials(config Config) (Config, error) {
 func DecryptConfig(cipher CredentialCipher, config Config) (Config, error) {
 	out := make(Config, len(config))
 	for k, v := range config {
+		if k == headersConfigKey {
+			decrypted, err := transformHeaderList(v, cipher.Decrypt)
+			if err != nil {
+				return nil, fmt.Errorf("resource config: decrypt headers: %w", err)
+			}
+			out[k] = decrypted
+			continue
+		}
 		if !IsCredentialKey(k) {
 			out[k] = v
 			continue
@@ -110,6 +143,38 @@ func DecryptConfig(cipher CredentialCipher, config Config) (Config, error) {
 			return nil, fmt.Errorf("resource config: decrypt %q: %w", k, err)
 		}
 		out[k] = plaintext
+	}
+	return out, nil
+}
+
+// transformHeaderList applies f (Encrypt or Decrypt) to every header's
+// value, leaving its key untouched. Malformed entries (not the expected
+// {"key":string,"value":string} shape) pass through unchanged rather than
+// erroring — the schema/frontend is what enforces the shape on the way in;
+// this is defensive, not a second validator.
+func transformHeaderList(v any, f func(string) (string, error)) ([]any, error) {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil, nil
+	}
+	out := make([]any, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			out = append(out, item)
+			continue
+		}
+		key, _ := m["key"].(string)
+		value, ok := m["value"].(string)
+		if !ok {
+			out = append(out, item)
+			continue
+		}
+		transformed, err := f(value)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"key": key, "value": transformed})
 	}
 	return out, nil
 }

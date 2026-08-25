@@ -242,6 +242,84 @@ func TestDecryptCredentials_RoundTrips(t *testing.T) {
 	}
 }
 
+// A "headers" list's values are treated as credentials unconditionally —
+// unlike every other field, IsCredentialKey's name-based guess can't reach
+// inside a []any of {key,value} objects, and a custom header name is
+// unpredictable (spec-05a).
+func TestRedact_HeaderListValuesRemovedKeysKept(t *testing.T) {
+	cfg := resource.Config{"headers": []any{
+		map[string]any{"key": "Authorization", "value": "Bearer sk-secret"},
+		map[string]any{"key": "X-Custom", "value": "also-secret"},
+	}}
+
+	got := cfg.Redact()
+
+	headers, ok := got["headers"].([]any)
+	if !ok || len(headers) != 2 {
+		t.Fatalf("expected 2 header entries to survive, got %+v", got["headers"])
+	}
+	for _, h := range headers {
+		m := h.(map[string]any)
+		if _, present := m["value"]; present {
+			t.Fatalf("header value must be absent, not masked: %+v", m)
+		}
+		if m["key"] == "" {
+			t.Fatalf("header key must survive redaction: %+v", m)
+		}
+	}
+}
+
+func TestCreate_HeaderListValuesEncryptedKeysPlain(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSvc(repo, stubProbe{})
+
+	_, err := svc.Create(context.Background(), 1, resource.CreateCommand{
+		Kind: "mcp", Ref: "my-mcp",
+		Config: resource.Config{
+			"endpoint": "https://mcp.example.com",
+			"headers":  []any{map[string]any{"key": "Authorization", "value": "Bearer sk-live-123"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	stored := repo.byKind[resource.KindMCP][1]
+	headers := stored.Config["headers"].([]any)
+	h := headers[0].(map[string]any)
+	if h["key"] != "Authorization" {
+		t.Fatalf("header key must be stored as-is, got %v", h["key"])
+	}
+	if h["value"] == "Bearer sk-live-123" {
+		t.Fatalf("header value must be stored encrypted, got %v", h["value"])
+	}
+	if h["value"] != reverse("Bearer sk-live-123") {
+		t.Fatalf("expected the stub cipher's ciphertext, got %v", h["value"])
+	}
+}
+
+func TestDecryptCredentials_HeaderListRoundTrips(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSvc(repo, stubProbe{})
+	ctx := context.Background()
+	if _, err := svc.Create(ctx, 1, resource.CreateCommand{
+		Kind: "mcp", Ref: "my-mcp",
+		Config: resource.Config{"headers": []any{map[string]any{"key": "Authorization", "value": "Bearer sk-live-123"}}},
+	}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	decrypted, err := svc.DecryptCredentials(repo.byKind[resource.KindMCP][1].Config)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	headers := decrypted["headers"].([]any)
+	h := headers[0].(map[string]any)
+	if h["value"] != "Bearer sk-live-123" {
+		t.Fatalf("round trip failed, got %v", h["value"])
+	}
+}
+
 // ── Validation & lifecycle ───────────────────────────────────────────
 
 func TestCreate_InvalidRefAndTypeReportBothFields(t *testing.T) {

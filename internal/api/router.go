@@ -105,6 +105,7 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Post("/resources", cfg.Resources.Create)
 				r.Patch("/resources/{id}", cfg.Resources.Update)
 				r.Get("/resources/{id}/delete-check", cfg.Resources.DeleteCheck)
+				r.Post("/resources/mcp/probe", cfg.Resources.Probe)
 			}
 			if cfg.KnowledgeBases != nil {
 				r.Post("/resources/{id}/kb/documents", cfg.KnowledgeBases.IngestDocument)

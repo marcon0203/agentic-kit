@@ -18,10 +18,13 @@ import (
 // handling, the four-kind fan-out and the MCP probe rule all live in
 // internal/domain/resource.
 type ResourceHandlers struct {
-	svc *resource.Service
+	svc      *resource.Service
+	mcpProbe resource.ToolProbe // backs POST /resources/mcp/probe; nil-safe
 }
 
-func NewResourceHandlers(svc *resource.Service) *ResourceHandlers { return &ResourceHandlers{svc: svc} }
+func NewResourceHandlers(svc *resource.Service, mcpProbe resource.ToolProbe) *ResourceHandlers {
+	return &ResourceHandlers{svc: svc, mcpProbe: mcpProbe}
+}
 
 type resourceDTO struct {
 	ID          string         `json:"id"`
@@ -178,6 +181,70 @@ func (h *ResourceHandlers) DeleteCheck(w http.ResponseWriter, r *http.Request) {
 		referencedBy = append(referencedBy, resourceReferenceDTO{Type: "agent", Ref: ref.AgentRef, Version: ref.Version})
 	}
 	writeJSON(w, r, http.StatusOK, deleteCheckDTO{Deletable: check.Deletable, ReferencedBy: referencedBy})
+}
+
+type mcpHeaderDTO struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type probeMCPRequest struct {
+	URL     string         `json:"url"`
+	Headers []mcpHeaderDTO `json:"headers"`
+}
+
+type probeMCPToolDTO struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type probeMCPResponse struct {
+	OK    bool              `json:"ok"`
+	Tools []probeMCPToolDTO `json:"tools,omitempty"`
+	Error string            `json:"error,omitempty"`
+}
+
+// Probe handles POST /resources/mcp/probe — a real MCP handshake against a
+// server the user hasn't saved a resource for yet (or is re-checking one
+// they have), so the registration page can show what tools it actually
+// advertises before the "保存" button ever does anything. Never persists;
+// a failed probe is still a 200 with ok:false, not a 4xx/5xx, because
+// "the server rejected this" is the expected answer for a wrong URL/header,
+// not a transport-level failure.
+func (h *ResourceHandlers) Probe(w http.ResponseWriter, r *http.Request) {
+	if _, ok := UserIDFromContext(r.Context()); !ok {
+		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
+		return
+	}
+	if h.mcpProbe == nil {
+		writeJSON(w, r, http.StatusOK, probeMCPResponse{OK: false, Error: "mcp probing is not configured on this deployment"})
+		return
+	}
+
+	var req probeMCPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
+		return
+	}
+
+	headers := make(map[string]string, len(req.Headers))
+	for _, h := range req.Headers {
+		if h.Key != "" {
+			headers[h.Key] = h.Value
+		}
+	}
+
+	tools, err := h.mcpProbe.Probe(r.Context(), req.URL, headers)
+	if err != nil {
+		writeJSON(w, r, http.StatusOK, probeMCPResponse{OK: false, Error: err.Error()})
+		return
+	}
+
+	toolDTOs := make([]probeMCPToolDTO, len(tools))
+	for i, t := range tools {
+		toolDTOs[i] = probeMCPToolDTO{Name: t.Name, Description: t.Description}
+	}
+	writeJSON(w, r, http.StatusOK, probeMCPResponse{OK: true, Tools: toolDTOs})
 }
 
 // ── External resource IDs ────────────────────────────────────────────

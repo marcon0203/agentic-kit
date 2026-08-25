@@ -101,13 +101,45 @@ func IsCredentialKey(key string) bool {
 // Redact returns a copy with every credential field *removed*. spec-05's
 // "凭证字段在任何 GET 响应中都不出现" means omitted — not masked with dots,
 // not shown as ciphertext, gone.
+//
+// A "headers" field (an MCP resource's custom header list) gets the same
+// treatment one level down: IsCredentialKey can't see inside a []any of
+// {key, value} objects, and a custom header's value is unpredictable by
+// name — a user can just as easily call it "x-secret-9527" as
+// "Authorization" — so every header value is treated as a credential
+// unconditionally, keeping only the header name for display.
 func (c Config) Redact() Config {
 	out := make(Config, len(c))
 	for k, v := range c {
+		if k == headersConfigKey {
+			out[k] = redactHeaderList(v)
+			continue
+		}
 		if IsCredentialKey(k) {
 			continue
 		}
 		out[k] = v
+	}
+	return out
+}
+
+// headersConfigKey is the config field name an MCP resource's custom
+// header list lives under — []any of {"key": string, "value": string}.
+const headersConfigKey = "headers"
+
+func redactHeaderList(v any) any {
+	raw, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	out := make([]any, 0, len(raw))
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		key, _ := m["key"].(string)
+		out = append(out, map[string]any{"key": key})
 	}
 	return out
 }

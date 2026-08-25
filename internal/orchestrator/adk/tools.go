@@ -142,18 +142,20 @@ func BuildTool(spec ToolSpec, kb KnowledgeBaseSearcher) (tool.Tool, error) {
 // this returns a tool.Toolset rather than a single tool.Tool.
 //
 // spec.Config carries the same "endpoint" convention as buildEndpointTool
-// (mirroring internal/api's MCP connectivity probe), plus an optional
-// "api_key" sent as a Bearer token on every request to the server.
+// (mirroring internal/api's MCP connectivity probe), plus either a
+// config.headers list (arbitrary header rows a user typed in at
+// registration — see spec-05a) or the older single "api_key" field (sent
+// as a Bearer token), on every request to the server. Both can be present
+// at once; headers just adds to whatever api_key already set.
 func BuildMCPToolset(spec ToolSpec) (tool.Toolset, error) {
 	endpoint, _ := spec.Config["endpoint"].(string)
 	if endpoint == "" {
 		return nil, fmt.Errorf("resource %q has no endpoint configured", spec.Ref)
 	}
-	apiKey, _ := spec.Config["api_key"].(string)
 
 	client := &http.Client{Timeout: toolCallTimeout}
-	if apiKey != "" {
-		client.Transport = &bearerAuthTransport{apiKey: apiKey, base: http.DefaultTransport}
+	if headers := headersFromConfig(spec.Config); len(headers) > 0 {
+		client.Transport = &headerTransport{headers: headers, base: http.DefaultTransport}
 	}
 
 	return mcptoolset.New(mcptoolset.Config{
@@ -161,17 +163,45 @@ func BuildMCPToolset(spec ToolSpec) (tool.Toolset, error) {
 	})
 }
 
-// bearerAuthTransport adds an Authorization header to every request — the
-// MCP transport takes an *http.Client, not a per-request header option, so
-// this is how a resource's stored credential reaches the server.
-type bearerAuthTransport struct {
-	apiKey string
-	base   http.RoundTripper
+// headersFromConfig reads an MCP resource's config.headers ([]any of
+// {"key","value"} objects) plus the legacy single api_key field into one
+// header map — the same shape internal/adapter/mcp.HeadersFromConfig reads
+// for the connectivity probe, duplicated here rather than imported to keep
+// this package decoupled from the domain layer (spec-10's "所有 ADK 调用
+// 收敛在 internal/orchestrator/adk 包内" convention).
+func headersFromConfig(config map[string]any) map[string]string {
+	headers := map[string]string{}
+	if apiKey, _ := config["api_key"].(string); apiKey != "" {
+		headers["Authorization"] = "Bearer " + apiKey
+	}
+	raw, _ := config["headers"].([]any)
+	for _, item := range raw {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		key, _ := m["key"].(string)
+		value, _ := m["value"].(string)
+		if key != "" && value != "" {
+			headers[key] = value
+		}
+	}
+	return headers
 }
 
-func (t *bearerAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+// headerTransport adds a fixed set of headers to every request — the MCP
+// transport takes an *http.Client, not a per-request header option, so
+// this is how a resource's stored credentials reach the server.
+type headerTransport struct {
+	headers map[string]string
+	base    http.RoundTripper
+}
+
+func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	for k, v := range t.headers {
+		req.Header.Set(k, v)
+	}
 	return t.base.RoundTrip(req)
 }
 

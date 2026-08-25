@@ -553,6 +553,58 @@ paths:
                       data: { $ref: '#/components/schemas/Resource' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /resources/mcp/probe:
+    post:
+      tags: [Resources]
+      summary: 探测 MCP Server，返回其真实工具列表
+      description: |
+        走真实的 MCP 协议握手（initialize + tools/list），不落库——用于注册页在保存前
+        显示"这台 MCP Server 到底有哪些工具"。连接/握手失败时仍返回 200，
+        `data.ok=false` 带上 `data.error`，因为"服务器拒绝了"是这个接口的正常回答之一，
+        不是传输层错误。
+      operationId: probeMCPServer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string }
+                headers:
+                  type: array
+                  items:
+                    type: object
+                    required: [key, value]
+                    properties:
+                      key: { type: string }
+                      value: { type: string }
+      responses:
+        '200':
+          description: 成功（探测本身可能是 ok:false）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [ok]
+                        properties:
+                          ok: { type: boolean }
+                          tools:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                name: { type: string }
+                                description: { type: string }
+                          error: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   # ────────────────────────── Agent ──────────────────────────
   /resources/{id}/delete-check:
     parameters:
