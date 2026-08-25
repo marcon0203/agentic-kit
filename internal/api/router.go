@@ -106,6 +106,9 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Patch("/resources/{id}", cfg.Resources.Update)
 				r.Get("/resources/{id}/delete-check", cfg.Resources.DeleteCheck)
 				r.Post("/resources/mcp/probe", cfg.Resources.Probe)
+				r.Post("/resources/skills/upload", cfg.Resources.UploadSkill)
+				r.Get("/resources/skills/{id}/files", cfg.Resources.ListSkillFiles)
+				r.Get("/resources/skills/{id}/files/*", cfg.Resources.GetSkillFile)
 			}
 			if cfg.KnowledgeBases != nil {
 				r.Post("/resources/{id}/kb/documents", cfg.KnowledgeBases.IngestDocument)

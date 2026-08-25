@@ -261,6 +261,68 @@ export interface paths {
         patch: operations["updateResource"];
         trace?: never;
     };
+    "/resources/skills/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 上传 Skill zip
+         * @description multipart/form-data：`ref`（必填）、`display_name`（可选）、`zip`（zip 文件，必须含
+         *     `SKILL.md`）。文件逐个存入阿里云 OSS，成功后返回新建的 Skill 资源。部署未配置 OSS
+         *     时返回 400。
+         */
+        post: operations["uploadSkillZip"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resources/skills/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** Skill 文件树（只读） */
+        get: operations["listSkillFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/resources/skills/{id}/files/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                /** @description 文件相对路径，可含斜杠 */
+                path: string;
+            };
+            cookie?: never;
+        };
+        /** 下载 Skill 中的单个文件 */
+        get: operations["downloadSkillFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/resources/mcp/probe": {
         parameters: {
             query?: never;
@@ -1977,6 +2039,101 @@ export interface operations {
                         data?: components["schemas"]["Resource"];
                     };
                 };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uploadSkillZip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    ref: string;
+                    display_name?: string;
+                    /** Format: binary */
+                    zip: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Resource"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /** @description ref 重复 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    listSkillFiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items?: {
+                                path?: string;
+                                size_bytes?: number;
+                                content_type?: string;
+                            }[];
+                        };
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    downloadSkillFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                /** @description 文件相对路径，可含斜杠 */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 文件内容（不是 Envelope 包装，直接是文件流） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: components["responses"]["NotFound"];
         };

@@ -41,6 +41,24 @@ type Config struct {
 	ElasticsearchUsername string `mapstructure:"ELASTICSEARCH_USERNAME"`
 	ElasticsearchPassword string `mapstructure:"ELASTICSEARCH_PASSWORD"`
 	ElasticsearchAPIKey   string `mapstructure:"ELASTICSEARCH_API_KEY"`
+
+	// Aliyun OSS backs Skill zip uploads (spec-05a) — the only current
+	// consumer. There's no separate ENABLED switch like KB_ENABLED: OSS is
+	// "on" exactly when all four vars are set, "off" when none are, and a
+	// startup error when it's some but not all (a half-configured deployment
+	// is a mistake worth failing loudly on, not silently degrading). A
+	// deployment that never sets any of these still boots cleanly — the
+	// Skill upload/register-source entry points just stay disabled.
+	OSSEndpoint        string `mapstructure:"OSS_ENDPOINT"`
+	OSSBucket          string `mapstructure:"OSS_BUCKET"`
+	OSSAccessKeyID     string `mapstructure:"OSS_ACCESS_KEY_ID"`
+	OSSAccessKeySecret string `mapstructure:"OSS_ACCESS_KEY_SECRET"`
+}
+
+// OSSEnabled reports whether Aliyun OSS is configured. Load already
+// guarantees this is never a partial configuration.
+func (c *Config) OSSEnabled() bool {
+	return c.OSSEndpoint != "" && c.OSSBucket != "" && c.OSSAccessKeyID != "" && c.OSSAccessKeySecret != ""
 }
 
 // required lists the env vars that must be non-empty for the server to start.
@@ -92,6 +110,10 @@ func Load() (*Config, error) {
 		ElasticsearchUsername: v.GetString("ELASTICSEARCH_USERNAME"),
 		ElasticsearchPassword: v.GetString("ELASTICSEARCH_PASSWORD"),
 		ElasticsearchAPIKey:   v.GetString("ELASTICSEARCH_API_KEY"),
+		OSSEndpoint:           v.GetString("OSS_ENDPOINT"),
+		OSSBucket:             v.GetString("OSS_BUCKET"),
+		OSSAccessKeyID:        v.GetString("OSS_ACCESS_KEY_ID"),
+		OSSAccessKeySecret:    v.GetString("OSS_ACCESS_KEY_SECRET"),
 	}
 
 	// Milvus/Elasticsearch addresses are only required once KB_ENABLED
@@ -104,6 +126,16 @@ func Load() (*Config, error) {
 		if cfg.ElasticsearchAddr == "" {
 			return nil, fmt.Errorf("config: KB_ENABLED=true requires ELASTICSEARCH_ADDR")
 		}
+	}
+
+	ossVarsSet := 0
+	for _, v := range []string{cfg.OSSEndpoint, cfg.OSSBucket, cfg.OSSAccessKeyID, cfg.OSSAccessKeySecret} {
+		if v != "" {
+			ossVarsSet++
+		}
+	}
+	if ossVarsSet != 0 && ossVarsSet != 4 {
+		return nil, fmt.Errorf("config: OSS_ENDPOINT/OSS_BUCKET/OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET must be either all set or all empty")
 	}
 
 	return cfg, nil

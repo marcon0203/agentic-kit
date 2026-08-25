@@ -22,6 +22,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/adapter/milvus"
 	adaptermodelgateway "github.com/marcon0203/agentic-kit/internal/adapter/modelgateway"
 	"github.com/marcon0203/agentic-kit/internal/adapter/orchestrator"
+	"github.com/marcon0203/agentic-kit/internal/adapter/oss"
 	"github.com/marcon0203/agentic-kit/internal/adapter/password"
 	"github.com/marcon0203/agentic-kit/internal/adapter/postgres"
 	adapterschema "github.com/marcon0203/agentic-kit/internal/adapter/schema"
@@ -131,6 +132,17 @@ func run() error {
 		mcp.NewReachabilityProbe(),
 		cfg.KBEnabled,
 	)
+	// Skill zip upload needs an object store; a deployment that never sets
+	// the OSS_* vars still boots cleanly (WithSkillUploads just never gets
+	// called, so UploadSkill/ListSkillFiles/GetSkillFile all return a clear
+	// "not configured" error instead of a nil-pointer panic).
+	if cfg.OSSEnabled() {
+		objectStore, err := oss.New(cfg.OSSEndpoint, cfg.OSSAccessKeyID, cfg.OSSAccessKeySecret, cfg.OSSBucket)
+		if err != nil {
+			return fmt.Errorf("connect to OSS: %w", err)
+		}
+		resourceService = resourceService.WithSkillUploads(objectStore, postgres.NewSkillFileRepository(queries))
+	}
 
 	providerKeys := postgres.NewProviderKeyStore(queries, aesKey)
 

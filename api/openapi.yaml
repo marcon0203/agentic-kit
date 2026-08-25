@@ -553,6 +553,97 @@ paths:
                       data: { $ref: '#/components/schemas/Resource' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /resources/skills/upload:
+    post:
+      tags: [Resources]
+      summary: 上传 Skill zip
+      description: |
+        multipart/form-data：`ref`（必填）、`display_name`（可选）、`zip`（zip 文件，必须含
+        `SKILL.md`）。文件逐个存入阿里云 OSS，成功后返回新建的 Skill 资源。部署未配置 OSS
+        时返回 400。
+      operationId: uploadSkillZip
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [ref, zip]
+              properties:
+                ref: { type: string, pattern: '^[a-z][a-z0-9_-]*$' }
+                display_name: { type: string }
+                zip: { type: string, format: binary }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Resource' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: ref 重复
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /resources/skills/{id}/files:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Resources]
+      summary: Skill 文件树（只读）
+      operationId: listSkillFiles
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                path: { type: string }
+                                size_bytes: { type: integer }
+                                content_type: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /resources/skills/{id}/files/{path}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: path
+        in: path
+        required: true
+        schema: { type: string }
+        description: 文件相对路径，可含斜杠
+    get:
+      tags: [Resources]
+      summary: 下载 Skill 中的单个文件
+      operationId: downloadSkillFile
+      responses:
+        '200':
+          description: 文件内容（不是 Envelope 包装，直接是文件流）
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /resources/mcp/probe:
     post:
       tags: [Resources]

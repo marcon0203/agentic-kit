@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
@@ -46,6 +47,18 @@ type ProbedTool struct {
 	Description string
 }
 
+// ObjectStore is where a Skill's uploaded zip contents live — one object
+// per file, keyed by a caller-chosen path. Nothing else in the resource
+// context uses this yet; it exists because a Skill's real content (its
+// SKILL.md and any attached files) is too large and too file-shaped to
+// live in the Config JSONB every other resource kind is happy keeping
+// everything in.
+type ObjectStore interface {
+	Put(ctx context.Context, key string, r io.Reader, contentType string) error
+	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	Delete(ctx context.Context, key string) error
+}
+
 // ToolProbe answers "what tools does this MCP endpoint actually advertise"
 // without persisting anything — the preview check a Bundle/component
 // registration page runs before the resource is ever saved (spec-05a),
@@ -64,6 +77,13 @@ type Service struct {
 	cipher    CredentialCipher
 	probe     HealthProbe
 	kbEnabled bool
+
+	// objectStore/skillFiles back UploadSkill/ListSkillFiles/GetSkillFile
+	// (skill.go). Both nil when OSS isn't configured — every method that
+	// needs them checks and returns a clear "not configured" error rather
+	// than panicking; the rest of the service works identically either way.
+	objectStore ObjectStore
+	skillFiles  SkillFileRepository
 }
 
 // kbEnabled mirrors config.Config.KBEnabled — the knowledge_base kind
@@ -72,6 +92,15 @@ type Service struct {
 // create a resource nothing can ever ingest into or search.
 func NewService(repo Repository, cipher CredentialCipher, probe HealthProbe, kbEnabled bool) *Service {
 	return &Service{repo: repo, cipher: cipher, probe: probe, kbEnabled: kbEnabled}
+}
+
+// WithSkillUploads enables UploadSkill/ListSkillFiles/GetSkillFile — a
+// separate opt-in step rather than more NewService parameters, since it's
+// the one capability that's genuinely optional infrastructure (OSS) rather
+// than a required collaborator every deployment has.
+func (s *Service) WithSkillUploads(objectStore ObjectStore, skillFiles SkillFileRepository) *Service {
+	s.objectStore, s.skillFiles = objectStore, skillFiles
+	return s
 }
 
 // encryptCredentials returns a copy of config with every credential value

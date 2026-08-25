@@ -43,6 +43,7 @@ type Querier interface {
 	CreateReport(ctx context.Context, arg CreateReportParams) (Report, error)
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error)
+	CreateSkillFile(ctx context.Context, arg CreateSkillFileParams) error
 	// ── Subscriptions ────────────────────────────────────────────────────
 	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error)
 	CreateTool(ctx context.Context, arg CreateToolParams) (Tool, error)
@@ -221,6 +222,7 @@ type Querier interface {
 	ListRolePermissionKeys(ctx context.Context, roleIds []int64) ([]ListRolePermissionKeysRow, error)
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListRolesForUser(ctx context.Context, userID int64) ([]Role, error)
+	ListSkillFilesForSkill(ctx context.Context, arg ListSkillFilesForSkillParams) ([]SkillFile, error)
 	ListSkillsForOwnerPage(ctx context.Context, arg ListSkillsForOwnerPageParams) ([]Skill, error)
 	ListSubscriptionsForUserPage(ctx context.Context, arg ListSubscriptionsForUserPageParams) ([]Subscription, error)
 	ListToolsForOwnerPage(ctx context.Context, arg ListToolsForOwnerPageParams) ([]Tool, error)

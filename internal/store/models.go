@@ -242,6 +242,16 @@ type Skill struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type SkillFile struct {
+	ID          int64              `json:"id"`
+	SkillID     int64              `json:"skill_id"`
+	OwnerUserID int64              `json:"owner_user_id"`
+	Path        string             `json:"path"`
+	SizeBytes   int64              `json:"size_bytes"`
+	ContentType string             `json:"content_type"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type Subscription struct {
 	ID           int64              `json:"id"`
 	SubscriberID int64              `json:"subscriber_id"`
