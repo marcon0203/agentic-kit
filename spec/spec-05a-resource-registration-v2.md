@@ -14,10 +14,12 @@
 
 ## 设计原则
 
-1. **弹窗退场，二级页面上位**——跟这次 Bundle 编辑器的改法一致（`/apps/bundles/new` 有独立路由、侧栏常驻、有返回按钮）。五种资源里字段简单的（记忆库）可以留在轻量表单，字段复杂/需要多步骤的（Tool 的 OpenAPI 导入、Skill 的文件树、MCP 的探测）必须是独立路由页面，不能塞进 Dialog 的滚动区域里。
-2. **新增能力是叠加，不是替换**——现有最简单的"手填 JSON config"路径继续保留兜底（比如没配 OSS 时 Skill 还能用纯文本 instructions），新表单是更好的输入方式，不是唯一路径，避免这轮改动把线上已存在的资源“契约”破坏掉。
+1. **弹窗退场，二级页面上位**——跟这次 Bundle 编辑器的改法一致（`/apps/bundles/new` 有独立路由、侧栏常驻、有返回按钮）。五种资源里字段简单的（记忆库）可以留在轻量表单，字段复杂/需要多步骤的（组件的 OpenAPI 导入、MCP 的探测）必须是独立路由页面，不能塞进 Dialog 的滚动区域里。
+2. **新增能力是叠加，不是替换**——现有最简单的"手填 JSON config"路径继续保留兜底（比如没配 OSS 时 Skill 还能用纯文本 instructions），新表单是更好的输入方式，不是唯一路径，避免这轮改动把线上已存在的资源"契约"破坏掉。
 3. **凭证加密模型从"字符串子串匹配"扩展为"按 kind 注册专属规则"**——MCP 的自定义 Header 是本轮唯一一个必须现在处理的加密模型缺口（否则用户填的 Header 值明文落库）。
 4. **运行时编译代码只在必要处改**——Tool 的 `http` 形态、Skill 走纯 `instructions` 的旧路径，行为完全不变；新形态是新增分支，不是重写。
+5. **名字和判别字段按终态设计，功能按当下需要实现**——"组件"这个菜单名和 `component_type` 判别字段现在就按"以后要装下插件/沙箱环境"的终态定下来，但插件/沙箱环境本身不做，只做 Tool 这一支；这样以后补类型是加一个枚举值，不是推倒重来。
+6. **系统级资源目录复用已有先例**——Skill 源同步下来的"系统提供"Skill，管理模式直接照抄系统设置里已经跑通的模型目录（`modelcatalog`：管理员登记、全局只读、所有人可见），不重新发明一套。
 
 ---
 
@@ -70,7 +72,9 @@ Response: { ok: true, tools: [{name, description}] } | { ok: false, error: strin
 
 ---
 
-## 二、Skill：zip 上传（存阿里云 OSS）+ 在线编辑
+## 二、Skill：只支持 zip 上传（存阿里云 OSS），不做在线编辑；另开"Skill 源"同步
+
+**改口**：不做在线编辑器。Skill 的编辑方式就是"重新上传一个新版本"——跟 Agent/Bundle 的 immutable 版本语义完全一致（已发布版本不可改，要改就建新 `version`），不需要为 Skill 单独发明一套"文件树 + 保存"的编辑体验。这样第二部分的实现范围直接砍掉文件在线编辑的所有前后端工作。
 
 ### 为什么不是"一个字符串"就够
 
@@ -80,20 +84,15 @@ Skill 的本质是"一段可复用的做事方式"，真实场景里从来不是
 - 必须有一个入口文件 `SKILL.md`（agent 实际读到的正文）。
 - 允许任意数量的附属文件（本轮附属文件不喂给模型，只有入口文件内容进 `buildSkillTool` 的输出——先把"能管理一整个目录"这件事立住，模型按需读取附属文件是下一步，不在本轮）。
 
-### 两种创建方式，都要支持
+### 创建方式：只有一种——上传 zip
 
-1. **上传 zip 导入**：`POST /resources/skills/upload`（multipart），body 另带 `ref/version/display_name`。服务端解压校验（必须含 `SKILL.md`；限制解压后总大小、单文件大小、文件数量；校验 zip slip——拒绝任何 `..` 或绝对路径条目）→ 逐文件 PUT 到 OSS → 建 resource 行 + 建文件树索引行，一步到位的单次请求，不是"先建元数据再传文件"的两阶段（避免中间态：元数据建好了但文件没传完）。
-2. **在线新建**：不上传 zip，直接在编辑器里新建一个空的 `SKILL.md` 开始写，跟"导入"是并列的两个入口，不是先后关系。
+`POST /resources/skills/upload`（multipart），body 另带 `ref/version/display_name`。服务端解压校验（必须含 `SKILL.md`；限制解压后总大小、单文件大小、文件数量；校验 zip slip——拒绝任何 `..` 或绝对路径条目）→ 逐文件 PUT 到 OSS → 建 resource 行 + 建文件树索引行，一步到位的单次请求，不是"先建元数据再传文件"的两阶段（避免中间态：元数据建好了但文件没传完）。
 
-### 在线编辑
+文件树索引仍然保留（见下），但只用来"查看这个 Skill 包含哪些文件、下载核对"，不提供编辑入口：
 
-不做 Git 式版本控制——Skill 的"版本"就是 resource 表已有的 `version` 字段，immutable 语义和 Agent/Bundle 一致（已发布版本不可再改，要改就建新版本）。编辑器是"文件树 + 单文件编辑"：
-
-- `GET /resources/skills/{id}/files`：文件树列表（路径、大小、类型）。
-- `GET /resources/skills/{id}/files/{path}`：单文件内容，服务端从 OSS 流式代理，不落本地临时文件。
-- `PUT /resources/skills/{id}/files/{path}`：保存编辑，仅当前工作版本（未发布）允许，发布版本走跟 Agent/Bundle 一致的 409 immutable 规则。
-- 只允许文本类扩展名（`.md/.txt/.json/.yaml/.py/...`）走在线编辑；二进制文件只能下载/替换，不提供文本编辑器。
-- 编辑器组件可以复用 Bundle 编辑器里 `SourceView`（`web/src/components/bundle-editor/SourceView.tsx`）已经引入的代码编辑体验，不用重新选型。
+- `GET /resources/skills/{id}/files`：文件树列表（路径、大小、类型），列表页点开能看。
+- `GET /resources/skills/{id}/files/{path}`：单文件内容/下载，服务端从 OSS 流式代理。
+- 没有 `PUT`。要改内容，重新上传一个新 zip 作为新 `version`。
 
 ### 数据库改动
 
@@ -116,6 +115,18 @@ CREATE TABLE skill_files (
 
 `buildSkillTool`（`internal/orchestrator/adk/tools.go`）现在直接读 `config.instructions`；改为：`config` 里有 `oss_prefix` 时，按需从 OSS 拉 `{oss_prefix}/{entry}` 的内容（加一层进程内缓存，TTL 5 分钟，避免每次 tool 调用都打一次 OSS）；没有 `oss_prefix`（旧的纯文本 Skill）继续走 `config.instructions`，两条路径并存。
 
+### Skill 源：系统设置里配置同步源，同步下来的都是"系统提供"
+
+新诉求：除了用户自己上传，系统设置要能配置若干个"Skill 源"（比如 clawhub.ai 这类 Skill 目录/市场），从源同步 Skill 下来——同步来的 Skill 统一标记"系统提供"，不是哪个用户私有的。
+
+这跟 spec-59～65 已经落地的**模型目录**（`modelcatalog`：系统配置里管理员登记 Provider/Model，所有人在模型广场只读浏览）是同一个模式，直接照搬：
+
+- **系统设置新增二级菜单"Skill 源"**（`/settings/skill-sources`，仿照"模型提供商"页面），管理员在这里登记同步源：`name`（展示名，如 "ClawHub"）、`sync_type`（同步协议的判别字段，先支持一种约定好的 HTTP 目录接口，`clawhub` 是第一个具体实现）、`endpoint`、可选 `api_key`（加密存储）。点"立即同步"按钮触发一次同步，不做后台定时任务——用得上自动化了再加 cron，本轮手动触发够用。
+- 新表 `skill_sources`（id, name, sync_type, config JSONB, last_synced_at, last_sync_status, status, created_at）。
+- 同步落地到**一张独立的全局目录表 `system_skills`**（不进用户 owner 的 `skills` 表——它是全局的，没有 owner），字段跟 `skills` 类似但多一个 `source_id` 外键：`id, source_id, ref, version, display_name, config(oss_prefix/entry), status, synced_at`。存储复用同一个 OSS，对象 key 前缀换成 `skills/system/{source_id}/{ref}/{version}/`。
+- 后端加一个判别接口 `SkillSourceSyncer`（`Sync(ctx, source SkillSource) ([]SyncedSkill, error)`），每种 `sync_type` 一份实现（`internal/adapter/skillsource/clawhub` 是第一个）——这样以后接第二个源不用改同步流程的主干逻辑，只加一个新适配器。
+- **展示与引用**：应用广场的 Skill 列表页，用户自己上传的和"系统提供"的混合展示，系统提供的打一个角标、禁用编辑/停用/删除（生命周期只在系统设置里管）。Agent 的 `capabilities.skills[]` 解析（`internal/api` 里的 `ResourceAuthorizer`）从"只查 owner 的 skills 表"扩展为"先查 owner 自己的，查不到再查 `system_skills` 目录"——两段查找，同名时 owner 自己的优先（允许用户用同名 ref 覆盖系统提供的版本，语义更直觉）。
+
 ---
 
 ## 三、OSS 接入（阿里云）
@@ -127,34 +138,43 @@ CREATE TABLE skill_files (
 
 ---
 
-## 四、Tool：形态从"一种"扩展到"能覆盖大多数场景"
+## 四、菜单改名"组件"：Tool 只是组件的一种类型，插件/沙箱环境是预留的其他类型
 
-### 现状的局限
+**改口**：侧栏菜单 "Tool" 改名"组件"。"组件"是一个更大的伞：Tool、插件（Plugin）、沙箱环境（Sandbox）……都是"组件"下不同的类型，差别只在类型，不是各自独立的资源门类。插件体系本身**本轮不做**——用户明确说了"这是把目前业务梳理清楚后再做的事情"，这里只做两件事：(1) 菜单/产品命名现在就改，(2) 数据结构上现在就留出"类型"判别位，不要现在把 Tool 焊死成唯一形态，将来插件/沙箱环境落地时是加一个新的 `component_type` 取值，不是另起一张表、另设计一遍。
 
-`buildEndpointTool` 只有一种形态：POST 一个 endpoint，body 是自由文本，返回也是自由文本——一次只能接一个"函数"，粒度太粗，接一个真实的第三方 API（比如 GitHub/Notion）要一个个手写 N 个 tool。
+### 判别字段设计：`component_type`（大类）+ `tool_type`（Tool 内部的子形态）
 
-### 新增形态：OpenAPI 导入（收益最大，优先做）
+两层判别，不是一层：
+
+- `config.component_type`：`"tool"`（本轮唯一实现的取值）｜ `"plugin"`（预留，不做）｜ `"sandbox"`（预留，不做）。菜单/列表页按这个字段分组展示。
+- 当 `component_type == "tool"` 时，才有第二层 `config.tool_type` 区分 Tool 自己的形态：`"http"`（现状，单接口）｜ `"openapi"`（导入一批 operation）。
+
+这样以后插件/沙箱环境落地时，各自会有自己的一套 `config` 形状（插件大概率需要"托管代码执行"，沙箱环境大概率需要"隔离运行环境的生命周期管理"），但都挂在同一张 `tools` 表、同一个 `component` Kind 下，靠 `component_type` 分流——不需要因为新增一个组件类型就新建一张表、新加一个 Resource Kind、新加一整套 CRUD 接口。**这是本轮唯一要现在做的改动**：把 Tool 相关的表/字段命名和判别逻辑按"组件"的终态设计，但只实现 `component_type=tool` 这一支。
+
+### Tool 自己的形态扩展：OpenAPI 导入（收益最大，优先做）
 
 流程是"预览 → 勾选 → 批量创建"三步，不是一次表单提交：
 
 1. 用户贴 OpenAPI spec 的 URL，或直接粘贴/上传 YAML/JSON 内容。
-2. `POST /resources/tools/import-openapi`（预览，不落库）：服务端解析 spec（用 `github.com/pb33f/libopenapi` 或 `github.com/getkin/kin-openapi`），返回每个 operation 的 `{operation_id, method, path, summary}` 列表。
+2. `POST /resources/components/import-openapi`（预览，不落库）：服务端解析 spec（用 `github.com/pb33f/libopenapi` 或 `github.com/getkin/kin-openapi`），返回每个 operation 的 `{operation_id, method, path, summary}` 列表。
 3. 用户勾选要开放给 Agent 的 operation。
-4. `POST /resources/tools/batch`（批量创建，单事务）：为每个被选中的 operation 各建一行 `tools` 记录，`ref` 形如 `{base_ref}__{operation_id}`，`config` 存 `{tool_type: "openapi", method, path, base_url, import_group: "<导入批次标识>"}`。
+4. `POST /resources/components/batch`（批量创建，单事务）：为每个被选中的 operation 各建一行 `tools` 记录，`ref` 形如 `{base_ref}__{operation_id}`，`config` 存 `{component_type: "tool", tool_type: "openapi", method, path, base_url, import_group: "<导入批次标识>"}`。
 
 **每个 operation 各自是一个独立的 `tools` 行**，不是一个 tool 资源背后塞多个 operation——这样 `capabilities.tools[]` 的"一个 ref 一个 tool"心智模型完全不用变，Bundle/Agent 层不用感知这个新形态的存在。`import_group` 字段只是方便以后"整批查看/整批禁用来自同一个 spec 的 tool"，不参与运行时逻辑。
 
 ### 运行时改动
 
-`buildEndpointTool` 按 `config.tool_type` 分支：`"openapi"` 时用 `config.method/path/base_url` 拼实际请求（而不是现在写死的"POST 到 endpoint、body 透传"）；没有 `tool_type`（旧数据）继续走现在的行为。这是本轮唯一必须碰运行时编译代码的第二处（第一处是 MCP 探测）。
+`buildEndpointTool` 按 `config.tool_type` 分支：`"openapi"` 时用 `config.method/path/base_url` 拼实际请求（而不是现在写死的"POST 到 endpoint、body 透传"）；没有 `tool_type`（旧数据，视为 `http`）继续走现在的行为。这是本轮唯一必须碰运行时编译代码的第二处（第一处是 MCP 探测）。`component_type` 本轮不影响运行时分支（只有 tool 一种取值），纯粹是为将来预留的字段。
 
 ### 前端
 
-`/apps/tool/new` 改成两步：Step 1 卡片选形态（`http` 手填单接口 / `openapi` 导入一批），Step 2 才进对应的表单——不是一个大表单把两种形态的字段糊在一起。
+菜单标签 `Tool` → `组件`（内部路由 value 保持 `tool` 不变，跟这次 Bundle/Agent 改名同一个做法——只换展示文案，不动 URL）。`/apps/tool/new` 改成两步：Step 1 卡片选类型（本轮只有一张"Tool"卡片可点，插件/沙箱环境卡片可以先放上去打成"即将支持"的禁用态，提前让用户看到路线图），选完 Tool 后 Step 2 再选形态（`http` 手填单接口 / `openapi` 导入一批）进对应表单。
 
 ### 本轮不做，但写清楚以后往哪走
 
-- `code`（用户自己写一段沙箱脚本执行）：需要一个新的执行沙箱，安全边界和"MCP 托管一个远程进程"是同一量级的新增风险，本轮不做，留作独立的后续项。
+- **插件体系**（`component_type = "plugin"`）：用户明确说了"业务梳理清楚后再做"，本轮只留判别字段，不设计具体形态。
+- **沙箱环境**（`component_type = "sandbox"`）：同上，本轮不做。
+- Tool 自己的 `code`（用户写一段脚本在沙箱里执行）：这个未来可能会和"沙箱环境"这个组件类型是同一件事的两个入口，等沙箱环境立项时一起想清楚，不单独作为 Tool 的第三种 `tool_type` 抢跑。
 
 ---
 
@@ -169,43 +189,52 @@ CREATE TABLE skill_files (
 | 方法 + 路径 | 用途 | 落库？ |
 |---|---|---|
 | `POST /resources/mcp/probe` | 探测 MCP Server，返回工具列表 | 否 |
-| `POST /resources/tools/import-openapi` | 解析 OpenAPI spec，返回 operation 列表 | 否 |
-| `POST /resources/tools/batch` | 批量创建勾选的 operation 对应的 tools | 是（单事务） |
+| `POST /resources/components/import-openapi` | 解析 OpenAPI spec，返回 operation 列表 | 否 |
+| `POST /resources/components/batch` | 批量创建勾选的 operation 对应的 tools | 是（单事务） |
 | `POST /resources/skills/upload` | 上传 zip，解压+建文件树+建资源，一步到位 | 是 |
-| `GET /resources/skills/{id}/files` | 文件树列表 | 否 |
-| `GET /resources/skills/{id}/files/{path}` | 单文件内容（OSS 代理） | 否 |
-| `PUT /resources/skills/{id}/files/{path}` | 保存编辑（仅未发布版本） | 是 |
+| `GET /resources/skills/{id}/files` | 文件树列表（查看/下载，不可编辑） | 否 |
+| `GET /resources/skills/{id}/files/{path}` | 单文件内容（OSS 代理，下载用） | 否 |
+| `POST /settings/skill-sources` | 管理员登记一个 Skill 源 | 是 |
+| `POST /settings/skill-sources/{id}/sync` | 触发一次同步 | 是（写入 `system_skills`） |
+| `GET /settings/skill-sources` | 列出已登记的 Skill 源 | 否 |
 
-现有 `POST /resources`（单条创建）保持不变，继续覆盖 `http` 型 Tool、记忆库、以及"不上传 zip 的纯文本 Skill"这几种最简单的场景。
+现有 `POST /resources`（单条创建）保持不变，继续覆盖 `http` 型 Tool（组件）、记忆库、以及"不上传 zip 的纯文本 Skill"这几种最简单的场景。
 
 ## 七、数据库改动一览
 
-- 新表 `skill_files`（见上）。
-- 其余四张资源表（`tools`/`skills`/`mcp_servers`/`knowledge_bases`）不加列，新字段都放进已有的 `config` JSONB——跟 spec-05"分表但字段收在 config 里"的既有风格一致。
+- 新表 `skill_files`（Skill zip 里的文件树索引，只读展示用）。
+- 新表 `skill_sources`（管理员登记的 Skill 同步源）。
+- 新表 `system_skills`（源同步下来的全局 Skill 目录，无 owner，`source_id` 外键指回 `skill_sources`）。
+- 其余四张资源表（`tools`/`skills`/`mcp_servers`/`knowledge_bases`）不加列，新字段都放进已有的 `config` JSONB——跟 spec-05"分表但字段收在 config 里"的既有风格一致；`tools` 表新增的 `component_type`/`tool_type` 判别也走这条路，不加列。
 
 ## 八、前端信息架构一览
 
 延续这次 Bundle 编辑器立的规矩：字段复杂的资源类型用独立路由页面（嵌套在 `/apps` 下、侧栏常驻、有返回按钮），不再塞进 Dialog：
 
-- `/apps/tool/new`——两步（选形态 → 表单/导入预览）
-- `/apps/skill/new`——上传 zip 或空白新建二选一；`/apps/skill/:ref/edit`——文件树 + 编辑器
+- 侧栏菜单 "Tool" → **"组件"**（内部路由 value 仍是 `tool`，只换展示文案）
+- `/apps/tool/new`——两步（选组件类型，本轮只有 Tool 可选 → 选 Tool 形态 http/openapi → 对应表单/导入预览）
+- `/apps/skill/new`——只有"上传 zip"一种入口，没有在线编辑
 - `/apps/mcp/new`——表单 + Header 列表 + 检测按钮（实时拉工具列表）
 - `/apps/memory/new`——轻量表单
 - 知识库暂不在本轮改动范围内（配置项相对简单，且依赖 Milvus/Elasticsearch 是否启用，维持现状）
+- 系统设置新增 `/settings/skill-sources`——仿照"模型提供商"页面的管理员配置页
 - `RegisterResourceDialog` 弹窗**保留组件**，作为知识库等字段确实简单的 kind 的兜底，不强求五种资源全部路由化；具体每种是否退场到实现阶段按字段数量再定。
 
 ## 九、分期计划
 
 1. **Phase 1 —— MCP**：二级页面 + Header 列表（逐项加密）+ 真实 MCP 探测/拉工具列表，替换掉现在的裸 HTTP GET 健康检查。诉求最明确、改动面最小、不依赖 OSS，优先做。
-2. **Phase 2 —— OSS + Skill**：`internal/adapter/oss` 接入真实阿里云 OSS（等 AK/SK 配好 `.env`）、zip 上传/解压/建索引、文件树 + 在线编辑器、运行时按需拉取 `SKILL.md`。
-3. **Phase 3 —— Tool 多形态**：OpenAPI 导入（预览→勾选→批量创建）+ 运行时按 `tool_type` 分支请求逻辑。
-4. **Phase 4 —— 记忆库表单化**（体量最小，顺手做）。
+2. **Phase 2 —— OSS + Skill 上传**：`internal/adapter/oss` 接入真实阿里云 OSS（等 AK/SK 配好 `.env`）、zip 上传/解压/建索引（只读文件树，无在线编辑）、运行时按需拉取 `SKILL.md`。
+3. **Phase 2.5 —— Skill 源同步**：系统设置"Skill 源"页 + `skill_sources`/`system_skills` 表 + `SkillSourceSyncer` 接口 + clawhub 适配器 + Agent 引用解析扩展到系统目录。依赖 Phase 2 的 OSS 基础设施，紧跟其后。
+4. **Phase 3 —— 组件/Tool 多形态**：菜单改名"组件"+ `component_type`/`tool_type` 判别字段落地、OpenAPI 导入（预览→勾选→批量创建）+ 运行时按 `tool_type` 分支请求逻辑。插件/沙箱环境两个组件类型只留判别位，不实现。
+5. **Phase 4 —— 记忆库表单化**（体量最小，顺手做）。
 
 ## 验收清单（草案，实现阶段按 Phase 拆分为独立任务时再细化）
 
 - [ ] MCP 检测按钮返回真实工具列表，不是"能不能连上"
 - [ ] MCP Header 的 value 在任何 GET 响应里都不出现，加密落库
-- [ ] Skill 上传 zip 后能在文件树里看到全部文件，点开能编辑保存
-- [ ] 未配置 OSS 时，Skill 的纯文本旧路径（`config.instructions`）不受影响，只有"上传/在线编辑"入口置灰
+- [ ] Skill 上传 zip 后能在文件树里看到全部文件、能下载核对，没有编辑入口
+- [ ] 未配置 OSS 时，Skill 的纯文本旧路径（`config.instructions`）不受影响，只有"上传"入口置灰
+- [ ] 管理员在系统设置登记一个 Skill 源并同步后，应用广场的 Skill 列表能看到"系统提供"角标的条目，普通用户看不到编辑/删除按钮
+- [ ] Agent 引用一个只存在于 `system_skills` 而不在自己 `skills` 表里的 ref 时，编译期能正确解析
 - [ ] OpenAPI 导入后，Agent 的 `capabilities.tools[]` 引用其中任一 operation 的 ref 时行为和手填的 `http` 型 tool 完全一致（对 Agent 层透明）
-- [ ] 已发布（immutable）的 Skill 版本调用 `PUT /resources/skills/{id}/files/{path}` 返回 409，和 Agent/Bundle 现有 immutable 规则一致
+- [ ] 侧栏菜单显示"组件"而不是"Tool"，路由 `/apps/tool` 不变
