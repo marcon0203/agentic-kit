@@ -78,15 +78,16 @@ export function AppsLayout() {
   const segments = location.pathname.split('/apps/')[1]?.split('/') ?? []
   const section = (segments[0] || 'browse') as Section
   const title = SECTION_TITLE[section] ?? SECTION_TITLE.browse
-  // Bundle create/edit (/apps/bundles/new, /apps/bundles/:ref/edit) is a
-  // full-canvas tool, not a list — the section title row is dead weight
-  // next to it. The sidebar still renders underneath so leaving the
-  // editor is always one click, never a route dead-end.
-  const isBundleEditor = section === 'bundles' && segments.length > 1
+  // A sub-route under a section (/apps/bundles/new, /apps/mcp/new, ...) is
+  // always a dedicated create/edit page, not the section's list — the
+  // title row is dead weight next to it. The sidebar still renders
+  // underneath so leaving the editor is always one click, never a route
+  // dead-end.
+  const isSubRoute = segments.length > 1
 
   return (
     <div className="flex flex-col gap-space-6">
-      {!isBundleEditor && <PageHeader eyebrow="APPLICATIONS" title={title} />}
+      {!isSubRoute && <PageHeader eyebrow="APPLICATIONS" title={title} />}
 
       <div className="flex flex-1 flex-col gap-space-6 sm:flex-row">
         <SectionSidebar groups={sectionGroups(knowledgeBaseEnabled)} active={section} onChange={(v) => navigate(`/apps/${v}`)} />

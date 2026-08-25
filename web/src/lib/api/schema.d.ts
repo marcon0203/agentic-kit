@@ -261,6 +261,29 @@ export interface paths {
         patch: operations["updateResource"];
         trace?: never;
     };
+    "/resources/mcp/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 探测 MCP Server，返回其真实工具列表
+         * @description 走真实的 MCP 协议握手（initialize + tools/list），不落库——用于注册页在保存前
+         *     显示"这台 MCP Server 到底有哪些工具"。连接/握手失败时仍返回 200，
+         *     `data.ok=false` 带上 `data.error`，因为"服务器拒绝了"是这个接口的正常回答之一，
+         *     不是传输层错误。
+         */
+        post: operations["probeMCPServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/resources/{id}/delete-check": {
         parameters: {
             query?: never;
@@ -1956,6 +1979,46 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+        };
+    };
+    probeMCPServer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    url: string;
+                    headers?: {
+                        key: string;
+                        value: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description 成功（探测本身可能是 ok:false） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            ok: boolean;
+                            tools?: {
+                                name?: string;
+                                description?: string;
+                            }[];
+                            error?: string;
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     checkResourceDeletable: {

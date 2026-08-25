@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Input } from '@/components/ui/input'
@@ -86,7 +87,20 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
   const [registerOpen, setRegisterOpen] = useState(false)
   const [toggleError, setToggleError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { knowledgeBaseEnabled, isLoading: featuresLoading } = useFeatures()
+
+  // MCP Server has its own multi-field page (URL, header list, a 检测
+  // button that needs room to show probed results) — the generic
+  // ref+display_name+JSON dialog can't fit that, so its CTA routes
+  // there instead of opening the dialog.
+  function openRegister() {
+    if (type === 'mcp') {
+      navigate('/apps/mcp/new')
+      return
+    }
+    setRegisterOpen(true)
+  }
 
   const query = useQuery({
     queryKey: ['resources', type],
@@ -131,7 +145,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
   return (
     <div className="flex flex-col gap-space-6">
       <div className="flex items-center justify-end">
-        <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setRegisterOpen(true)}>
+        <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={openRegister}>
           {kind.blank.cta}
         </Button>
       </div>
@@ -160,7 +174,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
           title={kind.blank.title}
           description={kind.blank.description}
           action={
-            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setRegisterOpen(true)}>
+            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={openRegister}>
               {kind.blank.cta}
             </Button>
           }

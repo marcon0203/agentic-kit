@@ -22,6 +22,7 @@ import { MySubscriptionsPage } from '@/pages/MySubscriptionsPage'
 import { ModelProviderPage } from '@/pages/ModelProviderPage'
 import { ListingDetailPage } from '@/pages/ListingDetailPage'
 import { BundleEditorPage } from '@/pages/BundleEditorPage'
+import { McpServerEditorPage } from '@/pages/McpServerEditorPage'
 import { OperationsPage } from '@/pages/OperationsPage'
 
 /**
@@ -83,6 +84,7 @@ export default function App() {
               <Route path="tool" element={<ResourceKindPage type="tool" />} />
               <Route path="skill" element={<ResourceKindPage type="skill" />} />
               <Route path="mcp" element={<ResourceKindPage type="mcp" />} />
+              <Route path="mcp/new" element={<McpServerEditorPage />} />
               <Route path="knowledge_base" element={<ResourceKindPage type="knowledge_base" />} />
               <Route path="memory" element={<ResourceKindPage type="memory" />} />
               <Route path="publish" element={<MyListingsPage />} />
