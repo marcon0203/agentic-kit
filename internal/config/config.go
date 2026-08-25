@@ -23,6 +23,24 @@ type Config struct {
 	// email and a random password logged once at startup.
 	SuperadminEmail    string `mapstructure:"SUPERADMIN_EMAIL"`
 	SuperadminPassword string `mapstructure:"SUPERADMIN_PASSWORD"`
+
+	// KBEnabled is the single on/off switch for the entire 知识库 feature
+	// (Milvus vector search + Elasticsearch keyword search for 多路召回).
+	// Off by default: a fresh install with neither store deployed should
+	// boot cleanly rather than fail startup or half-work. When true,
+	// MilvusAddr and ElasticsearchAddr become required (checked in Load,
+	// not in the static `required` list, since they're conditionally
+	// required rather than always).
+	KBEnabled bool `mapstructure:"KB_ENABLED"`
+
+	MilvusAddr     string `mapstructure:"MILVUS_ADDR"`
+	MilvusUsername string `mapstructure:"MILVUS_USERNAME"`
+	MilvusPassword string `mapstructure:"MILVUS_PASSWORD"`
+
+	ElasticsearchAddr     string `mapstructure:"ELASTICSEARCH_ADDR"`
+	ElasticsearchUsername string `mapstructure:"ELASTICSEARCH_USERNAME"`
+	ElasticsearchPassword string `mapstructure:"ELASTICSEARCH_PASSWORD"`
+	ElasticsearchAPIKey   string `mapstructure:"ELASTICSEARCH_API_KEY"`
 }
 
 // required lists the env vars that must be non-empty for the server to start.
@@ -42,6 +60,7 @@ func Load() (*Config, error) {
 
 	v.SetDefault("APP_ENV", "development")
 	v.SetDefault("HTTP_PORT", 8080)
+	v.SetDefault("KB_ENABLED", false)
 
 	if err := v.ReadInConfig(); err != nil {
 		// .env is optional; ignore "file not found", surface anything else.
@@ -57,15 +76,36 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Env:                v.GetString("APP_ENV"),
-		HTTPPort:           v.GetInt("HTTP_PORT"),
-		DatabaseURL:        v.GetString("DATABASE_URL"),
-		JWTSecret:          v.GetString("JWT_SECRET"),
-		CredentialAESKey:   v.GetString("CREDENTIAL_AES_KEY"),
-		CORSAllowedOrigins: v.GetString("CORS_ALLOWED_ORIGINS"),
-		SuperadminEmail:    v.GetString("SUPERADMIN_EMAIL"),
-		SuperadminPassword: v.GetString("SUPERADMIN_PASSWORD"),
+		Env:                   v.GetString("APP_ENV"),
+		HTTPPort:              v.GetInt("HTTP_PORT"),
+		DatabaseURL:           v.GetString("DATABASE_URL"),
+		JWTSecret:             v.GetString("JWT_SECRET"),
+		CredentialAESKey:      v.GetString("CREDENTIAL_AES_KEY"),
+		CORSAllowedOrigins:    v.GetString("CORS_ALLOWED_ORIGINS"),
+		SuperadminEmail:       v.GetString("SUPERADMIN_EMAIL"),
+		SuperadminPassword:    v.GetString("SUPERADMIN_PASSWORD"),
+		KBEnabled:             v.GetBool("KB_ENABLED"),
+		MilvusAddr:            v.GetString("MILVUS_ADDR"),
+		MilvusUsername:        v.GetString("MILVUS_USERNAME"),
+		MilvusPassword:        v.GetString("MILVUS_PASSWORD"),
+		ElasticsearchAddr:     v.GetString("ELASTICSEARCH_ADDR"),
+		ElasticsearchUsername: v.GetString("ELASTICSEARCH_USERNAME"),
+		ElasticsearchPassword: v.GetString("ELASTICSEARCH_PASSWORD"),
+		ElasticsearchAPIKey:   v.GetString("ELASTICSEARCH_API_KEY"),
 	}
+
+	// Milvus/Elasticsearch addresses are only required once KB_ENABLED
+	// actually turns the feature on — an install that never enables it
+	// shouldn't have to stand up either store just to boot.
+	if cfg.KBEnabled {
+		if cfg.MilvusAddr == "" {
+			return nil, fmt.Errorf("config: KB_ENABLED=true requires MILVUS_ADDR")
+		}
+		if cfg.ElasticsearchAddr == "" {
+			return nil, fmt.Errorf("config: KB_ENABLED=true requires ELASTICSEARCH_ADDR")
+		}
+	}
+
 	return cfg, nil
 }
 

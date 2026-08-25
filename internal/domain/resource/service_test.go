@@ -120,7 +120,7 @@ type stubProbe struct{ verdict resource.Health }
 func (p stubProbe) Check(context.Context, resource.Config) resource.Health { return p.verdict }
 
 func newSvc(repo *fakeRepo, probe resource.HealthProbe) *resource.Service {
-	return resource.NewService(repo, reverseCipher{}, probe)
+	return resource.NewService(repo, reverseCipher{}, probe, true)
 }
 
 func assertErr(t *testing.T, err error, kind domain.Kind, code int) *domain.Error {
@@ -425,6 +425,20 @@ func TestList_FiltersByKindAndRedacts(t *testing.T) {
 	}
 	if page.NextCursor == "" {
 		t.Fatal("a single-kind page should carry a resumable cursor")
+	}
+}
+
+// KB_ENABLED gates knowledge_base registration itself, not just the
+// /kb/... sub-routes — a knowledge_base resource nothing can ingest into
+// or search would just be a dead config record.
+func TestCreate_RejectsKnowledgeBaseKindWhenDisabled(t *testing.T) {
+	repo := newFakeRepo()
+	svc := resource.NewService(repo, reverseCipher{}, stubProbe{}, false)
+
+	_, err := svc.Create(context.Background(), 1, resource.CreateCommand{Kind: "knowledge_base", Ref: "kb-1", Config: resource.Config{}})
+	de := assertErr(t, err, domain.KindInvalid, domain.CodeValidationFailed)
+	if len(de.Details) == 0 || de.Details[0].Field != "type" {
+		t.Fatalf("expected the type field to carry the disabled-KB reason, got %+v", de.Details)
 	}
 }
 

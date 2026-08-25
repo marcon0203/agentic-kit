@@ -6,7 +6,6 @@ package store
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
-	pgvector "github.com/pgvector/pgvector-go"
 )
 
 type Agent struct {
@@ -121,17 +120,6 @@ type IdempotencyKey struct {
 	ResponseBody []byte             `json:"response_body"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-}
-
-type KbChunk struct {
-	ID              int64              `json:"id"`
-	KnowledgeBaseID int64              `json:"knowledge_base_id"`
-	OwnerUserID     int64              `json:"owner_user_id"`
-	SourceRef       string             `json:"source_ref"`
-	ChunkIndex      int32              `json:"chunk_index"`
-	Content         string             `json:"content"`
-	Embedding       pgvector.Vector    `json:"embedding"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type KnowledgeBasis struct {

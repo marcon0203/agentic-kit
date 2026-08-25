@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	pgxvec "github.com/pgvector/pgvector-go/pgx"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
+	esstore "github.com/marcon0203/agentic-kit/internal/adapter/elasticsearch"
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
+	"github.com/marcon0203/agentic-kit/internal/adapter/milvus"
 	adaptermodelgateway "github.com/marcon0203/agentic-kit/internal/adapter/modelgateway"
 	"github.com/marcon0203/agentic-kit/internal/adapter/orchestrator"
 	"github.com/marcon0203/agentic-kit/internal/adapter/password"
@@ -77,17 +77,7 @@ func run() error {
 		}
 	}()
 
-	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
-	if err != nil {
-		return fmt.Errorf("parse DATABASE_URL: %w", err)
-	}
-	// Registers pgvector's Go <-> `vector` column codec on every pooled
-	// connection — required for the knowledge-base embedding columns to
-	// scan/bind as pgvector.Vector instead of failing with an unknown OID.
-	poolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
-		return pgxvec.RegisterTypes(ctx, conn)
-	}
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return fmt.Errorf("connect to database: %w", err)
 	}
@@ -139,21 +129,43 @@ func run() error {
 		postgres.NewResourceRepository(queries),
 		adaptercrypto.NewCipher(aesKey),
 		mcp.NewReachabilityProbe(),
+		cfg.KBEnabled,
 	)
 
 	providerKeys := postgres.NewProviderKeyStore(queries, aesKey)
 
-	// A standalone Gateway for calls that happen outside a Bundle run
-	// (embedding a document at ingest time, embedding a search query) —
-	// Engine builds its own per-run Gateway for completions, but knowledge
-	// base ingest/search need one too and aren't part of a run.
-	embeddingGateway := modelgateway.NewGateway(nil)
-	knowledgeBaseService := knowledgebase.NewService(
-		postgres.NewKnowledgeBaseRepository(queries),
-		embeddingGateway,
-		providerKeys,
-		resourceService,
-	)
+	// 知识库 (Milvus vector search + Elasticsearch keyword search, fused
+	// as 多路召回) is entirely optional — KB_ENABLED gates whether either
+	// external store is even dialed. Disabled: knowledgeBaseService and
+	// kbHandlers stay nil, orchestrator.NewEngine below already treats a
+	// nil kbService as "reject knowledge_base tool calls with a clear
+	// error" (see knowledgeBaseSearcher), and router.go's
+	// `if cfg.KnowledgeBases != nil` already no-ops the KB routes — no
+	// nil-guard needed at either of those call sites.
+	var knowledgeBaseService *knowledgebase.Service
+	var kbHandlers *api.KnowledgeBaseHandlers
+	if cfg.KBEnabled {
+		vectorStore, err := milvus.NewStore(ctx, milvus.Config{
+			Addr: cfg.MilvusAddr, Username: cfg.MilvusUsername, Password: cfg.MilvusPassword,
+		})
+		if err != nil {
+			return fmt.Errorf("connect to Milvus: %w", err)
+		}
+		keywordStore, err := esstore.NewStore(ctx, esstore.Config{
+			Addr: cfg.ElasticsearchAddr, Username: cfg.ElasticsearchUsername,
+			Password: cfg.ElasticsearchPassword, APIKey: cfg.ElasticsearchAPIKey,
+		})
+		if err != nil {
+			return fmt.Errorf("connect to Elasticsearch: %w", err)
+		}
+		// A standalone Gateway for calls that happen outside a Bundle run
+		// (embedding a document at ingest time, embedding a search query) —
+		// Engine builds its own per-run Gateway for completions, but
+		// knowledge base ingest/search need one too and aren't part of a run.
+		embeddingGateway := modelgateway.NewGateway(nil)
+		knowledgeBaseService = knowledgebase.NewService(vectorStore, keywordStore, embeddingGateway, providerKeys, resourceService)
+		kbHandlers = api.NewKnowledgeBaseHandlers(knowledgeBaseService)
+	}
 
 	// The run context is assembled from more parts than the others: it
 	// needs persistence, the ADK orchestrator behind it, and the gate
@@ -234,7 +246,7 @@ func run() error {
 		Tokens:            auth.NewTokenIssuer(cfg.JWTSecret),
 		APIKeys:           api.NewPostgresAPIKeyLookup(queries),
 		Resources:         api.NewResourceHandlers(resourceService),
-		KnowledgeBases:    api.NewKnowledgeBaseHandlers(knowledgeBaseService),
+		KnowledgeBases:    kbHandlers,
 		Agents:            api.NewAgentHandlers(agentService),
 		Bundles:           api.NewBundleHandlers(bundleService),
 		Marketplace:       api.NewMarketplaceHandlers(marketplaceService),
@@ -244,6 +256,7 @@ func run() error {
 		Usage:             api.NewUsageHandlers(modelCenter),
 		Runs:              api.NewRunHandlers(runService),
 		RBAC:              api.NewRBACHandlers(rbacService),
+		Features:          api.FeaturesConfig{KnowledgeBaseEnabled: cfg.KBEnabled},
 		Operations: api.NewOperationHandlers(operation.NewService(
 			postgres.NewReportRepository(queries),
 			postgres.NewAuditLogReader(queries),

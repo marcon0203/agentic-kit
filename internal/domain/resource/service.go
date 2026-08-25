@@ -45,13 +45,18 @@ var refPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 // Service is the 资源中心 application service.
 type Service struct {
-	repo   Repository
-	cipher CredentialCipher
-	probe  HealthProbe
+	repo      Repository
+	cipher    CredentialCipher
+	probe     HealthProbe
+	kbEnabled bool
 }
 
-func NewService(repo Repository, cipher CredentialCipher, probe HealthProbe) *Service {
-	return &Service{repo: repo, cipher: cipher, probe: probe}
+// kbEnabled mirrors config.Config.KBEnabled — the knowledge_base kind
+// depends on Milvus/Elasticsearch being deployed and wired up (see
+// internal/domain/knowledgebase), so registering one when that's off would
+// create a resource nothing can ever ingest into or search.
+func NewService(repo Repository, cipher CredentialCipher, probe HealthProbe, kbEnabled bool) *Service {
+	return &Service{repo: repo, cipher: cipher, probe: probe, kbEnabled: kbEnabled}
 }
 
 // encryptCredentials returns a copy of config with every credential value
@@ -196,6 +201,8 @@ func (s *Service) Create(ctx context.Context, ownerID int64, cmd CreateCommand) 
 	kind, ok := ParseKind(cmd.Kind)
 	if !ok {
 		errs = append(errs, domain.FieldError{Field: "type", Reason: "must be one of tool, skill, mcp, knowledge_base, memory"})
+	} else if kind == KindKnowledgeBase && !s.kbEnabled {
+		errs = append(errs, domain.FieldError{Field: "type", Reason: "knowledge_base is disabled on this deployment (KB_ENABLED)"})
 	}
 	if !refPattern.MatchString(cmd.Ref) {
 		errs = append(errs, domain.FieldError{Field: "ref", Reason: "must match ^[a-z][a-z0-9_-]*$"})

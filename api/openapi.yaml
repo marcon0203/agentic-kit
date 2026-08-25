@@ -1620,6 +1620,31 @@ paths:
               schema: { $ref: '#/components/schemas/Envelope' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ────────────────────────── 功能开关 ──────────────────────────
+  /features:
+    get:
+      tags: [Features]
+      summary: 服务端功能开关（前端据此隐藏未启用的功能，如知识库）
+      operationId: getFeatures
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [knowledge_base_enabled]
+                        properties:
+                          knowledge_base_enabled:
+                            type: boolean
+                            description: KB_ENABLED — 知识库依赖 Milvus + Elasticsearch，未部署时关闭
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   # ─────────────── 系统配置 → 用户管理 / 角色权限（RBAC）───────────────
   /me/permissions:
     get:

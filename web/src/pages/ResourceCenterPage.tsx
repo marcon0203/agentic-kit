@@ -9,6 +9,7 @@ import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { RegisterResourceDialog } from '@/components/resources/RegisterResourceDialog'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
+import { useFeatures } from '@/lib/features/useFeatures'
 import type { components } from '@/lib/api/schema'
 
 type ResourceType = components['schemas']['ResourceType']
@@ -85,6 +86,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
   const [registerOpen, setRegisterOpen] = useState(false)
   const [toggleError, setToggleError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+  const { knowledgeBaseEnabled, isLoading: featuresLoading } = useFeatures()
 
   const query = useQuery({
     queryKey: ['resources', type],
@@ -92,7 +94,17 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
       unwrap<{ items: Resource[]; has_more: boolean }>(
         await apiClient.GET('/resources', { params: { query: { type } } }),
       ),
+    enabled: type !== 'knowledge_base' || knowledgeBaseEnabled,
   })
+
+  if (type === 'knowledge_base' && !featuresLoading && !knowledgeBaseEnabled) {
+    return (
+      <EmptyRail
+        title="知识库功能未启用"
+        description="知识库依赖 Milvus（向量检索）和 Elasticsearch（关键词检索）——这台服务器的配置文件里 KB_ENABLED 是关闭的，找管理员在部署配置里打开并填好两边的连接地址。"
+      />
+    )
+  }
 
   async function toggleStatus(r: Resource) {
     setToggleError(null)

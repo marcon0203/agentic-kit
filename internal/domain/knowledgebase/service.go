@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
@@ -22,13 +23,27 @@ type ChunkInsert struct {
 	Embedding  []float32
 }
 
-// Repository persists and searches chunks. It never sees a plaintext
-// provider credential — only text and vectors.
-type Repository interface {
-	InsertChunks(ctx context.Context, ownerID, knowledgeBaseID int64, sourceRef string, chunks []ChunkInsert) error
+// VectorStore is the Milvus-backed leg of 多路召回 (multi-route recall):
+// nearest-neighbor search over chunk embeddings. It never sees a plaintext
+// provider credential — only text and vectors. It also doubles as the
+// source of truth for "what has been ingested" (ListSources) since every
+// ingest writes chunks here first.
+type VectorStore interface {
+	Upsert(ctx context.Context, ownerID, knowledgeBaseID int64, sourceRef string, chunks []ChunkInsert) error
 	DeleteSource(ctx context.Context, ownerID, knowledgeBaseID int64, sourceRef string) error
 	ListSources(ctx context.Context, ownerID, knowledgeBaseID int64) ([]SourceSummary, error)
-	Search(ctx context.Context, ownerID, knowledgeBaseID int64, queryVector []float32, topK int) ([]SearchResult, error)
+	SearchVector(ctx context.Context, ownerID, knowledgeBaseID int64, queryVector []float32, topK int) ([]SearchResult, error)
+}
+
+// KeywordStore is the Elasticsearch-backed leg of 多路召回: BM25 keyword
+// search over the same chunks' raw text. This is what still surfaces a
+// chunk a pure embedding search would miss — an exact product code, an
+// acronym, a name that doesn't carry much semantic weight but matters a
+// lot lexically.
+type KeywordStore interface {
+	Index(ctx context.Context, ownerID, knowledgeBaseID int64, sourceRef string, chunks []ChunkInsert) error
+	DeleteSource(ctx context.Context, ownerID, knowledgeBaseID int64, sourceRef string) error
+	SearchKeyword(ctx context.Context, ownerID, knowledgeBaseID int64, query string, topK int) ([]SearchResult, error)
 }
 
 // Embedder calls whichever model provider turns text into vectors.
@@ -52,14 +67,15 @@ type ResourceLookup interface {
 
 // Service is the 知识库 retrieval application service.
 type Service struct {
-	repo   Repository
-	embed  Embedder
-	creds  Credentials
-	lookup ResourceLookup
+	vectors  VectorStore
+	keywords KeywordStore
+	embed    Embedder
+	creds    Credentials
+	lookup   ResourceLookup
 }
 
-func NewService(repo Repository, embed Embedder, creds Credentials, lookup ResourceLookup) *Service {
-	return &Service{repo: repo, embed: embed, creds: creds, lookup: lookup}
+func NewService(vectors VectorStore, keywords KeywordStore, embed Embedder, creds Credentials, lookup ResourceLookup) *Service {
+	return &Service{vectors: vectors, keywords: keywords, embed: embed, creds: creds, lookup: lookup}
 }
 
 func embeddingSpec(res resource.Resource) (modelgateway.ModelSpec, error) {
@@ -122,19 +138,27 @@ func (s *Service) Ingest(ctx context.Context, ownerID, knowledgeBaseID int64, so
 		inserts[i] = ChunkInsert{ChunkIndex: i, Content: c, Embedding: vectors[i]}
 	}
 
-	if err := s.repo.DeleteSource(ctx, ownerID, knowledgeBaseID, sourceRef); err != nil {
+	// Re-ingesting a source clears it from both stores before writing the
+	// fresh chunks, so a document that shrank doesn't leave stale trailing
+	// chunks behind in either index.
+	if err := s.deleteFromBothStores(ctx, ownerID, knowledgeBaseID, sourceRef); err != nil {
+		return 0, err
+	}
+	if err := s.vectors.Upsert(ctx, ownerID, knowledgeBaseID, sourceRef, inserts); err != nil {
 		return 0, domain.Internal(err)
 	}
-	if err := s.repo.InsertChunks(ctx, ownerID, knowledgeBaseID, sourceRef, inserts); err != nil {
+	if err := s.keywords.Index(ctx, ownerID, knowledgeBaseID, sourceRef, inserts); err != nil {
 		return 0, domain.Internal(err)
 	}
 	return len(inserts), nil
 }
 
 // Sources lists what has been ingested into a knowledge base, one row per
-// document rather than per chunk.
+// document rather than per chunk. Read from the vector store — every
+// ingest writes there first, so it's the source of truth for "what
+// exists" (the keyword store never needs its own listing path).
 func (s *Service) Sources(ctx context.Context, ownerID, knowledgeBaseID int64) ([]SourceSummary, error) {
-	rows, err := s.repo.ListSources(ctx, ownerID, knowledgeBaseID)
+	rows, err := s.vectors.ListSources(ctx, ownerID, knowledgeBaseID)
 	if err != nil {
 		return nil, domain.Internal(err)
 	}
@@ -144,9 +168,17 @@ func (s *Service) Sources(ctx context.Context, ownerID, knowledgeBaseID int64) (
 	return rows, nil
 }
 
-// DeleteSource removes every chunk ingested under one source ref.
+// DeleteSource removes every chunk ingested under one source ref, from
+// both stores.
 func (s *Service) DeleteSource(ctx context.Context, ownerID, knowledgeBaseID int64, sourceRef string) error {
-	if err := s.repo.DeleteSource(ctx, ownerID, knowledgeBaseID, sourceRef); err != nil {
+	return s.deleteFromBothStores(ctx, ownerID, knowledgeBaseID, sourceRef)
+}
+
+func (s *Service) deleteFromBothStores(ctx context.Context, ownerID, knowledgeBaseID int64, sourceRef string) error {
+	if err := s.vectors.DeleteSource(ctx, ownerID, knowledgeBaseID, sourceRef); err != nil {
+		return domain.Internal(err)
+	}
+	if err := s.keywords.DeleteSource(ctx, ownerID, knowledgeBaseID, sourceRef); err != nil {
 		return domain.Internal(err)
 	}
 	return nil
@@ -156,8 +188,14 @@ func (s *Service) DeleteSource(ctx context.Context, ownerID, knowledgeBaseID int
 // doesn't specify how many chunks it wants back.
 const defaultTopK = 5
 
-// Search embeds the query with the knowledge base's own registered model
-// and returns its nearest chunks by cosine similarity.
+// Search is 多路召回: it embeds the query and runs Milvus vector search and
+// Elasticsearch keyword search in parallel, then merges both ranked lists
+// with Reciprocal Rank Fusion (fuseRRF). Vector search is the required
+// signal — its failure fails the whole call, since the embedding call
+// already succeeded and a vector-store outage means retrieval is actually
+// broken. Keyword search is the supplementary signal: if Elasticsearch
+// errors, Search degrades to vector-only results rather than failing the
+// entire query over an outage in the secondary recall route.
 func (s *Service) Search(ctx context.Context, ownerID, knowledgeBaseID int64, query string, topK int) ([]SearchResult, error) {
 	spec, creds, err := s.resolve(ctx, ownerID, knowledgeBaseID)
 	if err != nil {
@@ -170,10 +208,29 @@ func (s *Service) Search(ctx context.Context, ownerID, knowledgeBaseID int64, qu
 	if topK <= 0 {
 		topK = defaultTopK
 	}
-	results, err := s.repo.Search(ctx, ownerID, knowledgeBaseID, vectors[0], topK)
-	if err != nil {
-		return nil, domain.Internal(err)
+
+	var vecResults, kwResults []SearchResult
+	var vecErr, kwErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		vecResults, vecErr = s.vectors.SearchVector(ctx, ownerID, knowledgeBaseID, vectors[0], topK)
+	}()
+	go func() {
+		defer wg.Done()
+		kwResults, kwErr = s.keywords.SearchKeyword(ctx, ownerID, knowledgeBaseID, query, topK)
+	}()
+	wg.Wait()
+
+	if vecErr != nil {
+		return nil, domain.Internal(vecErr)
 	}
+	if kwErr != nil {
+		kwResults = nil
+	}
+
+	results := fuseRRF(topK, vecResults, kwResults)
 	if results == nil {
 		results = []SearchResult{}
 	}

@@ -1,17 +1,21 @@
 // Package knowledgebase is real document retrieval for the 知识库
 // resource kind (spec-05): chunk, embed and store a document's text, then
-// answer a query with its nearest chunks by cosine similarity over
-// pgvector. Before this package existed, "knowledge_base" was just a
-// labeled config record with no actual index — this is what makes it real.
+// answer a query with 多路召回 (multi-route recall) — nearest chunks by
+// cosine similarity from Milvus, fused via Reciprocal Rank Fusion with
+// BM25 keyword matches from Elasticsearch. Before this package existed,
+// "knowledge_base" was just a labeled config record with no actual index —
+// this is what makes it real. The whole feature is optional: it's only
+// wired up (see cmd/server/main.go) when KB_ENABLED=true, since it depends
+// on two external stores neither install is required to run.
 package knowledgebase
 
 import "time"
 
 // EmbeddingDimension is the fixed vector width every knowledge base's
-// registered embedding model must produce — migrations/0013_kb_chunks.up.sql
-// pins the storage column to vector(1536), matching the width OpenAI's
-// ada-002/text-embedding-3-small (and most OpenAI-compatible embedding
-// models) produce.
+// registered embedding model must produce — internal/adapter/milvus's
+// collection schema pins the vector field to this width, matching what
+// OpenAI's ada-002/text-embedding-3-small (and most OpenAI-compatible
+// embedding models) produce.
 const EmbeddingDimension = 1536
 
 // Chunk is one stored unit of a document: an embeddable slice of its text.

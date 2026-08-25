@@ -45,6 +45,7 @@ type RouterConfig struct {
 	Runs              *RunHandlers
 	Operations        *OperationHandlers
 	RBAC              *RBACHandlers
+	Features          FeaturesConfig
 }
 
 // NewRouter assembles the top-level chi router with the shared middleware
@@ -166,6 +167,7 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Patch("/users/{id}/status", cfg.RBAC.UpdateUserStatus)
 				r.Patch("/users/{id}/roles", cfg.RBAC.UpdateUserRoles)
 			}
+			r.Get("/features", FeaturesHandler(cfg.Features))
 			if cfg.Usage != nil {
 				r.Get("/usage/me", cfg.Usage.GetMyUsage)
 			}

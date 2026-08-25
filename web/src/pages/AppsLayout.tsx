@@ -3,6 +3,7 @@ import { Store, Boxes, Bot, Wrench, Puzzle, Plug, BookOpen, Brain, Upload, Heart
 
 import { PageHeader } from '@/components/common/Page'
 import { SectionSidebar, type SectionSidebarGroup } from '@/components/layout/SectionSidebar'
+import { useFeatures } from '@/lib/features/useFeatures'
 
 type Section =
   | 'browse'
@@ -16,33 +17,38 @@ type Section =
   | 'publish'
   | 'subscriptions'
 
-const SECTION_GROUPS: SectionSidebarGroup[] = [
-  { items: [{ value: 'browse', label: '应用广场', icon: Store }] },
-  {
-    label: '应用',
-    items: [
-      { value: 'bundles', label: 'Bundle 编排', icon: Boxes },
-      { value: 'agents', label: 'Agent 定义', icon: Bot },
-    ],
-  },
-  {
-    label: '资源',
-    items: [
-      { value: 'tool', label: 'Tool', icon: Wrench },
-      { value: 'skill', label: 'Skill', icon: Puzzle },
-      { value: 'mcp', label: 'MCP Server', icon: Plug },
-      { value: 'knowledge_base', label: '知识库', icon: BookOpen },
-      { value: 'memory', label: '记忆库', icon: Brain },
-    ],
-  },
-  {
-    label: '我的',
-    items: [
-      { value: 'publish', label: '我的发布', icon: Upload },
-      { value: 'subscriptions', label: '我的订阅', icon: Heart },
-    ],
-  },
-]
+function sectionGroups(knowledgeBaseEnabled: boolean): SectionSidebarGroup[] {
+  return [
+    { items: [{ value: 'browse', label: '应用广场', icon: Store }] },
+    {
+      label: '应用',
+      items: [
+        { value: 'bundles', label: 'Bundle 编排', icon: Boxes },
+        { value: 'agents', label: 'Agent 定义', icon: Bot },
+      ],
+    },
+    {
+      label: '资源',
+      items: [
+        { value: 'tool', label: 'Tool', icon: Wrench },
+        { value: 'skill', label: 'Skill', icon: Puzzle },
+        { value: 'mcp', label: 'MCP Server', icon: Plug },
+        // 知识库依赖 Milvus + Elasticsearch（多路召回）；未部署时
+        // GET /features 报 knowledge_base_enabled=false，隐藏这一项而不是
+        // 留一个点了就报错的入口。
+        ...(knowledgeBaseEnabled ? [{ value: 'knowledge_base', label: '知识库', icon: BookOpen }] : []),
+        { value: 'memory', label: '记忆库', icon: Brain },
+      ],
+    },
+    {
+      label: '我的',
+      items: [
+        { value: 'publish', label: '我的发布', icon: Upload },
+        { value: 'subscriptions', label: '我的订阅', icon: Heart },
+      ],
+    },
+  ]
+}
 
 const SECTION_COPY: Record<Section, { title: string; description: string }> = {
   browse: {
@@ -95,6 +101,7 @@ const SECTION_COPY: Record<Section, { title: string; description: string }> = {
 export function AppsLayout() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { knowledgeBaseEnabled } = useFeatures()
   const section = (location.pathname.split('/apps/')[1]?.split('/')[0] || 'browse') as Section
   const copy = SECTION_COPY[section] ?? SECTION_COPY.browse
 
@@ -103,7 +110,7 @@ export function AppsLayout() {
       <PageHeader eyebrow="APPLICATIONS" title={copy.title} description={copy.description} />
 
       <div className="flex flex-col gap-space-6 sm:flex-row">
-        <SectionSidebar groups={SECTION_GROUPS} active={section} onChange={(v) => navigate(`/apps/${v}`)} />
+        <SectionSidebar groups={sectionGroups(knowledgeBaseEnabled)} active={section} onChange={(v) => navigate(`/apps/${v}`)} />
 
         <div className="min-w-0 flex-1">
           <Outlet />

@@ -94,7 +94,7 @@ func (healthyProbe) Check(context.Context, resource.Config) resource.Health {
 
 func newResourceHandlersForTest() (*ResourceHandlers, *fakeResourceRepo) {
 	repo := newFakeResourceRepo()
-	return NewResourceHandlers(resource.NewService(repo, passthroughCipher{}, healthyProbe{})), repo
+	return NewResourceHandlers(resource.NewService(repo, passthroughCipher{}, healthyProbe{}, true)), repo
 }
 
 func doResourceRequest(t *testing.T, handler http.HandlerFunc, method, path string, userID int64, body any, urlParams map[string]string) *httptest.ResponseRecorder {

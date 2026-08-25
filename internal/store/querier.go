@@ -55,7 +55,6 @@ type Querier interface {
 	DeleteCatalogModel(ctx context.Context, id int64) error
 	DeleteCatalogProvider(ctx context.Context, id int64) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
-	DeleteKBChunksBySource(ctx context.Context, arg DeleteKBChunksBySourceParams) error
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
@@ -171,7 +170,6 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	IncrementListingSubscriberCount(ctx context.Context, id int64) error
 	InsertBundleRunEvent(ctx context.Context, arg InsertBundleRunEventParams) (BundleRunEvent, error)
-	InsertKBChunk(ctx context.Context, arg InsertKBChunkParams) (int64, error)
 	InsertMemoryEntry(ctx context.Context, arg InsertMemoryEntryParams) (int64, error)
 	InsertRolePermission(ctx context.Context, arg InsertRolePermissionParams) error
 	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
@@ -204,7 +202,6 @@ type Querier interface {
 	ListCatalogModelsPublic(ctx context.Context) ([]ListCatalogModelsPublicRow, error)
 	ListCatalogProviders(ctx context.Context) ([]CatalogProvider, error)
 	ListHumanGatesForRun(ctx context.Context, runID string) ([]HumanGate, error)
-	ListKBSources(ctx context.Context, arg ListKBSourcesParams) ([]ListKBSourcesRow, error)
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
 	ListListingVersionHistory(ctx context.Context, listingRef string) ([]ListListingVersionHistoryRow, error)
 	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)
@@ -240,7 +237,6 @@ type Querier interface {
 	ResolveHumanGate(ctx context.Context, arg ResolveHumanGateParams) (HumanGate, error)
 	ResolveReport(ctx context.Context, arg ResolveReportParams) (Report, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
-	SearchKBChunks(ctx context.Context, arg SearchKBChunksParams) ([]SearchKBChunksRow, error)
 	SearchMemoryEntries(ctx context.Context, arg SearchMemoryEntriesParams) ([]SearchMemoryEntriesRow, error)
 	SetAgentDisplayMeta(ctx context.Context, arg SetAgentDisplayMetaParams) error
 	SetAgentStatusByID(ctx context.Context, arg SetAgentStatusByIDParams) error
