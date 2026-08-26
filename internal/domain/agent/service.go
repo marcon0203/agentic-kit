@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
 )
@@ -87,6 +89,75 @@ func (s *Service) Create(ctx context.Context, ownerID int64, def Definition) (Ag
 		return Agent{}, domain.Internal(err)
 	}
 	return created, nil
+}
+
+// Update edits an Agent by creating a new version from its latest existing
+// version. The path ref must match definition.agent; the version is bumped
+// automatically so callers don't have to know the existing version number.
+func (s *Service) Update(ctx context.Context, ownerID int64, ref string, def Definition) (Agent, error) {
+	if def == nil {
+		return Agent{}, domain.Invalid(domain.CodeValidationFailed, "definition is required")
+	}
+	if def.Ref() != ref {
+		return Agent{}, domain.Invalid(domain.CodeValidationFailed, "definition.agent must match path ref")
+	}
+
+	schemaErrs, err := s.validator.Validate(def)
+	if err != nil {
+		return Agent{}, domain.Internal(err)
+	}
+	if len(schemaErrs) > 0 {
+		return Agent{}, domain.Invalid(domain.CodeAgentSchemaInvalid, "Agent 定义不符合 Schema").WithDetails(schemaErrs...)
+	}
+
+	refErrs, err := s.checkCapabilities(ctx, ownerID, def)
+	if err != nil {
+		return Agent{}, domain.Internal(err)
+	}
+	if len(refErrs) > 0 {
+		return Agent{}, domain.Invalid(domain.CodeResourceDisabled, "Agent 引用了不存在或已禁用的资源").WithDetails(refErrs...)
+	}
+
+	versions, err := s.repo.ListVersions(ctx, ownerID, ref)
+	if err != nil {
+		return Agent{}, domain.Internal(err)
+	}
+	if len(versions) == 0 {
+		return Agent{}, domain.NotFound(domain.CodeResourceNotFound, "agent not found")
+	}
+	latest := versions[0]
+
+	def["version"] = bumpVersion(latest.Version)
+
+	created, err := s.repo.Create(ctx, Agent{
+		OwnerID:    ownerID,
+		Ref:        def.Ref(),
+		Version:    def.Version(),
+		Definition: def,
+	})
+	if err != nil {
+		if errors.Is(err, ErrDuplicateVersion) {
+			return Agent{}, domain.Conflict(domain.CodeResourceRefDuplicate, "this agent_ref/version already exists")
+		}
+		return Agent{}, domain.Internal(err)
+	}
+	return created, nil
+}
+
+// bumpVersion increments the last numeric segment of a dotted version string.
+// Non-numeric or malformed versions are returned unchanged.
+func bumpVersion(v string) string {
+	parts := strings.Split(v, ".")
+	if len(parts) == 0 {
+		return v
+	}
+	last := parts[len(parts)-1]
+	n, err := strconv.Atoi(last)
+	if err != nil {
+		return v
+	}
+	parts[len(parts)-1] = strconv.Itoa(n + 1)
+	return strings.Join(parts, ".")
 }
 
 // Delete removes every version of a ref.

@@ -5,9 +5,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { EmptyRail } from '@/components/common/Rail'
-import { Ref, Section } from '@/components/common/Page'
-import { cn } from '@/lib/utils'
+import { Section } from '@/components/common/Page'
 import { AgentForm } from '@/components/agents/AgentForm'
+import { AgentCard } from '@/components/agents/AgentCard'
 import { definitionToFormState, type FormState } from '@/lib/agents/definition'
 import { apiClient, unwrap } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
@@ -25,6 +25,11 @@ export function AgentDefinitionPage() {
     queryFn: async () => unwrap<{ items: Agent[] }>(await apiClient.GET('/agents', {})),
     enabled: mode === 'list',
   })
+
+  function handleCopy(agent: Agent) {
+    setCopyFrom(definitionToFormState(agent.definition, true))
+    setMode('create')
+  }
 
   if (mode === 'create') {
     return (
@@ -81,39 +86,16 @@ export function AgentDefinitionPage() {
       )}
 
       {items.length > 0 && (
-        <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+        <div className="grid grid-cols-1 gap-space-4 md:grid-cols-2 xl:grid-cols-3">
           {items.map((a) => (
-            <li
+            <AgentCard
               key={a.id}
-              className="flex items-center gap-space-4 border-b border-border px-space-5 py-space-3 last:border-0"
-            >
-              <span
-                aria-hidden
-                className={cn(
-                  'size-2 shrink-0 rounded-full',
-                  a.status === 1 ? 'bg-moss' : 'bg-border-strong',
-                )}
-              />
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="flex items-center gap-space-2">
-                  <Ref>{a.agent_ref}</Ref>
-                  <span className="text-caption tabular text-ink-500">v{a.version}</span>
-                </span>
-                <span className="text-body-sm truncate text-ink-700">{a.definition.role}</span>
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setCopyFrom(definitionToFormState(a.definition, true))
-                  setMode('create')
-                }}
-              >
-                以此为模板
-              </Button>
-            </li>
+              agent={a}
+              onEdit={(ref) => navigate(`/agents/${ref}/edit`)}
+              onCopy={handleCopy}
+            />
           ))}
-        </ul>
+        </div>
       )}
     </Section>
   )

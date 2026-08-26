@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { apiClient, unwrap } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 import { cn } from '@/lib/utils'
+import { CheckCardGroup } from './CheckCardGroup'
 
 type Resource = components['schemas']['Resource']
 type ResourceType = components['schemas']['ResourceType']
@@ -25,10 +26,12 @@ export function ResourceMultiSelect({
   types,
   selected,
   onChange,
+  variant = 'pill',
 }: {
   types: ResourceType[]
   selected: string[]
   onChange: (refs: string[]) => void
+  variant?: 'pill' | 'card'
 }) {
   const query = useQuery({
     queryKey: ['resource-picker', types],
@@ -52,6 +55,35 @@ export function ResourceMultiSelect({
   }
   if (options.length === 0) {
     return <p className="text-body-sm text-ink-500">资源中心暂无可选资源，请先前往注册。</p>
+  }
+
+  if (variant === 'card') {
+    return (
+      <CheckCardGroup
+        options={options.map((opt) => {
+          const disabled = opt.status !== 1
+          const componentType = (opt.config as { component_type?: string } | undefined)?.component_type
+          const componentLabel = componentType ? COMPONENT_TYPE_LABEL[componentType] : undefined
+          return {
+            value: opt.ref,
+            label: (
+              <span className="flex items-center gap-space-2">
+                {opt.ref}
+                {componentLabel && (
+                  <span className="text-caption rounded-full bg-surface-muted px-space-2 py-0.5 text-ink-500">
+                    {componentLabel}
+                  </span>
+                )}
+              </span>
+            ),
+            disabled,
+            disabledReason: '该资源已被停用，无法在新的能力白名单中选用',
+          }
+        })}
+        value={selected}
+        onChange={onChange}
+      />
+    )
   }
 
   return (

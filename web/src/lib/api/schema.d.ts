@@ -516,7 +516,12 @@ export interface paths {
         delete: operations["deleteAgent"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * 更新 Agent（基于最新版本创建新版本）
+         * @description 以该 Agent 的最新版本为基准创建一个新版本，definition 中的 `agent` 必须与路径中的 `ref` 一致。
+         *     请求体中的 `definition` 会用 Agent DSL 的 JSON Schema 严格校验；保存成功后返回最新版本。
+         */
+        patch: operations["updateAgent"];
         trace?: never;
     };
     "/agents/{ref}/versions": {
@@ -2909,6 +2914,57 @@ export interface operations {
             };
             /** @description 存在占用无法删除（70005 已被订阅 / 40004 被引用） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    updateAgent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description 客户端生成的 UUID，24h 内相同 Key 重复请求直接返回首次结果 */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    definition: components["schemas"]["AgentDefinition"];
+                };
+            };
+        };
+        responses: {
+            /** @description 更新成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Agent"];
+                    };
+                };
+            };
+            /** @description DSL 校验失败（40001）、引用了被禁用的资源（30002）、或 definition.agent 与路径 ref 不一致 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description Agent 不存在（30001） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

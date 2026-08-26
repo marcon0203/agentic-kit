@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="zh-CN"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>创建 Agent · Agent Studio</title>
+  <style>
+    :root {
+      --bg:      oklch(98% 0.005 250);
+      --surface: oklch(100% 0 0);
+      --fg:      oklch(22% 0.02 240);
+      --muted:   oklch(50% 0.018 240);
+      --border:  oklch(90% 0.008 240);
+      --accent:  oklch(58% 0.16 145);
+
+      --accent-soft: color-mix(in oklch, var(--accent) 14%, transparent);
+      --fg-soft:     color-mix(in oklch, var(--fg) 6%, transparent);
+
+      --font-display: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --font-body:    -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --font-mono:    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+
+      --fs-h1: clamp(36px, 4.5vw, 56px);
+      --fs-h2: clamp(26px, 3vw, 36px);
+      --fs-h3: 22px;
+      --fs-lead: 18px;
+      --fs-body: 15px;
+      --fs-meta: 13px;
+
+      --gap-xs: 8px;
+      --gap-sm: 12px;
+      --gap-md: 20px;
+      --gap-lg: 28px;
+      --gap-xl: 48px;
+      --gap-2xl: 84px;
+      --container: 920px;
+      --gutter: 24px;
+
+      --radius: 10px;
+      --radius-lg: 16px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-size: var(--fs-body);
+      line-height: 1.55;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+    img, svg { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; cursor: pointer; }
+    p { text-wrap: pretty; }
+    h1, h2, h3, h4 { text-wrap: balance; }
+
+    .container {
+      max-width: var(--container);
+      margin-inline: auto;
+      padding-inline: var(--gutter);
+    }
+    .section {
+      padding-block: clamp(40px, 6vw, var(--gap-2xl));
+    }
+    .section + .section { border-top: 1px solid var(--border); }
+    .stack { display: flex; flex-direction: column; }
+    .stack > * + * { margin-top: var(--gap-md); }
+    .row { display: flex; align-items: center; gap: var(--gap-md); }
+    .row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--gap-md); }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--gap-lg); }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap-md); }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap-md); }
+    @media (max-width: 920px) {
+      .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    }
+
+    .h1, h1 { font-family: var(--font-display); font-size: var(--fs-h1); line-height: 1.08; letter-spacing: -0.02em; margin: 0; }
+    .h2, h2 { font-family: var(--font-display); font-size: var(--fs-h2); line-height: 1.12; letter-spacing: -0.015em; margin: 0; }
+    .h3, h3 { font-size: var(--fs-h3); font-weight: 600; line-height: 1.3; letter-spacing: -0.005em; margin: 0; }
+    .lead   { font-size: var(--fs-lead); line-height: 1.55; color: var(--muted); max-width: 52ch; margin: 0; }
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin: 0 0 var(--gap-md);
+    }
+    .meta { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--muted); }
+
+    .pagefoot { padding-block: var(--gap-xl); color: var(--muted); font-size: 13px; border-top: 1px solid var(--border); }
+    .pagefoot .row-between { flex-wrap: wrap; gap: var(--gap-md); }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 11px 20px;
+      border-radius: var(--radius);
+      border: 1px solid transparent;
+      font-size: 15px;
+      font-weight: 500;
+      letter-spacing: -0.005em;
+      transition: transform 0.05s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+    .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .btn:active { transform: translateY(1px); }
+    .btn-primary { background: var(--accent); color: var(--surface); border-color: var(--accent); }
+    .btn-primary:hover { background: color-mix(in oklch, var(--accent) 88%, black); }
+    .btn-secondary { background: transparent; color: var(--fg); border-color: var(--border); }
+    .btn-secondary:hover { border-color: var(--fg); }
+    .btn-ghost { background: transparent; color: var(--fg); border-color: transparent; padding-inline: 8px; }
+    .btn-ghost:hover { color: var(--accent); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 28px;
+    }
+    .card-flat { background: transparent; border: 0; padding: 0; }
+
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .tag {
+      display: inline-flex; align-items: center;
+      padding: 5px 11px;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 13px;
+    }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 13px; color: var(--muted); }
+    .input, .textarea {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      color: var(--fg);
+      font: inherit;
+      font-size: 15px;
+    }
+    .input:focus, .textarea:focus {
+      outline: 2px solid var(--accent-soft);
+      border-color: var(--accent);
+    }
+    .textarea { min-height: 120px; resize: vertical; line-height: 1.55; }
+    input[type="range"].input { padding: 0; height: 6px; accent-color: var(--accent); }
+    select.input { cursor: pointer; }
+
+    .ds-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .ds-table th, .ds-table td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); }
+    .ds-table th { color: var(--muted); font-weight: 500; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+    .ds-table tbody tr:hover { background: var(--fg-soft); }
+    .ds-table .num-col { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+    .rule  { border: 0; border-top: 1px solid var(--border); margin: 0; }
+
+    /* wizard additions */
+    .wizard-layout { display: grid; grid-template-columns: 140px 1fr; gap: 56px; align-items: start; }
+    .wizard-stepper {
+      display: flex; flex-direction: column;
+      position: relative;
+      padding-left: 22px;
+      gap: 6px;
+    }
+    .wizard-stepper::before {
+      content: '';
+      position: absolute;
+      left: 5px;
+      top: 10px;
+      bottom: 10px;
+      width: 2px;
+      background: var(--border);
+    }
+    .wizard-step {
+      position: relative;
+      display: flex; align-items: center;
+      padding: 6px 0;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 14px;
+      cursor: pointer;
+      text-align: left;
+      line-height: 1.4;
+    }
+    .wizard-step:hover { color: var(--fg); }
+    .wizard-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .wizard-step.active { color: var(--fg); font-weight: 600; }
+    .wizard-step.completed { color: var(--accent); }
+    .wizard-step::before {
+      content: '';
+      position: absolute;
+      left: -22px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+      border: 2px solid var(--surface);
+      box-shadow: 0 0 0 1px var(--border);
+    }
+    .wizard-step.active::before { background: var(--accent); border-color: var(--surface); box-shadow: 0 0 0 1px var(--accent); }
+    .wizard-step.completed::before { background: var(--accent); border-color: var(--surface); box-shadow: 0 0 0 1px var(--accent); }
+    .step-panel { display: none; }
+    .step-panel.active { display: block; animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    .wizard-actions { display: flex; justify-content: space-between; margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--border); }
+    .section-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .form-section { margin-bottom: 28px; }
+    .form-section h3 { font-size: 15px; color: var(--fg); margin-bottom: 12px; font-family: var(--font-body); font-weight: 600; }
+    .check-card {
+      display: flex; align-items: center; gap: 10px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 14px;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .check-card:hover { border-color: var(--fg); }
+    .check-card:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+    .check-card input { accent-color: var(--accent); width: 16px; height: 16px; flex-shrink: 0; margin: 0; }
+    .tag-list { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+    .tag-input { border: 0; background: transparent; padding: 4px 8px; min-width: 120px; flex: 1; font: inherit; font-size: 14px; }
+    .tag-input:focus { outline: none; }
+    .tag-remove { background: none; border: 0; cursor: pointer; color: var(--muted); margin-left: 4px; padding: 0; font-size: 14px; line-height: 1; }
+    .tag-remove:hover { color: var(--fg); }
+    .range-wrap { display: flex; align-items: center; gap: 16px; }
+    .range-value { font-family: var(--font-mono); font-size: 15px; color: var(--accent); min-width: 36px; text-align: right; }
+    .kv-input { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: center; }
+    @media (max-width: 920px) {
+      .wizard-layout { grid-template-columns: 1fr; gap: 28px; }
+      .wizard-stepper { padding-left: 22px; padding-top: 0; gap: 10px; }
+      .wizard-step { padding: 8px 0; }
+      .range-wrap { flex-direction: column; align-items: stretch; gap: 8px; }
+      .range-value { text-align: left; }
+      .kv-input { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  
+
+  <main id="content">
+    <section class="section" data-od-id="wizard">
+      <div class="container" style="max-width: 960px;">
+        <div class="wizard-layout">
+          <div class="wizard-stepper" data-od-id="stepper" role="tablist">
+            <button class="wizard-step active" data-step="1" role="tab" aria-selected="true" data-od-id="step-tab-1">基础信息</button>
+            <button class="wizard-step" data-step="2" role="tab" aria-selected="false" data-od-id="step-tab-2">人设与知识</button>
+            <button class="wizard-step" data-step="3" role="tab" aria-selected="false" data-od-id="step-tab-3">技能与工具</button>
+            <button class="wizard-step" data-step="4" role="tab" aria-selected="false" data-od-id="step-tab-4">记忆与参数</button>
+          </div>
+
+          <div class="wizard-form-wrap">
+          <form id="agent-form" data-od-id="agent-form">
+          <div class="step-panel active" data-step="1" data-od-id="step-basic">
+            <div class="card">
+              <div class="section-title">
+                <h2>基础信息</h2>
+                <span class="pill">必填</span>
+              </div>
+              <div class="stack" style="gap: 24px;">
+                <div class="grid-2">
+                  <div class="field">
+                    <label for="agent-name">名称</label>
+                    <input type="text" id="agent-name" class="input" placeholder="例如：客服助手" data-od-id="input-name">
+                  </div>
+                  <div class="field">
+                    <label for="agent-code">编码</label>
+                    <input type="text" id="agent-code" class="input" style="font-family: var(--font-mono);" placeholder="例如：cs-assistant-01" data-od-id="input-code">
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="model-vendor">模型厂商</label>
+                  <select id="model-vendor" class="input" data-od-id="select-vendor">
+                    <option>OpenAI</option>
+                    <option>Anthropic</option>
+                    <option>Google</option>
+                    <option>阿里云</option>
+                    <option>智谱 AI</option>
+                  </select>
+                </div>
+                <div class="grid-2">
+                  <div class="field">
+                    <label for="model-name">模型</label>
+                    <select id="model-name" class="input" data-od-id="select-model">
+                      <option>gpt-4o</option>
+                      <option>gpt-4o-mini</option>
+                      <option>claude-3-5-sonnet</option>
+                      <option>gemini-1.5-pro</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="fallback-model">Fallback 模型</label>
+                    <select id="fallback-model" class="input" data-od-id="select-fallback">
+                      <option>gpt-4o-mini</option>
+                      <option>claude-3-haiku</option>
+                      <option>gemini-1.5-flash</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="temperature">Temperature <span class="meta">控制输出随机性</span></label>
+                  <div class="range-wrap">
+                    <input type="range" id="temperature" class="input" min="0" max="2" step="0.1" value="0.7" data-od-id="range-temperature">
+                    <span class="range-value" id="temp-value" data-od-id="temp-value">0.7</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step-panel" data-step="2" data-od-id="step-persona">
+            <div class="card">
+              <div class="section-title">
+                <h2>人设与知识</h2>
+                <span class="pill">核心</span>
+              </div>
+              <div class="stack" style="gap: 24px;">
+                <div class="field">
+                  <label for="persona">人设</label>
+                  <textarea id="persona" class="textarea" placeholder="描述 Agent 的角色定位、语气风格与行为准则。例如：你是一位耐心专业的客服代表，回答简洁，优先使用知识库内容。" data-od-id="textarea-persona"></textarea>
+                </div>
+                <div class="field">
+                  <label>知识库</label>
+                  <div class="tag-list" data-od-id="knowledge-tags">
+                    <span class="tag" data-od-id="tag-kb-1">产品手册 <button type="button" class="tag-remove" aria-label="删除">×</button></span>
+                    <span class="tag" data-od-id="tag-kb-2">FAQ 库 <button type="button" class="tag-remove" aria-label="删除">×</button></span>
+                    <input type="text" class="input tag-input" placeholder="+ 添加知识库后按回车" data-od-id="input-knowledge">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step-panel" data-step="3" data-od-id="step-skills">
+            <div class="card">
+              <div class="section-title">
+                <h2>技能与工具</h2>
+                <span class="pill">可选</span>
+              </div>
+              <div class="stack" style="gap: 32px;">
+                <div class="form-section">
+                  <h3>组件</h3>
+                  <div class="grid-3">
+                    <label class="check-card" data-od-id="skill-component-1"><input type="checkbox" checked=""> 文本输入</label>
+                    <label class="check-card" data-od-id="skill-component-2"><input type="checkbox"> 文件上传</label>
+                    <label class="check-card" data-od-id="skill-component-3"><input type="checkbox" checked=""> 卡片渲染</label>
+                    <label class="check-card" data-od-id="skill-component-4"><input type="checkbox"> 图片展示</label>
+                    <label class="check-card" data-od-id="skill-component-5"><input type="checkbox"> 语音输入</label>
+                    <label class="check-card" data-od-id="skill-component-6"><input type="checkbox"> 快捷按钮</label>
+                  </div>
+                </div>
+                <div class="form-section">
+                  <h3>插件</h3>
+                  <div class="grid-3">
+                    <label class="check-card" data-od-id="skill-plugin-1"><input type="checkbox"> 天气查询</label>
+                    <label class="check-card" data-od-id="skill-plugin-2"><input type="checkbox" checked=""> 知识检索</label>
+                    <label class="check-card" data-od-id="skill-plugin-3"><input type="checkbox"> 日历同步</label>
+                    <label class="check-card" data-od-id="skill-plugin-4"><input type="checkbox"> 邮件发送</label>
+                    <label class="check-card" data-od-id="skill-plugin-5"><input type="checkbox"> 地图服务</label>
+                    <label class="check-card" data-od-id="skill-plugin-6"><input type="checkbox"> 翻译引擎</label>
+                  </div>
+                </div>
+                <div class="form-section">
+                  <h3>Skill</h3>
+                  <div class="grid-3">
+                    <label class="check-card" data-od-id="skill-skill-1"><input type="checkbox" checked=""> 意图识别</label>
+                    <label class="check-card" data-od-id="skill-skill-2"><input type="checkbox" checked=""> 多轮对话</label>
+                    <label class="check-card" data-od-id="skill-skill-3"><input type="checkbox"> 情感分析</label>
+                    <label class="check-card" data-od-id="skill-skill-4"><input type="checkbox"> 实体抽取</label>
+                    <label class="check-card" data-od-id="skill-skill-5"><input type="checkbox"> 摘要生成</label>
+                    <label class="check-card" data-od-id="skill-skill-6"><input type="checkbox"> 质量评分</label>
+                  </div>
+                </div>
+                <div class="form-section">
+                  <h3>Tools</h3>
+                  <div class="grid-3">
+                    <label class="check-card" data-od-id="tool-1"><input type="checkbox" checked=""> 代码解释器</label>
+                    <label class="check-card" data-od-id="tool-2"><input type="checkbox"> API 调用</label>
+                    <label class="check-card" data-od-id="tool-3"><input type="checkbox"> 数据库查询</label>
+                    <label class="check-card" data-od-id="tool-4"><input type="checkbox"> 文档生成</label>
+                    <label class="check-card" data-od-id="tool-5"><input type="checkbox"> 图像识别</label>
+                    <label class="check-card" data-od-id="tool-6"><input type="checkbox"> 网页抓取</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step-panel" data-step="4" data-od-id="step-memory">
+            <div class="card">
+              <div class="section-title">
+                <h2>记忆与参数</h2>
+                <span class="pill">高级</span>
+              </div>
+              <div class="stack" style="gap: 24px;">
+                <div class="field">
+                  <label>记忆策略</label>
+                  <div class="grid-2">
+                    <label class="check-card" data-od-id="memory-session"><input type="radio" name="memory" checked=""> 会话级记忆</label>
+                    <label class="check-card" data-od-id="memory-longterm"><input type="radio" name="memory"> 长期记忆</label>
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="memory-prompt">记忆提示词</label>
+                  <textarea id="memory-prompt" class="textarea" placeholder="定义需要跨会话保留的关键信息及其更新规则。" data-od-id="textarea-memory"></textarea>
+                </div>
+                <div class="form-section" style="margin-bottom: 0;">
+                  <h3>模型参数</h3>
+                  <table class="ds-table" data-od-id="params-table">
+                    <thead>
+                      <tr>
+                        <th>参数名</th>
+                        <th>值</th>
+                        <th style="width: 80px;"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><input type="text" class="input" value="max_tokens" style="font-family: var(--font-mono);"></td>
+                        <td><input type="text" class="input" value="2048"></td>
+                        <td><button type="button" class="btn btn-ghost" data-od-id="param-del-1">删除</button></td>
+                      </tr>
+                      <tr>
+                        <td><input type="text" class="input" value="top_p" style="font-family: var(--font-mono);"></td>
+                        <td><input type="text" class="input" value="1.0"></td>
+                        <td><button type="button" class="btn btn-ghost" data-od-id="param-del-2">删除</button></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <button type="button" class="btn btn-secondary" style="margin-top: 16px;" data-od-id="btn-add-param">+ 添加参数</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
+
+        <div class="wizard-actions" data-od-id="wizard-actions">
+          <button type="button" class="btn btn-secondary" id="prev-btn" disabled="" data-od-id="btn-prev">上一步</button>
+          <div class="row" style="gap: 12px;">
+            
+            <button type="button" class="btn btn-primary" id="next-btn" data-od-id="btn-next">下一步</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+  </main>
+
+  
+
+  <script>
+    (function () {
+      const steps = document.querySelectorAll('.wizard-step');
+      const panels = document.querySelectorAll('.step-panel');
+      const prevBtn = document.getElementById('prev-btn');
+      const nextBtn = document.getElementById('next-btn');
+      const tempInput = document.getElementById('temperature');
+      const tempValue = document.getElementById('temp-value');
+      let currentStep = 1;
+      const totalSteps = 4;
+
+      function updateUI() {
+        steps.forEach(function (s) {
+          const step = parseInt(s.dataset.step, 10);
+          s.classList.remove('active', 'completed');
+          s.setAttribute('aria-selected', 'false');
+          if (step === currentStep) {
+            s.classList.add('active');
+            s.setAttribute('aria-selected', 'true');
+          } else if (step < currentStep) {
+            s.classList.add('completed');
+          }
+        });
+        panels.forEach(function (p) {
+          p.classList.toggle('active', parseInt(p.dataset.step, 10) === currentStep);
+        });
+        prevBtn.disabled = currentStep === 1;
+        nextBtn.textContent = currentStep === totalSteps ? '保存' : '下一步';
+      }
+
+      steps.forEach(function (s) {
+        s.addEventListener('click', function () {
+          currentStep = parseInt(s.dataset.step, 10);
+          updateUI();
+        });
+      });
+
+      prevBtn.addEventListener('click', function () {
+        if (currentStep > 1) {
+          currentStep--;
+          updateUI();
+        }
+      });
+
+      nextBtn.addEventListener('click', function () {
+        if (currentStep < totalSteps) {
+          currentStep++;
+          updateUI();
+        } else {
+          window.alert('配置已保存');
+        }
+      });
+
+      tempInput.addEventListener('input', function () {
+        tempValue.textContent = tempInput.value;
+      });
+    })();
+  </script>
+
+
+</body></html>

@@ -1030,6 +1030,46 @@ paths:
         in: path
         required: true
         schema: { type: string }
+    patch:
+      tags: [Agents]
+      summary: 更新 Agent（基于最新版本创建新版本）
+      description: |
+        以该 Agent 的最新版本为基准创建一个新版本，definition 中的 `agent` 必须与路径中的 `ref` 一致。
+        请求体中的 `definition` 会用 Agent DSL 的 JSON Schema 严格校验；保存成功后返回最新版本。
+      operationId: updateAgent
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [definition]
+              properties:
+                definition: { $ref: '#/components/schemas/AgentDefinition' }
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Agent' }
+        '400':
+          description: |
+            DSL 校验失败（40001）、引用了被禁用的资源（30002）、或 definition.agent 与路径 ref 不一致
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '404':
+          description: Agent 不存在（30001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
     delete:
       tags: [Agents]
       summary: 删除 Agent

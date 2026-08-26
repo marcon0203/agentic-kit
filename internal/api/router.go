@@ -132,6 +132,7 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 			if cfg.Agents != nil {
 				r.Get("/agents", cfg.Agents.List)
 				r.Post("/agents", cfg.Agents.Create)
+				r.Patch("/agents/{ref}", cfg.Agents.Update)
 				r.Get("/agents/{ref}/versions", cfg.Agents.ListVersions)
 				r.Delete("/agents/{ref}", cfg.Agents.Delete)
 			}

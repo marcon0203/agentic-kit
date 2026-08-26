@@ -71,6 +71,14 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/agents/:ref/edit"
+            element={
+              <ProtectedRoute>
+                <AgentStudioPage />
+              </ProtectedRoute>
+            }
+          />
           <Route element={<AppShell />}>
             <Route path="/" element={<HomePage />} />
             <Route path="/marketplace" element={<MarketplaceRedirect />} />

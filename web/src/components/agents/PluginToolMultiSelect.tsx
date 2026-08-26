@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { apiClient, unwrap } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 import type { components } from '@/lib/api/schema'
+import { CheckCardGroup } from './CheckCardGroup'
 
 type InstalledPluginTool = components['schemas']['InstalledPluginTool']
 
@@ -15,7 +16,15 @@ type InstalledPluginTool = components['schemas']['InstalledPluginTool']
  * 工具）只有它的 ref 被勾进这里，auto_render 才会真的生效——不是装了就自动
  * 生效，这一步不能省。
  */
-export function PluginToolMultiSelect({ selected, onChange }: { selected: string[]; onChange: (refs: string[]) => void }) {
+export function PluginToolMultiSelect({
+  selected,
+  onChange,
+  variant = 'pill',
+}: {
+  selected: string[]
+  onChange: (refs: string[]) => void
+  variant?: 'pill' | 'card'
+}) {
   const query = useQuery({
     queryKey: ['plugins', 'installed', 'tools'],
     queryFn: async () => unwrap<{ items: InstalledPluginTool[] }>(await apiClient.GET('/plugins/installed/tools', {})),
@@ -39,6 +48,27 @@ export function PluginToolMultiSelect({ selected, onChange }: { selected: string
         </a>{' '}
         安装。
       </p>
+    )
+  }
+
+  if (variant === 'card') {
+    return (
+      <CheckCardGroup
+        options={options.map((opt) => ({
+          value: opt.ref,
+          label: (
+            <span className="flex items-center gap-space-2">
+              {opt.tool_name}
+              <span className="text-caption rounded-full bg-surface-muted px-space-2 py-0.5 text-ink-500">
+                {opt.plugin_id}
+              </span>
+            </span>
+          ),
+          helper: opt.description,
+        }))}
+        value={selected}
+        onChange={onChange}
+      />
     )
   }
 

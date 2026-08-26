@@ -41,7 +41,7 @@ export function ListSkeleton({ rows = 5 }: { rows?: number }) {
  * An error tells the reader what failed and offers the retry — it does not
  * apologise, and it never says "出错了" without saying what.
  */
-export function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
+export function ErrorPanel({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div
       role="alert"
@@ -51,13 +51,15 @@ export function ErrorPanel({ message, onRetry }: { message: string; onRetry: () 
         <AlertTriangle className="size-4 shrink-0" aria-hidden />
         {message}
       </p>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="text-body-sm shrink-0 font-medium text-rust underline underline-offset-2 hover:no-underline"
-      >
-        重试
-      </button>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="text-body-sm shrink-0 font-medium text-rust underline underline-offset-2 hover:no-underline"
+        >
+          重试
+        </button>
+      )}
     </div>
   )
 }

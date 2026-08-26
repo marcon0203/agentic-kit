@@ -101,6 +101,30 @@ func (h *AgentHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusCreated, toAgentDTO(created))
 }
 
+// Update handles PATCH /agents/{ref} — edits the latest version by creating a
+// new version with an auto-bumped version number. To callers this looks like
+// an in-place update while the backend preserves immutable versions.
+func (h *AgentHandlers) Update(w http.ResponseWriter, r *http.Request) {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
+		return
+	}
+
+	var req createAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
+		return
+	}
+
+	updated, err := h.svc.Update(r.Context(), userID, chi.URLParam(r, "ref"), agent.Definition(req.Definition))
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, toAgentDTO(updated))
+}
+
 // ListVersions handles GET /agents/{ref}/versions.
 func (h *AgentHandlers) ListVersions(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
