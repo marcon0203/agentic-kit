@@ -22,14 +22,15 @@ import (
 // an error: the run has already passed its pre-flight check, so this is the
 // last line of defence and it should decline quietly, not crash the graph.
 type resourceAuthorizer struct {
-	ctx     context.Context
-	q       store.Querier
-	ownerID int64
-	aesKey  []byte
+	ctx        context.Context
+	q          store.Querier
+	ownerID    int64
+	aesKey     []byte
+	pluginWasm *pluginWasmFetcher
 }
 
-func newResourceAuthorizer(ctx context.Context, q store.Querier, ownerID int64, aesKey []byte) adk.ResourceAuthorizer {
-	return &resourceAuthorizer{ctx: ctx, q: q, ownerID: ownerID, aesKey: aesKey}
+func newResourceAuthorizer(ctx context.Context, q store.Querier, ownerID int64, aesKey []byte, pluginWasm *pluginWasmFetcher) adk.ResourceAuthorizer {
+	return &resourceAuthorizer{ctx: ctx, q: q, ownerID: ownerID, aesKey: aesKey, pluginWasm: pluginWasm}
 }
 
 // lookup is one kind's "newest row for this ref" query, plus the ADK kind a
@@ -40,6 +41,13 @@ type lookup struct {
 }
 
 func (a *resourceAuthorizer) Authorize(_ context.Context, ref string) (adk.ToolSpec, bool, error) {
+	// A "plugin:{id}/{name}" ref (spec-20 §5.1) resolves against
+	// plugin_installations instead of the four resource-center tables —
+	// same capabilities.tools[] array, a different backing store.
+	if pluginID, name, ok := parsePluginRef(ref); ok {
+		return a.authorizePlugin(pluginID, name)
+	}
+
 	// A ref may name a tool, an MCP server, a knowledge base or a skill —
 	// all four surface via capabilities.tools[]/skills[], per spec-05.
 	for _, l := range []lookup{

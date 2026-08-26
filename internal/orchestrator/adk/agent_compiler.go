@@ -38,6 +38,14 @@ type AgentCompileOptions struct {
 	// PluginRuntime backs a "plugin:{id}/{tool}" capabilities.tools[] ref
 	// (spec-20); nil is fine when no Agent in the Bundle references one.
 	PluginRuntime PluginRuntime
+	// Renderers, if non-nil, receives every plugin renderer this Agent's
+	// capabilities.tools[] resolved during compilation — both
+	// renderers[].auto_render registrations and explicit tools[].ui ones
+	// (spec-20 §4.2), in declaration order (needed for its own "先声明者赢"
+	// tiebreak). The caller (the run engine, per node) uses this to match
+	// node.render events against the node's actual output; CompileAgent
+	// itself never emits one.
+	Renderers *[]RendererRegistration
 }
 
 // CompileAgent turns one validated Agent DSL document (schemas/agent.schema.json)
@@ -63,7 +71,7 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		}
 	}
 
-	tools, toolsets, err := compileTools(ctx, def, opts.Authorizer, opts.KnowledgeBaseSearcher, opts.SkillContentFetcher, opts.PluginRuntime)
+	tools, toolsets, err := compileTools(ctx, def, opts.Authorizer, opts.KnowledgeBaseSearcher, opts.SkillContentFetcher, opts.PluginRuntime, opts.Renderers)
 	if err != nil {
 		return nil, fmt.Errorf("adk: agent %q: %w", ref, err)
 	}
@@ -115,7 +123,7 @@ func anyFallbackHasKey(fallbacks []modelgateway.ModelSpec, creds map[string]mode
 	return modelgateway.ModelSpec{}, false
 }
 
-func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAuthorizer, kb KnowledgeBaseSearcher, skills SkillContentFetcher, plugins PluginRuntime) ([]tool.Tool, []tool.Toolset, error) {
+func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAuthorizer, kb KnowledgeBaseSearcher, skills SkillContentFetcher, plugins PluginRuntime, renderers *[]RendererRegistration) ([]tool.Tool, []tool.Toolset, error) {
 	caps, _ := def["capabilities"].(map[string]any)
 	if caps == nil || authorizer == nil {
 		return nil, nil, nil
@@ -170,6 +178,18 @@ func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAu
 			tools = append(tools, sandboxTools...)
 			continue
 		}
+		// A "plugin:{id}/{renderer_name}" ref resolving to a renderers[]
+		// entry (spec-20 §4.2) is never a callable tool — it only feeds
+		// the auto_render registry the run engine matches node output
+		// against.
+		if spec.Kind == KindPluginRenderer {
+			if renderers != nil {
+				if reg, ok := RendererRegistrationFromRendererSpec(spec); ok {
+					*renderers = append(*renderers, reg)
+				}
+			}
+			continue
+		}
 		// A "plugin:{id}/{tool}" ref (spec-20 §5.1) — third-party WASM code,
 		// not a resource-center row, but authorized and dispatched the same
 		// way as everything else here.
@@ -179,6 +199,14 @@ func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAu
 				return nil, nil, fmt.Errorf("build plugin tool %q: %w", ref, err)
 			}
 			tools = append(tools, t)
+			// A tools[].ui entry (spec-20 §4.2 method A) also registers as
+			// a renderer, alongside — not instead of — being a callable
+			// tool: the model decides to call it, the result gets rendered.
+			if renderers != nil {
+				if reg, ok := RendererRegistrationFromToolSpec(spec, t.Name()); ok {
+					*renderers = append(*renderers, reg)
+				}
+			}
 			continue
 		}
 		t, err := BuildTool(spec, kb, skills)

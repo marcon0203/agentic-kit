@@ -72,6 +72,12 @@ const (
 	// dispatched the same way: the Authorizer resolves the ref and tells
 	// this package apart by Kind, same as KindMCP/ComponentTypeSandbox.
 	KindPlugin ResourceKind = "plugin"
+	// KindPluginRenderer is a "plugin:{plugin_id}/{renderer_name}" ref
+	// resolving to a renderers[] entry (spec-20 §4.2) rather than a
+	// tools[] one — it never becomes a callable ADK tool.compileTools
+	// collects it into a RendererRegistration for auto_render matching
+	// instead.
+	KindPluginRenderer ResourceKind = "plugin_renderer"
 )
 
 // A "tool"-kind resource's config carries two discriminator fields

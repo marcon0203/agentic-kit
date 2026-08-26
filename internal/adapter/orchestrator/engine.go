@@ -32,6 +32,7 @@ type Engine struct {
 	kbSearcher adk.KnowledgeBaseSearcher
 	skills     adk.SkillContentFetcher
 	plugins    adk.PluginRuntime
+	pluginWasm *pluginWasmFetcher
 
 	cancelMu sync.Mutex
 	cancels  map[string]context.CancelFunc
@@ -63,6 +64,11 @@ func NewEngine(
 		kbSearcher: newKnowledgeBaseSearcher(kbService),
 		skills:     newSkillContentFetcher(skillObjectStore),
 		plugins:    pluginRuntime,
+		// Plugin packages and Skill zips live in the same OSS bucket
+		// (spec-20 §3.1 reuses the Skill-upload storage convention
+		// verbatim), so the wasm fetcher shares skillObjectStore rather
+		// than main.go wiring a second, functionally identical store.
+		pluginWasm: newPluginWasmFetcher(skillObjectStore),
 	}
 }
 
@@ -93,11 +99,16 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 		return nil, fmt.Errorf("load provider keys: %w", err)
 	}
 	gateway := modelgateway.NewGateway(nil)
-	authorizer := newResourceAuthorizer(ctx, e.queries, b.OwnerUserID, e.aesKey)
+	authorizer := newResourceAuthorizer(ctx, e.queries, b.OwnerUserID, e.aesKey, e.pluginWasm)
 
 	agentsRaw, _ := b.Definition["agents"].([]any)
 	compiled := make(map[string]adk.CompiledAgent, len(agentsRaw))
 	nodeOrder := make([]string, 0, len(agentsRaw)) // agents[] declaration order — a flow's implicit schedule
+	// renderRules is consulted per node once its output/tool calls stream
+	// in during Start — a node.render event (spec-20 §4.2) is not
+	// something CompileAgent produces, only something it gathers the
+	// matching rules for.
+	renderRules := make(map[string][]adk.RendererRegistration, len(agentsRaw))
 	for _, a := range agentsRaw {
 		am, _ := a.(map[string]any)
 		ref, _ := am["ref"].(string)
@@ -117,10 +128,15 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 		}
 		agentDef["agent"] = node
 
+		var nodeRenderers []adk.RendererRegistration
 		compiledAgent, err := adk.CompileAgent(ctx, agentDef, adk.AgentCompileOptions{
 			Gateway: gateway, Credentials: creds, Authorizer: authorizer,
 			KnowledgeBaseSearcher: e.kbSearcher, SkillContentFetcher: e.skills, PluginRuntime: e.plugins,
+			Renderers: &nodeRenderers,
 		})
+		if len(nodeRenderers) > 0 {
+			renderRules[node] = nodeRenderers
+		}
 		if err != nil {
 			return nil, fmt.Errorf("compile agent %q: %w", node, err)
 		}
@@ -156,7 +172,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 	if err != nil {
 		return nil, err
 	}
-	return &execution{engine: e, runID: runID, root: root, ownerID: b.OwnerUserID}, nil
+	return &execution{engine: e, runID: runID, root: root, ownerID: b.OwnerUserID, renderRules: renderRules}, nil
 }
 
 func firstOrEmpty(nodes []string) string {
@@ -234,6 +250,10 @@ type execution struct {
 	runID   string
 	root    adk.CompiledAgent
 	ownerID int64
+	// renderRules is Prepare's per-node auto_render/tools[].ui registry
+	// (spec-20 §4.2) — Start's emit callback consults it after each node
+	// event to decide whether a node.render event should follow.
+	renderRules map[string][]adk.RendererRegistration
 }
 
 // Start drives the run to completion, persisting each translated event and
@@ -289,6 +309,7 @@ func (x *execution) Start(triggeredBy int64, input map[string]any, limits run.Li
 			_ = e.events.Append(persist, run.Event{
 				RunID: x.runID, Type: ev.Type, Node: ev.Node, Payload: payload, IsInternal: ev.IsInternal,
 			})
+			x.emitRenderIfMatched(persist, ev)
 
 			if ev.InputTokens == 0 && ev.OutputTokens == 0 && ev.CostUSD == 0 {
 				return
@@ -313,6 +334,53 @@ func (x *execution) Start(triggeredBy int64, input map[string]any, limits run.Li
 		x.finish(persist, run.StatusFailed, sanitizeRunError(runErr))
 	default:
 		x.finish(persist, run.StatusFinished, "")
+	}
+}
+
+// emitRenderIfMatched implements spec-20 §4.2's two render triggers against
+// one already-persisted node event: an explicit tools[].ui call (method A —
+// ev.Type is node.tool_call.finished and the tool name matches a
+// registration's TriggerTool) or an auto_render fenced-code-block match
+// (method B — ev.Type is node.finished and the output text matches a
+// registration's FencedLangs, first-declared-wins). Neither trigger fires
+// twice for the same underlying event; at most one node.render event
+// follows.
+func (x *execution) emitRenderIfMatched(ctx context.Context, ev adk.Event) {
+	regs := x.renderRules[ev.Node]
+	if len(regs) == 0 {
+		return
+	}
+
+	switch ev.Type {
+	case adk.EventNodeToolCallFinished:
+		name, _ := ev.Payload["name"].(string)
+		reg, ok := adk.MatchToolRender(name, regs)
+		if !ok {
+			return
+		}
+		_ = x.engine.events.Append(ctx, run.Event{
+			RunID: x.runID, Type: adk.EventNodeRender, Node: ev.Node,
+			Payload: map[string]any{
+				"plugin": reg.PluginID, "renderer": reg.RendererName,
+				"resource_uri": reg.ResourceURI(), "data": ev.Payload["result"],
+			},
+		})
+	case adk.EventNodeFinished:
+		text, _ := ev.Payload["text"].(string)
+		if text == "" {
+			return
+		}
+		reg, lang, content, matched := adk.MatchAutoRender(text, regs)
+		if !matched {
+			return
+		}
+		_ = x.engine.events.Append(ctx, run.Event{
+			RunID: x.runID, Type: adk.EventNodeRender, Node: ev.Node,
+			Payload: map[string]any{
+				"plugin": reg.PluginID, "renderer": reg.RendererName,
+				"resource_uri": reg.ResourceURI(), "data": map[string]any{"lang": lang, "content": content},
+			},
+		})
 	}
 }
 

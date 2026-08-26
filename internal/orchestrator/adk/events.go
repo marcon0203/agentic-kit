@@ -16,6 +16,13 @@ const (
 	EventNodeToolCallStarted  = "node.tool_call.started"
 	EventNodeToolCallFinished = "node.tool_call.finished"
 	EventNodeFinished         = "node.finished"
+	// EventNodeRender is not produced by TranslateEvent — the run engine
+	// emits it itself (spec-20 §4.2) after matching a node.finished or
+	// node.tool_call.finished event's payload against the node's compiled
+	// RendererRegistrations. It lives in this const block anyway: it's
+	// still a node-scoped platform event in the same "node.*" family, and
+	// the frontend's timeline switches on this exact string.
+	EventNodeRender = "node.render"
 )
 
 // PlatformEvent is the translated shape spec-10 requires: "ADK 产出自己的

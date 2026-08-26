@@ -49,7 +49,7 @@ func TestBuildPluginTool_BuildsSuccessfully(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildPluginTool: %v", err)
 	}
-	if tl.Name() != "acme.charts/render_chart" {
+	if tl.Name() != "acme_charts_render_chart" {
 		t.Fatalf("unexpected tool name: %q", tl.Name())
 	}
 }

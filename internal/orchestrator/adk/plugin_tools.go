@@ -44,6 +44,11 @@ const (
 	PluginConfigKeyTimeoutMS      = "timeout_ms"
 	PluginConfigKeyMaxMemoryPages = "max_memory_pages"
 	PluginConfigKeyPluginConfig   = "plugin_config" // map[string]string, e.g. granted permissions
+	// PluginConfigKeyUIEntry is set on a KindPlugin (callable tool) spec
+	// when its manifest tools[].ui declares a UI resource entry (spec-20
+	// §4.2 method A) — compileTools reads this to also register a
+	// RendererRegistration alongside building the callable tool.
+	PluginConfigKeyUIEntry = "ui_entry"
 )
 
 // ParsePluginEntry splits a manifest tools[].entry string
@@ -100,7 +105,7 @@ func BuildPluginTool(spec ToolSpec, runtime PluginRuntime) (tool.Tool, error) {
 		description = fmt.Sprintf("Calls the %q plugin tool.", spec.Ref)
 	}
 
-	return functiontool.New(functiontool.Config{Name: spec.Ref, Description: description},
+	return functiontool.New(functiontool.Config{Name: SanitizePluginToolName(spec.Ref), Description: description},
 		func(ctx agent.ToolContext, args pluginToolArgs) (pluginToolResult, error) {
 			output, err := runtime.Call(ctx, wasmKey, wasmBytes, opts, funcName, []byte(args.Input))
 			if err != nil {
@@ -108,4 +113,24 @@ func BuildPluginTool(spec ToolSpec, runtime PluginRuntime) (tool.Tool, error) {
 			}
 			return pluginToolResult{Output: string(output)}, nil
 		})
+}
+
+// SanitizePluginToolName turns a "plugin:{id}/{tool}" ref into a name most
+// model providers' function-calling APIs will actually accept — the colon
+// and slash a plugin ref is built from aren't universally legal in a tool
+// name, so this is what a plugin tool is really registered under, and what
+// EventNodeToolCallFinished.Payload["name"] reports back. Not reversible by
+// design: nothing needs to recover the original ref from the sanitized
+// name, only compare two sanitized names for equality (see MatchToolRender).
+func SanitizePluginToolName(ref string) string {
+	var b strings.Builder
+	for _, r := range ref {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
 }

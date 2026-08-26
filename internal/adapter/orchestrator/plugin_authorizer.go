@@ -1,0 +1,193 @@
+package orchestrator
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
+	"github.com/marcon0203/agentic-kit/internal/orchestrator/adk"
+	"github.com/marcon0203/agentic-kit/internal/store"
+)
+
+// parsePluginRef splits a "plugin:{plugin_id}/{name}" capabilities ref
+// (spec-20 §5.1: "不新增字段...按 plugin:acme.charts/render_chart 这样的
+// ref 引用") into its plugin_id and extension-point name halves. name is
+// a tools[]/connectors[]/hooks[] entry's own `name` field — which
+// extension-point list it's found in is resolved by manifestExtensionPoint,
+// not encoded in the ref itself.
+func parsePluginRef(ref string) (pluginID, name string, ok bool) {
+	rest, ok := strings.CutPrefix(ref, "plugin:")
+	if !ok {
+		return "", "", false
+	}
+	pluginID, name, ok = strings.Cut(rest, "/")
+	return pluginID, name, ok
+}
+
+// authorizePlugin resolves one "plugin:{id}/{name}" ref against the
+// caller's own plugin_installations. An uninstalled, disabled, or
+// unresolvable ref is simply not authorized (ok=false) — the same
+// "未授权的不进图" rule every other resource kind already follows
+// (resourceAuthorizer.Authorize's own doc comment).
+func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpec, bool, error) {
+	inst, err := a.q.GetPluginInstallation(a.ctx, store.GetPluginInstallationParams{OwnerUserID: a.ownerID, PluginID: pluginID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return adk.ToolSpec{}, false, nil
+	}
+	if err != nil {
+		return adk.ToolSpec{}, false, err
+	}
+	if inst.Status != int16(plugin.StatusEnabled) {
+		return adk.ToolSpec{}, false, nil
+	}
+
+	ver, err := a.q.GetPluginVersion(a.ctx, store.GetPluginVersionParams{PluginID: pluginID, Version: inst.Version})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return adk.ToolSpec{}, false, nil
+	}
+	if err != nil {
+		return adk.ToolSpec{}, false, err
+	}
+
+	var manifest map[string]any
+	if err := json.Unmarshal(ver.Manifest, &manifest); err != nil {
+		return adk.ToolSpec{}, false, err
+	}
+
+	if entry, description, ok := findExtensionEntry(manifest, "tools", name); ok {
+		funcName, err := adk.ParsePluginEntry(entry)
+		if err != nil {
+			return adk.ToolSpec{}, false, err
+		}
+
+		wasmBytes, err := a.pluginWasm.Fetch(a.ctx, ver.OssPrefix)
+		if err != nil {
+			return adk.ToolSpec{}, false, err
+		}
+
+		config := map[string]any{
+			adk.PluginConfigKeyWasmKey:           pluginID + "@" + inst.Version,
+			adk.PluginConfigKeyWasmBytes:         wasmBytes,
+			adk.PluginConfigKeyFuncName:          funcName,
+			adk.PluginConfigKeyAllowedHosts:      requiresNetwork(manifest),
+			adk.PluginRendererConfigKeyOSSPrefix: ver.OssPrefix,
+		}
+		if description != "" {
+			config["description"] = description
+		}
+		if uiEntry := findToolUIEntry(manifest, name); uiEntry != "" {
+			config[adk.PluginConfigKeyUIEntry] = uiEntry
+		}
+
+		return adk.ToolSpec{
+			Ref: "plugin:" + pluginID + "/" + name, Kind: adk.KindPlugin,
+			Config: config, OwnerID: a.ownerID,
+		}, true, nil
+	}
+
+	// Not a tools[] entry — try renderers[] (spec-20 §4.2's auto_render
+	// registration; connectors/hooks resolve through their own dedicated
+	// call sites, P3/P4, not through capabilities.tools[]).
+	if entry, fencedLangs, ok := findRendererEntry(manifest, name); ok {
+		return adk.ToolSpec{
+			Ref: "plugin:" + pluginID + "/" + name, Kind: adk.KindPluginRenderer,
+			Config: map[string]any{
+				adk.PluginRendererConfigKeyPluginID:    pluginID,
+				adk.PluginRendererConfigKeyVersion:     inst.Version,
+				adk.PluginRendererConfigKeyName:        name,
+				adk.PluginRendererConfigKeyOSSPrefix:   ver.OssPrefix,
+				adk.PluginRendererConfigKeyEntry:       entry,
+				adk.PluginRendererConfigKeyFencedLangs: fencedLangs,
+			},
+			OwnerID: a.ownerID,
+		}, true, nil
+	}
+
+	return adk.ToolSpec{}, false, nil
+}
+
+// findToolUIEntry reads a tools[] entry's optional `ui` field.
+func findToolUIEntry(manifest map[string]any, name string) string {
+	extensions, _ := manifest["extensions"].(map[string]any)
+	items, _ := extensions["tools"].([]any)
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if n, _ := m["name"].(string); n != name {
+			continue
+		}
+		ui, _ := m["ui"].(string)
+		return ui
+	}
+	return ""
+}
+
+// findRendererEntry looks up one renderers[] item by name, returning its
+// entry path and auto_render.fenced_lang list.
+func findRendererEntry(manifest map[string]any, name string) (entry string, fencedLangs []string, ok bool) {
+	extensions, _ := manifest["extensions"].(map[string]any)
+	items, _ := extensions["renderers"].([]any)
+	for _, item := range items {
+		m, mok := item.(map[string]any)
+		if !mok {
+			continue
+		}
+		if n, _ := m["name"].(string); n != name {
+			continue
+		}
+		entry, _ = m["entry"].(string)
+		if entry == "" {
+			return "", nil, false
+		}
+		autoRender, _ := m["auto_render"].(map[string]any)
+		rawLangs, _ := autoRender["fenced_lang"].([]any)
+		for _, v := range rawLangs {
+			if s, ok := v.(string); ok {
+				fencedLangs = append(fencedLangs, s)
+			}
+		}
+		return entry, fencedLangs, true
+	}
+	return "", nil, false
+}
+
+// findExtensionEntry looks up one named item in manifest.extensions[point]
+// (schemas/plugin.schema.json's tools/connectors array shape — both use
+// {name, entry, description?}), returning its entry string and optional
+// description.
+func findExtensionEntry(manifest map[string]any, point, name string) (entry, description string, ok bool) {
+	extensions, _ := manifest["extensions"].(map[string]any)
+	items, _ := extensions[point].([]any)
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if n, _ := m["name"].(string); n != name {
+			continue
+		}
+		entry, _ = m["entry"].(string)
+		description, _ = m["description"].(string)
+		return entry, description, entry != ""
+	}
+	return "", "", false
+}
+
+// requiresNetwork reads manifest.requires.network — the AllowedHosts
+// whitelist Extism enforces (spec-20 §4.1).
+func requiresNetwork(manifest map[string]any) []string {
+	requires, _ := manifest["requires"].(map[string]any)
+	raw, _ := requires["network"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
