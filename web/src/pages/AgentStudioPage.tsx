@@ -19,6 +19,7 @@ import { buildTimeline } from '@/lib/runs/timeline'
 import { validateAgentDefinition } from '@/lib/validation/validateAgent'
 import {
   BUILTIN_TOOLS,
+  csv,
   EMPTY_FORM,
   formStateToDefinition,
   type FormState,
@@ -246,15 +247,14 @@ export function AgentStudioPage() {
               </div>
               <div className="grid grid-cols-2 gap-space-4">
                 <Field
-                  label="fallback（逗号分隔）"
+                  label="fallback"
                   htmlFor="studio-fallback"
-                  helper="主模型不可用时按顺序降级，格式 provider/name"
+                  helper="主模型不可用/超限时按顺序尝试的备选模型，来自模型广场登记的目录"
                 >
-                  <Input
-                    id="studio-fallback"
+                  <FallbackMultiSelect
+                    catalog={modelCatalogQuery.data ?? []}
                     value={form.fallback}
-                    onChange={(e) => set('fallback', e.target.value)}
-                    placeholder="openai/gpt-5"
+                    onChange={(v) => set('fallback', v)}
                   />
                 </Field>
                 <Field label="temperature（可选，0-2）" htmlFor="studio-temperature">
@@ -479,6 +479,57 @@ function Field({
       </label>
       {children}
       {helper && <p className="text-caption text-ink-500">{helper}</p>}
+    </div>
+  )
+}
+
+/**
+ * fallback 是"主模型不可用时按顺序尝试"的备选模型列表，格式
+ * provider/name（agent.schema.json 里 model.fallback 的 pattern）。这里从
+ * 模型广场目录里勾选，而不是让人手打字符串——选中项按点击顺序追加，取消
+ * 勾选按值过滤，写回时仍然落回 FormState.fallback 那个逗号分隔的字符串
+ * （formStateToDefinition 用 csv() 拆开它），不改变底层数据形状。
+ */
+function FallbackMultiSelect({
+  catalog,
+  value,
+  onChange,
+}: {
+  catalog: ModelCatalogEntry[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  const selected = csv(value)
+
+  function toggle(ref: string) {
+    const next = selected.includes(ref) ? selected.filter((r) => r !== ref) : [...selected, ref]
+    onChange(next.join(', '))
+  }
+
+  if (catalog.length === 0) {
+    return <p className="text-body-sm text-ink-500">模型广场里还没有登记任何模型。</p>
+  }
+
+  return (
+    <div className="flex flex-wrap gap-space-2">
+      {catalog.map((e) => {
+        const ref = `${e.provider}/${e.model}`
+        const active = selected.includes(ref)
+        return (
+          <button
+            key={ref}
+            type="button"
+            onClick={() => toggle(ref)}
+            className={cn(
+              'text-body-sm flex items-center gap-space-2 rounded-full border px-space-3 py-space-2',
+              active ? 'border-primary bg-blueprint-tint text-blueprint' : 'border-border bg-surface text-ink-700 hover:border-border-strong',
+            )}
+          >
+            {e.display_name}
+            <span className="text-caption rounded-full bg-surface-muted px-space-2 py-0.5 text-ink-500">{ref}</span>
+          </button>
+        )
+      })}
     </div>
   )
 }
