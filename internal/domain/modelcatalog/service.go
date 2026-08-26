@@ -20,6 +20,9 @@ type Repository interface {
 	GetProvider(ctx context.Context, id int64) (Provider, error)
 	SetProviderStatus(ctx context.Context, id int64, status int16) error
 	DeleteProvider(ctx context.Context, id int64) error
+	// SetProviderCredential stores the org-wide default credential for a
+	// provider. encryptedKey nil means "leave the stored key as-is".
+	SetProviderCredential(ctx context.Context, id int64, encryptedKey *string, baseURL string) error
 
 	CreateModel(ctx context.Context, providerID int64, model, displayName, description string, modality Modality, featured bool) (Model, error)
 	ListModelsForProvider(ctx context.Context, providerID int64) ([]Model, error)
@@ -32,6 +35,14 @@ type Repository interface {
 type AdminDirectory interface {
 	IsAdmin(ctx context.Context, userID int64) (bool, error)
 	HasPermission(ctx context.Context, userID int64, key string) (bool, error)
+}
+
+// Cipher encrypts the org-wide default api_key before it's stored — the
+// same AES-256 key already used for per-user provider credentials
+// (internal/adapter/crypto.Cipher), so both live under one key-rotation
+// story. The plaintext never round-trips back out through this package.
+type Cipher interface {
+	Encrypt(plaintext string) (string, error)
 }
 
 // Permission keys this package gates on — seeded in migrations/0017_rbac.up.sql
@@ -51,10 +62,11 @@ const (
 type Service struct {
 	repo   Repository
 	admins AdminDirectory
+	cipher Cipher
 }
 
-func NewService(repo Repository, admins AdminDirectory) *Service {
-	return &Service{repo: repo, admins: admins}
+func NewService(repo Repository, admins AdminDirectory, cipher Cipher) *Service {
+	return &Service{repo: repo, admins: admins, cipher: cipher}
 }
 
 // List is the public read for 模型广场 — every logged-in user, not just
@@ -145,6 +157,41 @@ func (s *Service) DeleteProvider(ctx context.Context, userID, providerID int64) 
 		return domain.Internal(err)
 	}
 	if err := s.repo.DeleteProvider(ctx, providerID); err != nil {
+		return domain.Internal(err)
+	}
+	return nil
+}
+
+// SetProviderCredential registers/updates a provider's org-wide default
+// api_key + base_url — the admin-managed fallback credential used when a
+// user has no personal connection for that provider (see
+// postgres.ProviderKeyStore.Keys). Gated on the same permission as creating
+// a provider: this is still "managing the provider entry", just a field on
+// it that happens to be secret. apiKey empty means "leave the stored key
+// untouched", so an admin can update base_url alone without re-entering a
+// key that's already set.
+func (s *Service) SetProviderCredential(ctx context.Context, userID, providerID int64, apiKey, baseURL string) error {
+	if err := s.requireAccess(ctx, userID, PermProviderCreate); err != nil {
+		return err
+	}
+	if _, err := s.repo.GetProvider(ctx, providerID); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return domain.NotFound(domain.CodeCatalogProviderNotFound, "provider 不存在")
+		}
+		return domain.Internal(err)
+	}
+
+	var encryptedKey *string
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey != "" {
+		encrypted, err := s.cipher.Encrypt(apiKey)
+		if err != nil {
+			return domain.Internal(err)
+		}
+		encryptedKey = &encrypted
+	}
+
+	if err := s.repo.SetProviderCredential(ctx, providerID, encryptedKey, strings.TrimSpace(baseURL)); err != nil {
 		return domain.Internal(err)
 	}
 	return nil

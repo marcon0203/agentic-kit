@@ -90,13 +90,14 @@ type CatalogModel struct {
 }
 
 type CatalogProvider struct {
-	ID          int64              `json:"id"`
-	ProviderKey string             `json:"provider_key"`
-	DisplayName string             `json:"display_name"`
-	Icon        pgtype.Text        `json:"icon"`
-	BaseUrl     pgtype.Text        `json:"base_url"`
-	Status      int16              `json:"status"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID                     int64              `json:"id"`
+	ProviderKey            string             `json:"provider_key"`
+	DisplayName            string             `json:"display_name"`
+	Icon                   pgtype.Text        `json:"icon"`
+	BaseUrl                pgtype.Text        `json:"base_url"`
+	Status                 int16              `json:"status"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	DefaultApiKeyEncrypted pgtype.Text        `json:"default_api_key_encrypted"`
 }
 
 type HumanGate struct {

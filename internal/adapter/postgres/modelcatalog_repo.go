@@ -20,11 +20,11 @@ func NewModelCatalogRepository(q store.Querier) *ModelCatalogRepository {
 
 var _ modelcatalog.Repository = (*ModelCatalogRepository)(nil)
 
-func toDomainProvider(row store.CatalogProvider) modelcatalog.Provider {
+func toDomainProvider(id int64, key, displayName string, icon, baseURL pgtype.Text, status int16, createdAt pgtype.Timestamptz, hasCredential bool) modelcatalog.Provider {
 	return modelcatalog.Provider{
-		ID: row.ID, Key: row.ProviderKey, DisplayName: row.DisplayName,
-		Icon: row.Icon.String, BaseURL: row.BaseUrl.String,
-		Status: row.Status, CreatedAt: row.CreatedAt.Time,
+		ID: id, Key: key, DisplayName: displayName,
+		Icon: icon.String, BaseURL: baseURL.String,
+		Status: status, CreatedAt: createdAt.Time, HasCredential: hasCredential,
 	}
 }
 
@@ -48,7 +48,7 @@ func (r *ModelCatalogRepository) CreateProvider(ctx context.Context, key, displa
 		}
 		return modelcatalog.Provider{}, err
 	}
-	return toDomainProvider(row), nil
+	return toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Status, row.CreatedAt, row.HasCredential), nil
 }
 
 func (r *ModelCatalogRepository) ListProviders(ctx context.Context) ([]modelcatalog.Provider, error) {
@@ -58,7 +58,7 @@ func (r *ModelCatalogRepository) ListProviders(ctx context.Context) ([]modelcata
 	}
 	out := make([]modelcatalog.Provider, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toDomainProvider(row))
+		out = append(out, toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Status, row.CreatedAt, row.HasCredential))
 	}
 	return out, nil
 }
@@ -71,11 +71,28 @@ func (r *ModelCatalogRepository) GetProvider(ctx context.Context, id int64) (mod
 		}
 		return modelcatalog.Provider{}, err
 	}
-	return toDomainProvider(row), nil
+	return toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Status, row.CreatedAt, row.HasCredential), nil
 }
 
 func (r *ModelCatalogRepository) SetProviderStatus(ctx context.Context, id int64, status int16) error {
 	return r.q.SetCatalogProviderStatus(ctx, store.SetCatalogProviderStatusParams{ID: id, Status: status})
+}
+
+// SetProviderCredential registers/updates the org-wide default credential
+// for a provider. encryptedKey is a *string so a nil means "leave the
+// stored key untouched" (admin only changed base_url in the edit dialog,
+// left the api_key field blank because it's already set) — see
+// SetCatalogProviderCredential's COALESCE.
+func (r *ModelCatalogRepository) SetProviderCredential(ctx context.Context, id int64, encryptedKey *string, baseURL string) error {
+	var keyParam pgtype.Text
+	if encryptedKey != nil {
+		keyParam = pgtype.Text{String: *encryptedKey, Valid: true}
+	}
+	return r.q.SetCatalogProviderCredential(ctx, store.SetCatalogProviderCredentialParams{
+		ID:           id,
+		BaseUrl:      pgtype.Text{String: baseURL, Valid: baseURL != ""},
+		EncryptedKey: keyParam,
+	})
 }
 
 func (r *ModelCatalogRepository) DeleteProvider(ctx context.Context, id int64) error {

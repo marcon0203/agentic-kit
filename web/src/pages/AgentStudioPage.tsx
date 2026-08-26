@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ArrowLeft, Blocks, BookOpen, Brain, LayoutGrid, MessageSquare, Send, Share2 } from 'lucide-react'
 
@@ -26,6 +27,7 @@ import type { components } from '@/lib/api/schema'
 
 type ProviderName = components['schemas']['ProviderName']
 type RunSummary = components['schemas']['RunSummary']
+type ModelCatalogEntry = components['schemas']['ModelCatalogEntry']
 
 const SECTIONS = [
   { id: 'planning', label: '规划', icon: LayoutGrid },
@@ -57,6 +59,15 @@ export function AgentStudioPage() {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const { knowledgeBaseEnabled } = useFeatures()
+
+  const modelCatalogQuery = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: async () => unwrap<ModelCatalogEntry[]>(await apiClient.GET('/model-catalog', {})),
+  })
+  const modelsForProvider = useMemo(
+    () => (modelCatalogQuery.data ?? []).filter((e) => e.provider === form.provider),
+    [modelCatalogQuery.data, form.provider],
+  )
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -207,13 +218,30 @@ export function AgentStudioPage() {
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field label="模型名称" htmlFor="studio-model">
-                  <Input
-                    id="studio-model"
-                    value={form.modelName}
-                    onChange={(e) => set('modelName', e.target.value)}
-                    placeholder="claude-sonnet-5"
-                  />
+                <Field
+                  label="模型名称"
+                  htmlFor="studio-model"
+                  helper={
+                    modelCatalogQuery.isSuccess && modelsForProvider.length === 0
+                      ? '模型广场里这个 provider 下还没有登记模型，找管理员在系统配置 → 模型提供商添加'
+                      : undefined
+                  }
+                >
+                  <Select value={form.modelName} onValueChange={(v) => set('modelName', v)}>
+                    <SelectTrigger id="studio-model" className="w-full">
+                      <SelectValue placeholder="选择模型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {form.modelName && !modelsForProvider.some((m) => m.model === form.modelName) && (
+                        <SelectItem value={form.modelName}>{form.modelName}</SelectItem>
+                      )}
+                      {modelsForProvider.map((m) => (
+                        <SelectItem key={m.model} value={m.model}>
+                          {m.display_name}（{m.model}）
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
               </div>
               <div className="grid grid-cols-2 gap-space-4">

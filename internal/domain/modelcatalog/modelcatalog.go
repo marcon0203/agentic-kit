@@ -33,14 +33,20 @@ func (m Modality) Valid() bool {
 // Provider is one admin-registered model vendor entry — a catalog fixture,
 // not a credential. Icon is a URL or a data: URI; both render the same way
 // in an <img src>, so the domain doesn't need to know which.
+//
+// HasCredential reports whether an admin has additionally registered an
+// org-wide default api_key for this provider (SetProviderCredential) — the
+// encrypted value itself never leaves the postgres adapter, so this is only
+// ever a boolean flag, never the key.
 type Provider struct {
-	ID          int64
-	Key         string
-	DisplayName string
-	Icon        string
-	BaseURL     string
-	Status      int16
-	CreatedAt   time.Time
+	ID            int64
+	Key           string
+	DisplayName   string
+	Icon          string
+	BaseURL       string
+	Status        int16
+	CreatedAt     time.Time
+	HasCredential bool
 }
 
 func (p Provider) Enabled() bool { return p.Status == 1 }

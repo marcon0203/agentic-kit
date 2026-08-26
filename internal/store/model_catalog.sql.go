@@ -53,7 +53,7 @@ func (q *Queries) CreateCatalogModel(ctx context.Context, arg CreateCatalogModel
 const createCatalogProvider = `-- name: CreateCatalogProvider :one
 INSERT INTO catalog_providers (provider_key, display_name, icon, base_url)
 VALUES ($1, $2, $3, $4)
-RETURNING id, provider_key, display_name, icon, base_url, status, created_at
+RETURNING id, provider_key, display_name, icon, base_url, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 `
 
 type CreateCatalogProviderParams struct {
@@ -63,14 +63,25 @@ type CreateCatalogProviderParams struct {
 	BaseUrl     pgtype.Text `json:"base_url"`
 }
 
-func (q *Queries) CreateCatalogProvider(ctx context.Context, arg CreateCatalogProviderParams) (CatalogProvider, error) {
+type CreateCatalogProviderRow struct {
+	ID            int64              `json:"id"`
+	ProviderKey   string             `json:"provider_key"`
+	DisplayName   string             `json:"display_name"`
+	Icon          pgtype.Text        `json:"icon"`
+	BaseUrl       pgtype.Text        `json:"base_url"`
+	Status        int16              `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	HasCredential bool               `json:"has_credential"`
+}
+
+func (q *Queries) CreateCatalogProvider(ctx context.Context, arg CreateCatalogProviderParams) (CreateCatalogProviderRow, error) {
 	row := q.db.QueryRow(ctx, createCatalogProvider,
 		arg.ProviderKey,
 		arg.DisplayName,
 		arg.Icon,
 		arg.BaseUrl,
 	)
-	var i CatalogProvider
+	var i CreateCatalogProviderRow
 	err := row.Scan(
 		&i.ID,
 		&i.ProviderKey,
@@ -79,6 +90,7 @@ func (q *Queries) CreateCatalogProvider(ctx context.Context, arg CreateCatalogPr
 		&i.BaseUrl,
 		&i.Status,
 		&i.CreatedAt,
+		&i.HasCredential,
 	)
 	return i, err
 }
@@ -102,14 +114,25 @@ func (q *Queries) DeleteCatalogProvider(ctx context.Context, id int64) error {
 }
 
 const getCatalogProvider = `-- name: GetCatalogProvider :one
-SELECT id, provider_key, display_name, icon, base_url, status, created_at
+SELECT id, provider_key, display_name, icon, base_url, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 FROM catalog_providers
 WHERE id = $1
 `
 
-func (q *Queries) GetCatalogProvider(ctx context.Context, id int64) (CatalogProvider, error) {
+type GetCatalogProviderRow struct {
+	ID            int64              `json:"id"`
+	ProviderKey   string             `json:"provider_key"`
+	DisplayName   string             `json:"display_name"`
+	Icon          pgtype.Text        `json:"icon"`
+	BaseUrl       pgtype.Text        `json:"base_url"`
+	Status        int16              `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	HasCredential bool               `json:"has_credential"`
+}
+
+func (q *Queries) GetCatalogProvider(ctx context.Context, id int64) (GetCatalogProviderRow, error) {
 	row := q.db.QueryRow(ctx, getCatalogProvider, id)
-	var i CatalogProvider
+	var i GetCatalogProviderRow
 	err := row.Scan(
 		&i.ID,
 		&i.ProviderKey,
@@ -118,6 +141,7 @@ func (q *Queries) GetCatalogProvider(ctx context.Context, id int64) (CatalogProv
 		&i.BaseUrl,
 		&i.Status,
 		&i.CreatedAt,
+		&i.HasCredential,
 	)
 	return i, err
 }
@@ -212,21 +236,66 @@ func (q *Queries) ListCatalogModelsPublic(ctx context.Context) ([]ListCatalogMod
 	return items, nil
 }
 
+const listCatalogProviderDefaultCredentials = `-- name: ListCatalogProviderDefaultCredentials :many
+SELECT provider_key, base_url, default_api_key_encrypted
+FROM catalog_providers
+WHERE status = 1 AND default_api_key_encrypted IS NOT NULL
+`
+
+type ListCatalogProviderDefaultCredentialsRow struct {
+	ProviderKey            string      `json:"provider_key"`
+	BaseUrl                pgtype.Text `json:"base_url"`
+	DefaultApiKeyEncrypted pgtype.Text `json:"default_api_key_encrypted"`
+}
+
+// Admin-set org-wide fallback credentials, for ProviderKeyStore.Keys to
+// merge in when a user has no personal credential for that provider.
+func (q *Queries) ListCatalogProviderDefaultCredentials(ctx context.Context) ([]ListCatalogProviderDefaultCredentialsRow, error) {
+	rows, err := q.db.Query(ctx, listCatalogProviderDefaultCredentials)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCatalogProviderDefaultCredentialsRow{}
+	for rows.Next() {
+		var i ListCatalogProviderDefaultCredentialsRow
+		if err := rows.Scan(&i.ProviderKey, &i.BaseUrl, &i.DefaultApiKeyEncrypted); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCatalogProviders = `-- name: ListCatalogProviders :many
-SELECT id, provider_key, display_name, icon, base_url, status, created_at
+SELECT id, provider_key, display_name, icon, base_url, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 FROM catalog_providers
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ListCatalogProviders(ctx context.Context) ([]CatalogProvider, error) {
+type ListCatalogProvidersRow struct {
+	ID            int64              `json:"id"`
+	ProviderKey   string             `json:"provider_key"`
+	DisplayName   string             `json:"display_name"`
+	Icon          pgtype.Text        `json:"icon"`
+	BaseUrl       pgtype.Text        `json:"base_url"`
+	Status        int16              `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	HasCredential bool               `json:"has_credential"`
+}
+
+func (q *Queries) ListCatalogProviders(ctx context.Context) ([]ListCatalogProvidersRow, error) {
 	rows, err := q.db.Query(ctx, listCatalogProviders)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CatalogProvider{}
+	items := []ListCatalogProvidersRow{}
 	for rows.Next() {
-		var i CatalogProvider
+		var i ListCatalogProvidersRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.ProviderKey,
@@ -235,6 +304,7 @@ func (q *Queries) ListCatalogProviders(ctx context.Context) ([]CatalogProvider, 
 			&i.BaseUrl,
 			&i.Status,
 			&i.CreatedAt,
+			&i.HasCredential,
 		); err != nil {
 			return nil, err
 		}
@@ -257,6 +327,28 @@ type SetCatalogModelStatusParams struct {
 
 func (q *Queries) SetCatalogModelStatus(ctx context.Context, arg SetCatalogModelStatusParams) error {
 	_, err := q.db.Exec(ctx, setCatalogModelStatus, arg.ID, arg.Status)
+	return err
+}
+
+const setCatalogProviderCredential = `-- name: SetCatalogProviderCredential :exec
+UPDATE catalog_providers
+SET base_url = $2,
+    default_api_key_encrypted = COALESCE($3, default_api_key_encrypted)
+WHERE id = $1
+`
+
+type SetCatalogProviderCredentialParams struct {
+	ID           int64       `json:"id"`
+	BaseUrl      pgtype.Text `json:"base_url"`
+	EncryptedKey pgtype.Text `json:"encrypted_key"`
+}
+
+// encrypted_key is a nullable param: pass NULL to leave the stored key
+// untouched (admin only changed base_url, left the api_key field blank in
+// the edit dialog because it's already set), or an encrypted value to
+// replace it.
+func (q *Queries) SetCatalogProviderCredential(ctx context.Context, arg SetCatalogProviderCredentialParams) error {
+	_, err := q.db.Exec(ctx, setCatalogProviderCredential, arg.ID, arg.BaseUrl, arg.EncryptedKey)
 	return err
 }
 

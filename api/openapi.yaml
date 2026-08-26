@@ -2251,6 +2251,45 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
 
+  /model-catalog/providers/{id}/credential:
+    put:
+      tags: [ModelCatalogAdmin]
+      summary: 设置 Provider 的管理员统一凭证（api_key + base_url），管理员
+      description: >-
+        组织级默认凭证：某个用户在 /models（模型广场）没有为该 provider 配置
+        个人凭证时，运行时会退回到这里登记的 api_key + base_url。api_key
+        留空表示不修改已保存的密钥（用于只更新 base_url 的场景）；密钥永远
+        只加密存储，任何 GET 都不会把明文返回，只能通过 has_credential 得知
+        是否已配置。
+      operationId: setCatalogProviderCredential
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [base_url]
+              properties:
+                api_key: { type: string, description: '留空则不修改已保存的密钥' }
+                base_url: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: provider 不存在（60005）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
   /model-catalog/providers/{id}/models:
     get:
       tags: [ModelCatalogAdmin]
@@ -3224,7 +3263,7 @@ components:
     CatalogProvider:
       type: object
       description: 系统配置 → 模型提供商登记的一个 Provider（不是已接入的凭证）
-      required: [id, key, display_name, status, created_at]
+      required: [id, key, display_name, status, created_at, has_credential]
       properties:
         id: { type: string }
         key: { type: string, examples: ['deepseek'] }
@@ -3233,6 +3272,9 @@ components:
         base_url: { type: string }
         status: { $ref: '#/components/schemas/Status' }
         created_at: { type: string, format: date-time }
+        has_credential:
+          type: boolean
+          description: 是否已登记管理员统一凭证（api_key 永不通过接口返回，只有这个布尔标记）
 
     CatalogModel:
       type: object

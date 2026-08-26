@@ -24,7 +24,7 @@ type Querier interface {
 	CreateBundle(ctx context.Context, arg CreateBundleParams) (Bundle, error)
 	CreateBundleRun(ctx context.Context, arg CreateBundleRunParams) (BundleRun, error)
 	CreateCatalogModel(ctx context.Context, arg CreateCatalogModelParams) (CatalogModel, error)
-	CreateCatalogProvider(ctx context.Context, arg CreateCatalogProviderParams) (CatalogProvider, error)
+	CreateCatalogProvider(ctx context.Context, arg CreateCatalogProviderParams) (CreateCatalogProviderRow, error)
 	CreateHumanGate(ctx context.Context, arg CreateHumanGateParams) (HumanGate, error)
 	CreateKnowledgeBase(ctx context.Context, arg CreateKnowledgeBaseParams) (KnowledgeBasis, error)
 	// Dependency closure (spec-08) is always owner-scoped: a Bundle/Agent only
@@ -114,7 +114,7 @@ type Querier interface {
 	GetBundleListingDisplayByListingID(ctx context.Context, id int64) (GetBundleListingDisplayByListingIDRow, error)
 	GetBundleListingForOwnerByRefVersion(ctx context.Context, arg GetBundleListingForOwnerByRefVersionParams) (MarketplaceListing, error)
 	GetBundleRun(ctx context.Context, id string) (BundleRun, error)
-	GetCatalogProvider(ctx context.Context, id int64) (CatalogProvider, error)
+	GetCatalogProvider(ctx context.Context, id int64) (GetCatalogProviderRow, error)
 	GetHumanGateByID(ctx context.Context, id int64) (HumanGate, error)
 	GetIdempotencyKey(ctx context.Context, key string) (IdempotencyKey, error)
 	GetKnowledgeBaseByIDForOwner(ctx context.Context, arg GetKnowledgeBaseByIDForOwnerParams) (KnowledgeBasis, error)
@@ -213,7 +213,10 @@ type Querier interface {
 	// enabled providers, newest provider first so a freshly configured provider
 	// surfaces near the top instead of at the bottom of an ORDER BY id.
 	ListCatalogModelsPublic(ctx context.Context) ([]ListCatalogModelsPublicRow, error)
-	ListCatalogProviders(ctx context.Context) ([]CatalogProvider, error)
+	// Admin-set org-wide fallback credentials, for ProviderKeyStore.Keys to
+	// merge in when a user has no personal credential for that provider.
+	ListCatalogProviderDefaultCredentials(ctx context.Context) ([]ListCatalogProviderDefaultCredentialsRow, error)
+	ListCatalogProviders(ctx context.Context) ([]ListCatalogProvidersRow, error)
 	ListHumanGatesForRun(ctx context.Context, runID string) ([]HumanGate, error)
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
 	ListListingVersionHistory(ctx context.Context, listingRef string) ([]ListListingVersionHistoryRow, error)
@@ -263,6 +266,11 @@ type Querier interface {
 	SetBundleDisplayMeta(ctx context.Context, arg SetBundleDisplayMetaParams) error
 	SetBundleStatusByID(ctx context.Context, arg SetBundleStatusByIDParams) error
 	SetCatalogModelStatus(ctx context.Context, arg SetCatalogModelStatusParams) error
+	// encrypted_key is a nullable param: pass NULL to leave the stored key
+	// untouched (admin only changed base_url, left the api_key field blank in
+	// the edit dialog because it's already set), or an encrypted value to
+	// replace it.
+	SetCatalogProviderCredential(ctx context.Context, arg SetCatalogProviderCredentialParams) error
 	SetCatalogProviderStatus(ctx context.Context, arg SetCatalogProviderStatusParams) error
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
 	SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerDisplayMetaParams) error

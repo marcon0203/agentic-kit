@@ -1128,6 +1128,26 @@ export interface paths {
         patch: operations["updateCatalogProviderStatus"];
         trace?: never;
     };
+    "/model-catalog/providers/{id}/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 设置 Provider 的管理员统一凭证（api_key + base_url），管理员
+         * @description 组织级默认凭证：某个用户在 /models（模型广场）没有为该 provider 配置 个人凭证时，运行时会退回到这里登记的 api_key + base_url。api_key 留空表示不修改已保存的密钥（用于只更新 base_url 的场景）；密钥永远 只加密存储，任何 GET 都不会把明文返回，只能通过 has_credential 得知 是否已配置。
+         */
+        put: operations["setCatalogProviderCredential"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model-catalog/providers/{id}/models": {
         parameters: {
             query?: never;
@@ -1734,6 +1754,8 @@ export interface components {
             status: components["schemas"]["Status"];
             /** Format: date-time */
             created_at: string;
+            /** @description 是否已登记管理员统一凭证（api_key 永不通过接口返回，只有这个布尔标记） */
+            has_credential: boolean;
         };
         CatalogModel: {
             id: string;
@@ -4166,6 +4188,46 @@ export interface operations {
             content: {
                 "application/json": {
                     status: components["schemas"]["Status"];
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description provider 不存在（60005） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    setCatalogProviderCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description 留空则不修改已保存的密钥 */
+                    api_key?: string;
+                    base_url: string;
                 };
             };
         };

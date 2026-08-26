@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
@@ -58,6 +58,7 @@ export function ModelCatalogAdminPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [credentialTarget, setCredentialTarget] = useState<CatalogProvider | null>(null)
 
   const providersQuery = useQuery({
     queryKey: ['catalog-providers'],
@@ -174,6 +175,14 @@ export function ModelCatalogAdminPage() {
                     >
                       {p.status === 1 ? '已启用' : '已停用'}
                     </span>
+                    <span className={cn('text-caption w-16 shrink-0 text-right', p.has_credential ? 'text-moss' : 'text-ink-500')}>
+                      {p.has_credential ? '已配置凭证' : '未配置凭证'}
+                    </span>
+                    <Can permission="model_catalog.provider.create">
+                      <Button variant="outline" size="sm" onClick={() => setCredentialTarget(p)}>
+                        配置凭证
+                      </Button>
+                    </Can>
                     <Can permission="model_catalog.provider.toggle">
                       <Button variant="outline" size="sm" onClick={() => toggleProviderStatus(p)}>
                         {p.status === 1 ? '停用' : '启用'}
@@ -205,7 +214,115 @@ export function ModelCatalogAdminPage() {
           setCreateOpen(false)
         }}
       />
+
+      <ProviderCredentialDialog
+        provider={credentialTarget}
+        onOpenChange={(v) => {
+          if (!v) setCredentialTarget(null)
+        }}
+        onSaved={() => {
+          queryClient.invalidateQueries({ queryKey: ['catalog-providers'] })
+          setCredentialTarget(null)
+        }}
+      />
     </div>
+  )
+}
+
+/**
+ * 管理员统一凭证：一个 provider 的组织级默认 api_key + base_url，供没有在
+ * /models（模型广场）自己接入个人凭证的用户兜底使用——两套凭证并存，个人
+ * 凭证优先。api_key 从不回显明文，留空提交表示不修改已保存的密钥。
+ */
+function ProviderCredentialDialog({
+  provider,
+  onOpenChange,
+  onSaved,
+}: {
+  provider: CatalogProvider | null
+  onOpenChange: (v: boolean) => void
+  onSaved: () => void
+}) {
+  const [apiKey, setApiKey] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+
+  useEffect(() => {
+    setApiKey('')
+    setBaseUrl(provider?.base_url ?? '')
+    setError(null)
+  }, [provider])
+
+  async function submit() {
+    if (!provider) return
+    setPending(true)
+    setError(null)
+    try {
+      unwrap(
+        await apiClient.PUT('/model-catalog/providers/{id}/credential', {
+          params: { path: { id: provider.id } },
+          body: { api_key: apiKey || undefined, base_url: baseUrl },
+        }),
+      )
+      onSaved()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '保存失败，请稍后重试')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Dialog open={provider !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>配置管理员统一凭证{provider ? ` · ${provider.display_name}` : ''}</DialogTitle>
+          <DialogDescription>
+            组织级默认凭证：用户在模型广场（/models）没有为这个 Provider 接入个人凭证时，运行时会用这里登记的
+            api_key 兜底调用。和用户各自的个人凭证是两回事，个人凭证优先。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-space-2">
+          <label htmlFor="credential-api-key" className="text-label-md text-ink-700">
+            API Key {provider?.has_credential && <span className="text-caption text-ink-500">（已设置，留空则不修改）</span>}
+          </label>
+          <Input
+            id="credential-api-key"
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={provider?.has_credential ? '••••••••' : 'sk-...'}
+            className="h-12 rounded-sm"
+          />
+
+          <label htmlFor="credential-base-url" className="text-label-md text-ink-700">
+            Base URL
+          </label>
+          <Input
+            id="credential-base-url"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="https://api.example.com/v1"
+            className="h-12 rounded-sm"
+          />
+
+          {error && (
+            <p role="alert" className="text-caption text-rust">
+              {error}
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            取消
+          </Button>
+          <Button disabled={pending} onClick={submit}>
+            {pending ? '保存中…' : '保存'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

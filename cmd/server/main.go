@@ -256,7 +256,7 @@ func run() error {
 
 	// 系统配置 → 模型提供商: admin-managed catalog (Provider + its Models),
 	// distinct from modelCenter's per-user connected credentials above.
-	modelCatalog := modelcatalog.NewService(postgres.NewModelCatalogRepository(queries), adminDirectory)
+	modelCatalog := modelcatalog.NewService(postgres.NewModelCatalogRepository(queries), adminDirectory, adaptercrypto.NewCipher(aesKey))
 
 	// 系统配置 → 用户管理 / 角色权限: roles/permissions engine. adminDirectory
 	// doubles as its AdminDirectory too — role/permission administration

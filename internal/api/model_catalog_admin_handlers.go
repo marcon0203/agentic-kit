@@ -25,19 +25,21 @@ func NewModelCatalogAdminHandlers(svc *modelcatalog.Service) *ModelCatalogAdminH
 }
 
 type catalogProviderDTO struct {
-	ID          string    `json:"id"`
-	Key         string    `json:"key"`
-	DisplayName string    `json:"display_name"`
-	Icon        string    `json:"icon,omitempty"`
-	BaseURL     string    `json:"base_url,omitempty"`
-	Status      int16     `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	Key           string    `json:"key"`
+	DisplayName   string    `json:"display_name"`
+	Icon          string    `json:"icon,omitempty"`
+	BaseURL       string    `json:"base_url,omitempty"`
+	Status        int16     `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	HasCredential bool      `json:"has_credential"`
 }
 
 func toCatalogProviderDTO(p modelcatalog.Provider) catalogProviderDTO {
 	return catalogProviderDTO{
 		ID: strconv.FormatInt(p.ID, 10), Key: p.Key, DisplayName: p.DisplayName,
 		Icon: p.Icon, BaseURL: p.BaseURL, Status: p.Status, CreatedAt: p.CreatedAt,
+		HasCredential: p.HasCredential,
 	}
 }
 
@@ -160,6 +162,37 @@ func (h *ModelCatalogAdminHandlers) DeleteProvider(w http.ResponseWriter, r *htt
 		return
 	}
 	if err := h.svc.DeleteProvider(r.Context(), userID, id); err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, nil)
+}
+
+type setCatalogProviderCredentialRequest struct {
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url"`
+}
+
+// SetProviderCredential handles PUT /model-catalog/providers/{id}/credential
+// — the admin-managed org-wide default api_key + base_url, layered
+// alongside (never replacing) each user's own /models connection.
+// APIKey empty leaves the currently stored key untouched, so re-saving
+// base_url alone doesn't force the admin to re-paste an already-set key.
+func (h *ModelCatalogAdminHandlers) SetProviderCredential(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	id, ok := parseIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var req setCatalogProviderCredentialRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
+		return
+	}
+	if err := h.svc.SetProviderCredential(r.Context(), userID, id, req.APIKey, req.BaseURL); err != nil {
 		writeDomainErr(w, r, err)
 		return
 	}

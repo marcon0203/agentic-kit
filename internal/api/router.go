@@ -168,6 +168,7 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Post("/model-catalog/providers", cfg.ModelCatalogAdmin.CreateProvider)
 				r.Patch("/model-catalog/providers/{id}", cfg.ModelCatalogAdmin.UpdateProviderStatus)
 				r.Delete("/model-catalog/providers/{id}", cfg.ModelCatalogAdmin.DeleteProvider)
+				r.Put("/model-catalog/providers/{id}/credential", cfg.ModelCatalogAdmin.SetProviderCredential)
 				r.Get("/model-catalog/providers/{id}/models", cfg.ModelCatalogAdmin.ListModels)
 				r.Post("/model-catalog/providers/{id}/models", cfg.ModelCatalogAdmin.CreateModel)
 				r.Patch("/model-catalog/providers/{id}/models/{model_id}", cfg.ModelCatalogAdmin.UpdateModelStatus)
