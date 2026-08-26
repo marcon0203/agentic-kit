@@ -915,6 +915,35 @@ export interface paths {
         patch: operations["updatePluginInstallation"];
         trace?: never;
     };
+    "/plugins/assets/{id}/{ver}/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description plugin_id */
+                id: string;
+                ver: string;
+                /** @description 包内相对路径（renderers[].entry 或其引用的 JS/CSS，如 ui/chart.html） */
+                path: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * 插件前端内容下发（独立资源域，供 renderer iframe 加载）
+         * @description 故意不认证（spec-20 §4.2）：iframe 的 `src` 直接指向这个地址，不会带
+         *     Authorization 头，和任何静态资源 CDN 的访问方式一样。{id}/{ver} 先在
+         *     plugins 表里查实存在，再据此拿到真实的 OSS 前缀去取文件——调用方传的
+         *     path 本身不能直接决定读哪个 OSS key。
+         */
+        get: operations["getPluginAsset"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model-catalog": {
         parameters: {
             query?: never;
@@ -1389,7 +1418,9 @@ export interface components {
         /**
          * @description 事件流中的单条事件。前端 Chat 界面据此驱动：
          *     `node.thinking` → 打字机效果；`node.tool_call.*` → 气泡内工具调用状态条；
-         *     `human_gate.waiting` → 内联审批卡片。
+         *     `human_gate.waiting` → 内联审批卡片；`node.render`（spec-20 §4.2）→
+         *     插件渲染 iframe 卡片，payload 带 `plugin`/`version`/`renderer`/
+         *     `resource_uri`/`entry`/`data`。
          */
         RunEvent: {
             /**
@@ -1398,7 +1429,7 @@ export interface components {
              */
             id: number;
             /** @enum {string} */
-            type: "bundle.started" | "bundle.finished" | "bundle.failed" | "node.queued" | "node.started" | "node.thinking" | "node.tool_call.started" | "node.tool_call.finished" | "node.finished" | "node.failed" | "human_gate.waiting" | "human_gate.resolved" | "shared_state.updated" | "stream.error";
+            type: "bundle.started" | "bundle.finished" | "bundle.failed" | "node.queued" | "node.started" | "node.thinking" | "node.tool_call.started" | "node.tool_call.finished" | "node.finished" | "node.failed" | "node.render" | "human_gate.waiting" | "human_gate.resolved" | "shared_state.updated" | "stream.error";
             run_id: string;
             /** @description 事件关联的节点（bundle 级事件为空） */
             node?: string;
@@ -3563,6 +3594,48 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             /** @description 尚未安装该插件（100005） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    getPluginAsset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description plugin_id */
+                id: string;
+                ver: string;
+                /** @description 包内相对路径（renderers[].entry 或其引用的 JS/CSS，如 ui/chart.html） */
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 文件内容（Content-Type 按扩展名猜测） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description path 不合法（包含 ..） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description 插件版本或文件不存在 */
             404: {
                 headers: {
                     [name: string]: unknown;

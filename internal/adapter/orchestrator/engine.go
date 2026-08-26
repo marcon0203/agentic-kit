@@ -361,8 +361,8 @@ func (x *execution) emitRenderIfMatched(ctx context.Context, ev adk.Event) {
 		_ = x.engine.events.Append(ctx, run.Event{
 			RunID: x.runID, Type: adk.EventNodeRender, Node: ev.Node,
 			Payload: map[string]any{
-				"plugin": reg.PluginID, "renderer": reg.RendererName,
-				"resource_uri": reg.ResourceURI(), "data": ev.Payload["result"],
+				"plugin": reg.PluginID, "version": reg.Version, "renderer": reg.RendererName,
+				"resource_uri": reg.ResourceURI(), "entry": reg.Entry, "data": ev.Payload["result"],
 			},
 		})
 	case adk.EventNodeFinished:
@@ -377,8 +377,8 @@ func (x *execution) emitRenderIfMatched(ctx context.Context, ev adk.Event) {
 		_ = x.engine.events.Append(ctx, run.Event{
 			RunID: x.runID, Type: adk.EventNodeRender, Node: ev.Node,
 			Payload: map[string]any{
-				"plugin": reg.PluginID, "renderer": reg.RendererName,
-				"resource_uri": reg.ResourceURI(), "data": map[string]any{"lang": lang, "content": content},
+				"plugin": reg.PluginID, "version": reg.Version, "renderer": reg.RendererName,
+				"resource_uri": reg.ResourceURI(), "entry": reg.Entry, "data": map[string]any{"lang": lang, "content": content},
 			},
 		})
 	}

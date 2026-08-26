@@ -70,6 +70,36 @@ describe('buildTimeline', () => {
     expect(entries.map((e) => e.kind)).toEqual(['bubble-group', 'gate', 'bubble-group'])
   })
 
+  it('inserts a render entry when a node.render event carries the full payload', () => {
+    const { entries } = buildTimeline([
+      ev(1, 'node.thinking', 'analyst', { text: 'thinking' }),
+      ev(2, 'node.render', 'analyst', {
+        plugin: 'acme.charts',
+        version: '1.0.0',
+        renderer: 'chart',
+        resource_uri: 'ui://acme.charts/chart',
+        entry: 'ui/chart.html',
+        data: { lang: 'chart', content: '{}' },
+      }),
+    ])
+    expect(entries.at(-1)).toMatchObject({
+      kind: 'render',
+      node: 'analyst',
+      plugin: 'acme.charts',
+      version: '1.0.0',
+      renderer: 'chart',
+      resourceUri: 'ui://acme.charts/chart',
+      entry: 'ui/chart.html',
+    })
+  })
+
+  it('drops a node.render event missing a required payload field', () => {
+    const { entries } = buildTimeline([
+      ev(1, 'node.render', 'analyst', { plugin: 'acme.charts', renderer: 'chart' }),
+    ])
+    expect(entries.some((e) => e.kind === 'render')).toBe(false)
+  })
+
   it('surfaces bundle.failed as a terminal system entry with the sanitized error text', () => {
     const { entries, runStatus, runError } = buildTimeline([
       ev(1, 'bundle.started'),

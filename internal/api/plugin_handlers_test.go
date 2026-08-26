@@ -78,3 +78,19 @@ func TestExtractAKP_NotAZip_ReturnsError(t *testing.T) {
 		t.Fatal("expected an error for a non-zip payload")
 	}
 }
+
+func TestValidAssetPath(t *testing.T) {
+	valid := []string{"ui/chart.html", "index.html", "assets/icon.png", "a/b/c.js"}
+	for _, p := range valid {
+		if !validAssetPath(p) {
+			t.Errorf("expected %q to be valid", p)
+		}
+	}
+
+	invalid := []string{"", "/etc/passwd", "../secrets", "ui/../../../etc/passwd", ".."}
+	for _, p := range invalid {
+		if validAssetPath(p) {
+			t.Errorf("expected %q to be rejected", p)
+		}
+	}
+}

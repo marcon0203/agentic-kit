@@ -94,6 +94,16 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/register", authHandlers.Register)
 		r.Post("/auth/login", authHandlers.Login)
+		if cfg.Plugins != nil {
+			// Unauthenticated by design (spec-20 §5.2/§4.2): a plugin
+			// renderer's iframe loads this src directly, with no
+			// Authorization header to send — same reasoning as any static
+			// asset CDN. It's also why this deliberately isn't inside the
+			// auth Group below. Serving is still scoped to a real
+			// (plugin_id, version) the handler looks up itself, never to
+			// an arbitrary OSS key the caller names.
+			r.Get("/plugins/assets/{id}/{ver}/*", cfg.Plugins.GetAsset)
+		}
 
 		r.Group(func(r chi.Router) {
 			r.Use(AuthMiddleware(cfg.Tokens, cfg.APIKeys))

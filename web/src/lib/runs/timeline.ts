@@ -21,6 +21,21 @@ export type TimelineEntry =
   | { kind: 'bubble-group'; key: string; nodes: string[] }
   | { kind: 'gate'; key: string; node: string; gateId: number | null; status: 'pending' | 'approved' | 'rejected' | 'timeout' }
   | { kind: 'system'; key: string; text: string; tone: 'info' | 'error' | 'success' }
+  /** spec-20 §4.2's node.render event — a plugin renderer took over this
+   * node's output (or an explicit tool call handed it a result to render).
+   * resourceUri is what the iframe card fetches its content from, via the
+   * independent /plugins/assets/{plugin}/{version}/* asset domain. */
+  | {
+      kind: 'render'
+      key: string
+      node: string
+      plugin: string
+      version: string
+      renderer: string
+      resourceUri: string
+      entry: string
+      data: unknown
+    }
 
 export interface RunTimeline {
   entries: TimelineEntry[]
@@ -151,6 +166,28 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
         b.status = 'failed'
         b.isBusy = false
         b.errorText = typeof payload.error === 'string' ? payload.error : '节点执行失败'
+        break
+      }
+
+      case 'node.render': {
+        const plugin = typeof payload.plugin === 'string' ? payload.plugin : ''
+        const version = typeof payload.version === 'string' ? payload.version : ''
+        const renderer = typeof payload.renderer === 'string' ? payload.renderer : ''
+        const resourceUri = typeof payload.resource_uri === 'string' ? payload.resource_uri : ''
+        const entry = typeof payload.entry === 'string' ? payload.entry : ''
+        if (plugin && version && renderer && resourceUri && entry) {
+          entries.push({
+            kind: 'render',
+            key: `render-${ev.id}`,
+            node,
+            plugin,
+            version,
+            renderer,
+            resourceUri,
+            entry,
+            data: payload.data,
+          })
+        }
         break
       }
 

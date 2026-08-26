@@ -295,7 +295,7 @@ func run() error {
 		Usage:             api.NewUsageHandlers(modelCenter),
 		Runs:              api.NewRunHandlers(runService),
 		RBAC:              api.NewRBACHandlers(rbacService),
-		Plugins:           api.NewPluginHandlers(pluginService),
+		Plugins:           api.NewPluginHandlers(pluginService, skillObjectStore),
 		Features:          api.FeaturesConfig{KnowledgeBaseEnabled: cfg.KBEnabled, SkillUploadEnabled: cfg.OSSEnabled()},
 		Operations: api.NewOperationHandlers(operation.NewService(
 			postgres.NewReportRepository(queries),

@@ -3,10 +3,13 @@ package api
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -22,10 +25,25 @@ import (
 // (visibility=public review flow) are P5's job, not wired to a route here
 // yet even though the domain service already supports them.
 type PluginHandlers struct {
-	svc *plugin.Service
+	svc    *plugin.Service
+	assets assetGetter
 }
 
-func NewPluginHandlers(svc *plugin.Service) *PluginHandlers { return &PluginHandlers{svc: svc} }
+// assetGetter is the one OSS method GetAsset needs — satisfied by the same
+// object store the Skill upload feature already wires
+// (internal/adapter/oss.Store), passed in separately from svc because
+// serving a static file is a pure passthrough, not a plugin.Service
+// concern.
+type assetGetter interface {
+	Get(ctx context.Context, key string) (io.ReadCloser, error)
+}
+
+// NewPluginHandlers wires the CRUD/install surface. assets may be nil —
+// GetAsset then rejects with a clear "not configured" error instead of a
+// nil-pointer panic, same convention as every other OSS-optional feature.
+func NewPluginHandlers(svc *plugin.Service, assets assetGetter) *PluginHandlers {
+	return &PluginHandlers{svc: svc, assets: assets}
+}
 
 // maxPluginZipUploadBytes bounds the raw multipart body before it's ever
 // handed to archive/zip — a hard ceiling on the wire, ahead of
@@ -332,4 +350,53 @@ func (h *PluginHandlers) Uninstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// GetAsset handles GET /plugins/assets/{id}/{ver}/* — spec-20 §5.2's
+// "独立资源域" content delivery for a renderer's iframe (§4.2): the entry
+// HTML plus whatever JS/CSS it references relative to itself, all fetched
+// through this same endpoint. Deliberately unauthenticated (see router.go)
+// and deliberately not scoped to the caller's own installations — once a
+// version exists at all, its files are addressable the same way any static
+// asset CDN's are; {id}/{ver} is resolved against the real plugins table
+// first, so the OSS key actually read is never the untrusted wildcard path
+// alone.
+func (h *PluginHandlers) GetAsset(w http.ResponseWriter, r *http.Request) {
+	if h.assets == nil {
+		writeErr(w, r, http.StatusServiceUnavailable, ErrValidationFailed, "plugin asset storage is not configured on this deployment (OSS)")
+		return
+	}
+
+	pluginID, version := chi.URLParam(r, "id"), chi.URLParam(r, "ver")
+	path := chi.URLParam(r, "*")
+	if !validAssetPath(path) {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid asset path")
+		return
+	}
+
+	p, err := h.svc.GetVersion(r.Context(), pluginID, version)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+
+	content, err := h.assets.Get(r.Context(), p.OSSPrefix+"/"+path)
+	if err != nil {
+		writeErr(w, r, http.StatusNotFound, ErrResourceNotFound, "asset not found")
+		return
+	}
+	defer func() { _ = content.Close() }()
+
+	if ct := mime.TypeByExtension(filepath.Ext(path)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(w, content)
+}
+
+// validAssetPath rejects the shapes that would let a wildcard path escape
+// the plugin's own OSS prefix (zip-slip's request-path equivalent) — same
+// checks extractSkillZip/extractAKP already apply to a zip entry's name.
+func validAssetPath(path string) bool {
+	return path != "" && !strings.HasPrefix(path, "/") && !strings.Contains(path, "..")
 }

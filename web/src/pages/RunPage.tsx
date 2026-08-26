@@ -14,6 +14,7 @@ import { RunHeader } from '@/components/run/RunHeader'
 import { RunSidebar } from '@/components/run/RunSidebar'
 import { UserBubble, AgentBubble } from '@/components/run/ChatBubble'
 import { GateCard } from '@/components/run/GateCard'
+import { PluginRenderCard } from '@/components/run/PluginRenderCard'
 import type { PlatformStatus } from '@/components/run/StatusChip'
 
 export function RunPage() {
@@ -160,6 +161,9 @@ export function RunPage() {
               }
               if (entry.kind === 'gate') {
                 return <GateCard key={entry.key} gate={entry} canApprove={canApprove} onResolve={resolveGate} />
+              }
+              if (entry.kind === 'render') {
+                return <PluginRenderCard key={entry.key} entry={entry} />
               }
               return (
                 <div
