@@ -45,6 +45,11 @@ type Options struct {
 	// Extism's manifest only carries string values; anything richer stays
 	// out of the sandbox's reach entirely, by construction.
 	Config map[string]string
+	// PluginID/OwnerID scope the kv.get/set host function's namespace
+	// (spec-20 §4.3) — carried on the call's context, never trusted from
+	// the plugin's own request payload (see host_functions.go).
+	PluginID string
+	OwnerID  int64
 }
 
 // normalize applies the hard ceilings: a zero value gets the default, and
@@ -67,12 +72,20 @@ func (o Options) normalize() Options {
 // every call and every run — only instantiation, which is cheap, happens
 // per call.
 type Runtime struct {
-	mu    sync.Mutex
-	cache map[string]*extism.CompiledPlugin
+	mu       sync.Mutex
+	cache    map[string]*extism.CompiledPlugin
+	services HostServices
 }
 
-func NewRuntime() *Runtime {
-	return &Runtime{cache: map[string]*extism.CompiledPlugin{}}
+// NewRuntime wires services (spec-20 §4.3's sql/kv host functions) into
+// every plugin this Runtime ever compiles. services may be nil — a
+// deployment with no connector backend configured still runs plain
+// tools[] plugins; a plugin that does call sql.query/execute/schema or
+// kv.get/set just gets a clear "not configured" error back instead of
+// those functions being unavailable at the wasm-import level (which would
+// fail every plugin, not just ones that use them).
+func NewRuntime(services HostServices) *Runtime {
+	return &Runtime{cache: map[string]*extism.CompiledPlugin{}, services: services}
 }
 
 // compile returns the cached CompiledPlugin for wasmKey, compiling it on
@@ -95,7 +108,7 @@ func (r *Runtime) compile(ctx context.Context, wasmKey string, wasmBytes []byte,
 		Memory:       &extism.ManifestMemory{MaxPages: opts.MaxMemoryPages},
 		Config:       opts.Config,
 	}
-	cp, err := extism.NewCompiledPlugin(ctx, manifest, extism.PluginConfig{EnableWasi: true}, nil)
+	cp, err := extism.NewCompiledPlugin(ctx, manifest, extism.PluginConfig{EnableWasi: true}, hostFunctions(r.services))
 	if err != nil {
 		return nil, fmt.Errorf("extism: compile plugin %q: %w", wasmKey, err)
 	}
@@ -112,6 +125,7 @@ func (r *Runtime) Call(ctx context.Context, wasmKey string, wasmBytes []byte, op
 	if err != nil {
 		return nil, err
 	}
+	ctx = withCallerIdentity(ctx, opts.PluginID, opts.OwnerID)
 
 	instance, err := cp.Instance(ctx, extism.PluginInstanceConfig{})
 	if err != nil {

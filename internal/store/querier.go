@@ -144,6 +144,7 @@ type Querier interface {
 	GetPendingHumanGateForRunNode(ctx context.Context, arg GetPendingHumanGateForRunNodeParams) (HumanGate, error)
 	GetPermissionIDsByKeys(ctx context.Context, keys []string) ([]int64, error)
 	GetPluginInstallation(ctx context.Context, arg GetPluginInstallationParams) (PluginInstallation, error)
+	GetPluginKV(ctx context.Context, arg GetPluginKVParams) (PluginKv, error)
 	GetPluginVersion(ctx context.Context, arg GetPluginVersionParams) (Plugin, error)
 	GetPublisherKey(ctx context.Context, userID int64) (PluginPublisherKey, error)
 	GetReportByID(ctx context.Context, id int64) (Report, error)
@@ -283,6 +284,7 @@ type Querier interface {
 	UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill, error)
 	UpdateSubscriptionListing(ctx context.Context, arg UpdateSubscriptionListingParams) (Subscription, error)
 	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)
+	UpsertPluginKV(ctx context.Context, arg UpsertPluginKVParams) (PluginKv, error)
 	UpsertPublisherKey(ctx context.Context, arg UpsertPublisherKeyParams) (PluginPublisherKey, error)
 	UserHasPermission(ctx context.Context, arg UserHasPermissionParams) (bool, error)
 }

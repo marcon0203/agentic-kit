@@ -231,6 +231,14 @@ type PluginInstallation struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type PluginKv struct {
+	PluginID    string             `json:"plugin_id"`
+	OwnerUserID int64              `json:"owner_user_id"`
+	Key         string             `json:"key"`
+	Value       string             `json:"value"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PluginPublisherKey struct {
 	UserID    int64              `json:"user_id"`
 	PublicKey []byte             `json:"public_key"`

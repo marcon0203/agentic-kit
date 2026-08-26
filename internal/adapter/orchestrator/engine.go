@@ -33,6 +33,7 @@ type Engine struct {
 	skills     adk.SkillContentFetcher
 	plugins    adk.PluginRuntime
 	pluginWasm *pluginWasmFetcher
+	connectors *connectorRegistry
 
 	cancelMu sync.Mutex
 	cancels  map[string]context.CancelFunc
@@ -57,6 +58,7 @@ func NewEngine(
 	queries store.Querier, runs run.Repository, events run.EventStore,
 	gates run.GateRepository, registry *GateRegistry, keys providerKeys, aesKey []byte,
 	kbService *knowledgebase.Service, skillObjectStore resource.ObjectStore, pluginRuntime adk.PluginRuntime,
+	connectors *connectorRegistry,
 ) *Engine {
 	return &Engine{
 		queries: queries, runs: runs, events: events, gates: gates, registry: registry,
@@ -69,6 +71,7 @@ func NewEngine(
 		// verbatim), so the wasm fetcher shares skillObjectStore rather
 		// than main.go wiring a second, functionally identical store.
 		pluginWasm: newPluginWasmFetcher(skillObjectStore),
+		connectors: connectors,
 	}
 }
 
@@ -99,7 +102,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 		return nil, fmt.Errorf("load provider keys: %w", err)
 	}
 	gateway := modelgateway.NewGateway(nil)
-	authorizer := newResourceAuthorizer(ctx, e.queries, b.OwnerUserID, e.aesKey, e.pluginWasm)
+	authorizer := newResourceAuthorizer(ctx, e.queries, b.OwnerUserID, e.aesKey, e.pluginWasm, e.connectors)
 
 	agentsRaw, _ := b.Definition["agents"].([]any)
 	compiled := make(map[string]adk.CompiledAgent, len(agentsRaw))
@@ -172,7 +175,7 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 	if err != nil {
 		return nil, err
 	}
-	return &execution{engine: e, runID: runID, root: root, ownerID: b.OwnerUserID, renderRules: renderRules}, nil
+	return &execution{engine: e, runID: runID, root: root, ownerID: b.OwnerUserID, renderRules: renderRules, authorizer: authorizer}, nil
 }
 
 func firstOrEmpty(nodes []string) string {
@@ -254,6 +257,10 @@ type execution struct {
 	// (spec-20 §4.2) — Start's emit callback consults it after each node
 	// event to decide whether a node.render event should follow.
 	renderRules map[string][]adk.RendererRegistration
+	// authorizer is the same instance Prepare used to compile every node —
+	// kept so Start can release whatever connector connections it bound
+	// once this run ends (spec-20 §4.5's "谁创建谁回收").
+	authorizer *resourceAuthorizer
 }
 
 // Start drives the run to completion, persisting each translated event and
@@ -275,6 +282,7 @@ func (x *execution) Start(triggeredBy int64, input map[string]any, limits run.Li
 	e.registerCancel(x.runID, cancel)
 	defer e.unregisterCancel(x.runID)
 	defer cancel()
+	defer x.authorizer.ReleaseBound()
 
 	persist := context.Background()
 

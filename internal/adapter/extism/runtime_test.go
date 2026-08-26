@@ -25,7 +25,7 @@ func loadWasm(t *testing.T, name string) []byte {
 }
 
 func TestRuntime_CallReturnsOutput(t *testing.T) {
-	rt := extism.NewRuntime()
+	rt := extism.NewRuntime(nil)
 	defer func() { _ = rt.Close(context.Background()) }()
 
 	out, err := rt.Call(context.Background(), "hello@1.0.0", loadWasm(t, "hello.wasm"), extism.Options{}, "run_test", nil)
@@ -38,7 +38,7 @@ func TestRuntime_CallReturnsOutput(t *testing.T) {
 }
 
 func TestRuntime_CallCachesCompiledModule(t *testing.T) {
-	rt := extism.NewRuntime()
+	rt := extism.NewRuntime(nil)
 	defer func() { _ = rt.Close(context.Background()) }()
 
 	wasm := loadWasm(t, "hello.wasm")
@@ -54,7 +54,7 @@ func TestRuntime_CallCachesCompiledModule(t *testing.T) {
 }
 
 func TestRuntime_CallPropagatesPluginFailure(t *testing.T) {
-	rt := extism.NewRuntime()
+	rt := extism.NewRuntime(nil)
 	defer func() { _ = rt.Close(context.Background()) }()
 
 	_, err := rt.Call(context.Background(), "fail@1.0.0", loadWasm(t, "fail.wasm"), extism.Options{}, "run_test", nil)
@@ -64,7 +64,7 @@ func TestRuntime_CallPropagatesPluginFailure(t *testing.T) {
 }
 
 func TestRuntime_CallUnknownFunctionErrors(t *testing.T) {
-	rt := extism.NewRuntime()
+	rt := extism.NewRuntime(nil)
 	defer func() { _ = rt.Close(context.Background()) }()
 
 	_, err := rt.Call(context.Background(), "hello@1.0.0", loadWasm(t, "hello.wasm"), extism.Options{}, "does_not_exist", nil)
@@ -78,7 +78,7 @@ func TestRuntime_CallUnknownFunctionErrors(t *testing.T) {
 var _ plugin.WasmValidator = (*extism.Runtime)(nil)
 
 func TestRuntime_ValidateEntriesAcceptsExistingFunction(t *testing.T) {
-	rt := extism.NewRuntime()
+	rt := extism.NewRuntime(nil)
 	defer func() { _ = rt.Close(context.Background()) }()
 
 	err := rt.ValidateEntries(context.Background(), "hello@1.0.0", loadWasm(t, "hello.wasm"), []string{"run_test"})
@@ -88,7 +88,7 @@ func TestRuntime_ValidateEntriesAcceptsExistingFunction(t *testing.T) {
 }
 
 func TestRuntime_ValidateEntriesRejectsMissingFunction(t *testing.T) {
-	rt := extism.NewRuntime()
+	rt := extism.NewRuntime(nil)
 	defer func() { _ = rt.Close(context.Background()) }()
 
 	err := rt.ValidateEntries(context.Background(), "hello@1.0.0", loadWasm(t, "hello.wasm"), []string{"does_not_exist"})
@@ -98,7 +98,7 @@ func TestRuntime_ValidateEntriesRejectsMissingFunction(t *testing.T) {
 }
 
 func TestRuntime_ValidateEntriesPrimesCompileCacheForCall(t *testing.T) {
-	rt := extism.NewRuntime()
+	rt := extism.NewRuntime(nil)
 	defer func() { _ = rt.Close(context.Background()) }()
 
 	wasm := loadWasm(t, "hello.wasm")
@@ -118,7 +118,7 @@ func TestRuntime_ValidateEntriesPrimesCompileCacheForCall(t *testing.T) {
 }
 
 func TestRuntime_CompileInvalidWasmErrors(t *testing.T) {
-	rt := extism.NewRuntime()
+	rt := extism.NewRuntime(nil)
 	defer func() { _ = rt.Close(context.Background()) }()
 
 	_, err := rt.Call(context.Background(), "garbage@1.0.0", []byte("not a wasm module"), extism.Options{}, "run_test", nil)

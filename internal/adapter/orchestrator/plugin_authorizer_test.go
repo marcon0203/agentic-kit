@@ -91,6 +91,46 @@ func TestFindRendererEntry(t *testing.T) {
 	}
 }
 
+func TestBindConnector_NoConnectorsConfigured(t *testing.T) {
+	a := &resourceAuthorizer{connectors: nil}
+	connRef, ok, err := a.bindConnector([]byte(`{"connector_resource_id":1}`))
+	if err != nil || ok || connRef != "" {
+		t.Fatalf("expected a silent no-op with no connectors backend, got (%q, %v, %v)", connRef, ok, err)
+	}
+}
+
+func TestBindConnector_NoConnectorResourceIDInConfig(t *testing.T) {
+	a := &resourceAuthorizer{connectors: NewConnectorRegistry(nil)}
+	connRef, ok, err := a.bindConnector([]byte(`{}`))
+	if err != nil || ok || connRef != "" {
+		t.Fatalf("expected a silent no-op when the installation doesn't reference a connector, got (%q, %v, %v)", connRef, ok, err)
+	}
+}
+
+func TestBindConnector_EmptyConfigIsNoop(t *testing.T) {
+	a := &resourceAuthorizer{connectors: NewConnectorRegistry(nil)}
+	connRef, ok, err := a.bindConnector(nil)
+	if err != nil || ok || connRef != "" {
+		t.Fatalf("expected a silent no-op for an empty installation config, got (%q, %v, %v)", connRef, ok, err)
+	}
+}
+
+func TestStringFieldAndBoolField(t *testing.T) {
+	m := map[string]any{"dialect": "postgres", "allow_write": true, "port": float64(5432)}
+	if got := stringField(m, "dialect"); got != "postgres" {
+		t.Errorf("stringField = %q, want \"postgres\"", got)
+	}
+	if got := stringField(m, "missing"); got != "" {
+		t.Errorf("stringField for missing key = %q, want \"\"", got)
+	}
+	if got := boolField(m, "allow_write"); !got {
+		t.Error("boolField = false, want true")
+	}
+	if got := boolField(m, "missing"); got {
+		t.Error("boolField for missing key = true, want false")
+	}
+}
+
 func TestRequiresNetwork(t *testing.T) {
 	manifest := map[string]any{"requires": map[string]any{"network": []any{"api.acme.example", "cdn.acme.example"}}}
 	got := requiresNetwork(manifest)

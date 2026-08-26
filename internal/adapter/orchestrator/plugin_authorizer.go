@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
+	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	"github.com/marcon0203/agentic-kit/internal/orchestrator/adk"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
@@ -82,6 +83,12 @@ func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpe
 			config[adk.PluginConfigKeyUIEntry] = uiEntry
 		}
 
+		if connRef, ok, err := a.bindConnector(inst.Config); err != nil {
+			return adk.ToolSpec{}, false, err
+		} else if ok {
+			config[adk.PluginConfigKeyPluginConfig] = map[string]string{"connection_ref": connRef}
+		}
+
 		return adk.ToolSpec{
 			Ref: "plugin:" + pluginID + "/" + name, Kind: adk.KindPlugin,
 			Config: config, OwnerID: a.ownerID,
@@ -107,6 +114,72 @@ func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpe
 	}
 
 	return adk.ToolSpec{}, false, nil
+}
+
+// bindConnector reads an installation's optional connector_resource_id
+// (set via the existing PATCH /plugins/{id}/install config, spec-20 §4.3),
+// resolves it against the caller's own tools resource, decrypts it, and
+// binds a real connection — returning the opaque connection_ref a plugin's
+// sql.* host function calls will use. ok=false when the installation
+// simply doesn't use a connector, which is the common case and not an
+// error. The bound ref is tracked so ReleaseBound can close it once the
+// run that authorized it is done (spec-20 §4.5's "谁创建谁回收").
+func (a *resourceAuthorizer) bindConnector(rawInstConfig []byte) (connRef string, ok bool, err error) {
+	if a.connectors == nil || len(rawInstConfig) == 0 {
+		return "", false, nil
+	}
+	var instConfig struct {
+		ConnectorResourceID int64 `json:"connector_resource_id"`
+	}
+	if err := json.Unmarshal(rawInstConfig, &instConfig); err != nil || instConfig.ConnectorResourceID == 0 {
+		return "", false, nil
+	}
+
+	row, err := a.q.GetToolByIDForOwner(a.ctx, store.GetToolByIDForOwnerParams{ID: instConfig.ConnectorResourceID, OwnerUserID: a.ownerID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if row.Status != int16(resource.StatusEnabled) {
+		return "", false, nil
+	}
+
+	decrypted, err := a.decryptConfig(row.Config)
+	if err != nil {
+		return "", false, err
+	}
+	cfg := ConnectorConfig{
+		Dialect:    stringField(decrypted, "dialect"),
+		Host:       stringField(decrypted, "host"),
+		Database:   stringField(decrypted, "database"),
+		Username:   stringField(decrypted, "username"),
+		Password:   stringField(decrypted, "password"),
+		AllowWrite: boolField(decrypted, "allow_write"),
+	}
+	if port, ok := decrypted["port"].(float64); ok {
+		cfg.Port = int(port)
+	}
+
+	connRef, err = a.connectors.Bind(a.ctx, cfg)
+	if err != nil {
+		return "", false, err
+	}
+	a.boundMu.Lock()
+	a.boundRefs = append(a.boundRefs, connRef)
+	a.boundMu.Unlock()
+	return connRef, true, nil
+}
+
+func stringField(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
+}
+
+func boolField(m map[string]any, key string) bool {
+	b, _ := m[key].(bool)
+	return b
 }
 
 // findToolUIEntry reads a tools[] entry's optional `ui` field.

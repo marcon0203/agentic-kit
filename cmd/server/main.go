@@ -162,7 +162,12 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("compile plugin schema: %w", err)
 	}
-	pluginRuntime := extism.NewRuntime()
+	// connectorRegistry backs every compiled plugin's sql.*/kv.* host
+	// functions (spec-20 §4.3) — wired into extism.NewRuntime before any
+	// plugin compiles, since Extism host functions are fixed at compile
+	// time, not per-call.
+	connectorRegistry := orchestrator.NewConnectorRegistry(postgres.NewPluginKVStore(queries))
+	pluginRuntime := extism.NewRuntime(connectorRegistry)
 	pluginService := plugin.NewService(
 		postgres.NewPluginRepository(queries),
 		postgres.NewPluginPublisherKeys(queries),
@@ -221,7 +226,7 @@ func run() error {
 		runEvents,
 		postgres.NewRunBundleResolver(queries),
 		postgres.NewRunDependencyChecker(queries, resourceCatalog, providerKeys),
-		orchestrator.NewEngine(queries, runRepo, runEvents, gateRepo, gateRegistry, providerKeys, aesKey, knowledgeBaseService, skillObjectStore, extism.ForADK(pluginRuntime)),
+		orchestrator.NewEngine(queries, runRepo, runEvents, gateRepo, gateRegistry, providerKeys, aesKey, knowledgeBaseService, skillObjectStore, extism.ForADK(pluginRuntime), connectorRegistry),
 		gateRepo,
 		gateRegistry,
 		postgres.NewAuditLogWriter(queries),

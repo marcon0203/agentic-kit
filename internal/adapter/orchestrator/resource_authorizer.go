@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 
@@ -27,10 +28,36 @@ type resourceAuthorizer struct {
 	ownerID    int64
 	aesKey     []byte
 	pluginWasm *pluginWasmFetcher
+	connectors *connectorRegistry
+
+	boundMu   sync.Mutex
+	boundRefs []string
 }
 
-func newResourceAuthorizer(ctx context.Context, q store.Querier, ownerID int64, aesKey []byte, pluginWasm *pluginWasmFetcher) adk.ResourceAuthorizer {
-	return &resourceAuthorizer{ctx: ctx, q: q, ownerID: ownerID, aesKey: aesKey, pluginWasm: pluginWasm}
+// newResourceAuthorizer returns the concrete type (not just
+// adk.ResourceAuthorizer) so callers that need to release what this
+// authorizer bound during one run (spec-20 §4.5's "谁创建谁回收" for
+// connector connections) can call ReleaseBound after the run ends.
+// connectors may be nil — a deployment with no connector backend
+// configured just never resolves a connector_resource_id.
+func newResourceAuthorizer(ctx context.Context, q store.Querier, ownerID int64, aesKey []byte, pluginWasm *pluginWasmFetcher, connectors *connectorRegistry) *resourceAuthorizer {
+	return &resourceAuthorizer{ctx: ctx, q: q, ownerID: ownerID, aesKey: aesKey, pluginWasm: pluginWasm, connectors: connectors}
+}
+
+// ReleaseBound releases every connector connection this authorizer bound
+// while authorizing refs for one run. Safe to call once, at run end, even
+// if nothing was ever bound.
+func (a *resourceAuthorizer) ReleaseBound() {
+	if a.connectors == nil {
+		return
+	}
+	a.boundMu.Lock()
+	refs := a.boundRefs
+	a.boundRefs = nil
+	a.boundMu.Unlock()
+	for _, ref := range refs {
+		a.connectors.Release(ref)
+	}
 }
 
 // lookup is one kind's "newest row for this ref" query, plus the ADK kind a

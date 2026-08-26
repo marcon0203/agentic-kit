@@ -29,6 +29,14 @@ type PluginRuntimeOptions struct {
 	TimeoutMS      uint64
 	MaxMemoryPages uint32
 	Config         map[string]string
+	// PluginID/OwnerID identify who is making this call — the runtime uses
+	// them to scope the kv.get/set host function's namespace (spec-20
+	// §4.3's "按 (plugin, owner) 隔离"). Deliberately not something a
+	// plugin's own request payload can carry: the runtime derives them
+	// from the call itself, so a plugin cannot simply name a different
+	// namespace to reach another installation's kv data.
+	PluginID string
+	OwnerID  int64
 }
 
 // Plugin ToolSpec.Config keys (spec.Kind == KindPlugin). Populated by
@@ -89,7 +97,8 @@ func BuildPluginTool(spec ToolSpec, runtime PluginRuntime) (tool.Tool, error) {
 	}
 
 	allowedHosts, _ := spec.Config[PluginConfigKeyAllowedHosts].([]string)
-	opts := PluginRuntimeOptions{AllowedHosts: allowedHosts}
+	pluginID, _, _ := strings.Cut(wasmKey, "@")
+	opts := PluginRuntimeOptions{AllowedHosts: allowedHosts, PluginID: pluginID, OwnerID: spec.OwnerID}
 	if ms, ok := spec.Config[PluginConfigKeyTimeoutMS].(uint64); ok {
 		opts.TimeoutMS = ms
 	}
