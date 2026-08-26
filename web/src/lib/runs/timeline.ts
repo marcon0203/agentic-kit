@@ -48,6 +48,63 @@ function payloadOf(ev: RunEvent): Record<string, unknown> {
   return (ev.payload as Record<string, unknown>) ?? {}
 }
 
+const EMPTY_LANG_SET: ReadonlySet<string> = new Set()
+
+/**
+ * Strips fenced code blocks whose language is in hiddenLangs out of raw —
+ * a renderer-eligible block (e.g. ```chart) is about to get its own render
+ * card, so its raw JSON has no business flashing on screen as chat text
+ * first. An ordinary fenced block the model wrote for its own reasons
+ * (```python, say) passes through untouched, markers and all.
+ *
+ * Runs on the *whole* accumulated text on every call rather than parsing
+ * incrementally chunk-by-chunk — chat messages are short enough that
+ * re-scanning from scratch each delta is cheap, and it sidesteps every
+ * edge case a streaming parser would otherwise have to handle around a
+ * fence marker split across two deltas. An unclosed hidden fence (still
+ * streaming) is hidden in its entirety, including the opening marker,
+ * from the moment its "```lang\n" line is complete — there's necessarily
+ * a few characters of the opening ``` itself visible for one delta before
+ * that line completes, which is an acceptable, brief artifact next to the
+ * alternative of flashing the whole JSON payload.
+ */
+export function filterFencedBlocks(raw: string, hiddenLangs: ReadonlySet<string>): string {
+  if (hiddenLangs.size === 0) return raw
+  const fenceOpen = /```([A-Za-z0-9_-]*)\n/g
+  let out = ''
+  let i = 0
+  for (;;) {
+    fenceOpen.lastIndex = i
+    const m = fenceOpen.exec(raw)
+    if (!m) {
+      out += raw.slice(i)
+      break
+    }
+    out += raw.slice(i, m.index)
+    const lang = m[1]
+    const bodyStart = m.index + m[0].length
+    const closeIdx = raw.indexOf('```', bodyStart)
+    if (!hiddenLangs.has(lang)) {
+      // Not a renderer language: pass the whole block through as-is.
+      if (closeIdx === -1) {
+        out += raw.slice(m.index)
+        break
+      }
+      out += raw.slice(m.index, closeIdx + 3)
+      i = closeIdx + 3
+      continue
+    }
+    if (closeIdx === -1) {
+      // Still streaming the hidden block's body — nothing more to show
+      // until either it closes (next call resolves it) or the render
+      // card appears.
+      break
+    }
+    i = closeIdx + 3
+  }
+  return out
+}
+
 /**
  * Reduces the flat event log into chat bubbles + inline gate cards +
  * system status lines, grouping nodes that are running at the same time
@@ -61,6 +118,12 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
   let openGroup: Extract<TimelineEntry, { kind: 'bubble-group' }> | null = null
   let runStatus: RunTimeline['runStatus'] = 'idle'
   let runError: string | undefined
+  // rawTextByNode holds each node's unfiltered accumulated text — bubble.text
+  // is always filterFencedBlocks(raw, ...) of this, recomputed on every
+  // delta rather than incrementally, so a fence marker split across two
+  // deltas is never a special case to handle.
+  const rawTextByNode: Record<string, string> = {}
+  const hiddenLangsByNode: Record<string, ReadonlySet<string>> = {}
 
   function bubbleFor(node: string): NodeBubbleState {
     if (!bubbles[node]) {
@@ -98,6 +161,14 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
     switch (ev.type) {
       case 'bundle.started':
         runStatus = 'running'
+        {
+          const renderers = payload.renderers as Record<string, string[]> | undefined
+          if (renderers) {
+            for (const [n, langs] of Object.entries(renderers)) {
+              hiddenLangsByNode[n] = new Set(langs)
+            }
+          }
+        }
         break
       case 'bundle.finished':
         runStatus = 'finished'
@@ -125,7 +196,8 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
         openOrAttachGroup(node)
         const b = bubbleFor(node)
         const text = typeof payload.text === 'string' ? payload.text : ''
-        b.text += text
+        rawTextByNode[node] = (rawTextByNode[node] ?? '') + text
+        b.text = filterFencedBlocks(rawTextByNode[node], hiddenLangsByNode[node] ?? EMPTY_LANG_SET)
         b.isBusy = true
         break
       }
@@ -154,7 +226,10 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
         openOrAttachGroup(node)
         const b = bubbleFor(node)
         const text = typeof payload.text === 'string' ? payload.text : undefined
-        if (text) b.text = text
+        if (text) {
+          rawTextByNode[node] = text
+          b.text = filterFencedBlocks(text, hiddenLangsByNode[node] ?? EMPTY_LANG_SET)
+        }
         b.status = 'done'
         b.isBusy = false
         break

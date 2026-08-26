@@ -309,7 +309,18 @@ func (x *execution) Start(triggeredBy int64, input map[string]any, limits run.Li
 		msg = []byte("{}")
 	}
 
-	_ = e.events.Append(persist, run.Event{RunID: x.runID, Type: run.EventBundleStarted})
+	// The frontend needs to know, before any text streams in, which fenced
+	// code-block languages on which nodes are auto_render-eligible — without
+	// this it has no way to tell a renderer's own JSON payload (which
+	// should never flash on screen as raw text while it's being typed out)
+	// apart from an ordinary ```python example block the model wrote on
+	// purpose (which should still stream normally). Explicit tools[].ui
+	// registrations (TriggerTool set, FencedLangs empty) aren't fenced-block
+	// matches at all, so they're naturally excluded here.
+	_ = e.events.Append(persist, run.Event{
+		RunID: x.runID, Type: run.EventBundleStarted,
+		Payload: map[string]any{"renderers": rendererFencedLangs(x.renderRules)},
+	})
 
 	var usage run.Usage
 	breached := ""
@@ -349,6 +360,34 @@ func (x *execution) Start(triggeredBy int64, input map[string]any, limits run.Li
 	default:
 		x.finish(persist, run.StatusFinished, "")
 	}
+}
+
+// rendererFencedLangs collects, per node, the deduplicated set of fenced
+// code-block languages an auto_render registration will take over (spec-20
+// §4.2 method B) — the same registrations emitRenderIfMatched matches
+// against, just flattened to what the frontend needs to know ahead of
+// time: which fence languages to hide from the live-streamed text because
+// a render card is coming for them. Registrations with no FencedLangs
+// (explicit tools[].ui ones, method A) contribute nothing here — their
+// output was never streamed as message text to begin with.
+func rendererFencedLangs(renderRules map[string][]adk.RendererRegistration) map[string][]string {
+	out := map[string][]string{}
+	for node, regs := range renderRules {
+		seen := map[string]bool{}
+		var langs []string
+		for _, r := range regs {
+			for _, lang := range r.FencedLangs {
+				if !seen[lang] {
+					seen[lang] = true
+					langs = append(langs, lang)
+				}
+			}
+		}
+		if len(langs) > 0 {
+			out[node] = langs
+		}
+	}
+	return out
 }
 
 // emitRenderIfMatched implements spec-20 §4.2's two render triggers against

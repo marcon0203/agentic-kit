@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { buildTimeline } from '@/lib/runs/timeline'
+import { buildTimeline, filterFencedBlocks } from '@/lib/runs/timeline'
 import type { RunEvent } from '@/lib/runs/useRunEvents'
 
 function ev(id: number, type: RunEvent['type'], node?: string, payload?: unknown): RunEvent {
@@ -108,5 +108,44 @@ describe('buildTimeline', () => {
     expect(runStatus).toBe('failed')
     expect(runError).toBe('所有模型 Provider 均不可用')
     expect(entries.at(-1)).toMatchObject({ kind: 'system', tone: 'error' })
+  })
+
+  it('hides a renderer-eligible fenced block from the live-streamed bubble text, keeping the surrounding prose', () => {
+    const { bubbles } = buildTimeline([
+      ev(1, 'bundle.started', undefined, { renderers: { analyst: ['chart'] } }),
+      ev(2, 'node.thinking', 'analyst', { text: '这是月度销量：\n```chart\n{"labels"' }),
+      ev(3, 'node.thinking', 'analyst', { text: ': ["一月"], "datasets": []}\n```\n供参考。' }),
+    ])
+    expect(bubbles.analyst.text).toBe('这是月度销量：\n\n供参考。')
+  })
+
+  it('leaves an ordinary fenced block (not a registered renderer language) visible as-is', () => {
+    const { bubbles } = buildTimeline([
+      ev(1, 'bundle.started', undefined, { renderers: { analyst: ['chart'] } }),
+      ev(2, 'node.thinking', 'analyst', { text: '```python\nprint(1)\n```' }),
+    ])
+    expect(bubbles.analyst.text).toBe('```python\nprint(1)\n```')
+  })
+
+  it('also strips the fenced block from the final node.finished text, so it never lingers after the render card appears', () => {
+    const { bubbles } = buildTimeline([
+      ev(1, 'bundle.started', undefined, { renderers: { analyst: ['chart'] } }),
+      ev(2, 'node.finished', 'analyst', { text: '图表如下：\n```chart\n{"labels": []}\n```' }),
+    ])
+    expect(bubbles.analyst.text).toBe('图表如下：\n')
+  })
+})
+
+describe('filterFencedBlocks', () => {
+  it('passes text through unchanged when no languages are hidden', () => {
+    expect(filterFencedBlocks('```chart\n{}\n```', new Set())).toBe('```chart\n{}\n```')
+  })
+
+  it('hides an unclosed hidden-language fence entirely (still streaming)', () => {
+    expect(filterFencedBlocks('before\n```chart\n{"partial":', new Set(['chart']))).toBe('before\n')
+  })
+
+  it('hides a closed hidden-language fence, keeping text before and after it', () => {
+    expect(filterFencedBlocks('a\n```chart\n{}\n```\nb', new Set(['chart']))).toBe('a\n\nb')
   })
 })
