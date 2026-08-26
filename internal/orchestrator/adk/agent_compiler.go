@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
@@ -80,10 +81,15 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		}
 	}
 
-	tools, toolsets, err := compileTools(ctx, def, opts.Authorizer, opts.KnowledgeBaseSearcher, opts.SkillContentFetcher, opts.PluginRuntime, opts.Renderers)
+	var renderers []RendererRegistration
+	tools, toolsets, err := compileTools(ctx, def, opts.Authorizer, opts.KnowledgeBaseSearcher, opts.SkillContentFetcher, opts.PluginRuntime, &renderers)
 	if err != nil {
 		return nil, fmt.Errorf("adk: agent %q: %w", ref, err)
 	}
+	if opts.Renderers != nil {
+		*opts.Renderers = append(*opts.Renderers, renderers...)
+	}
+	persona = appendRendererInstructions(persona, renderers)
 
 	var nodeHooks []HookRegistration
 	if err := compileHooks(ctx, def, opts.Authorizer, &nodeHooks); err != nil {
@@ -124,6 +130,32 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		return nil, fmt.Errorf("adk: agent %q: compile llmagent: %w", ref, err)
 	}
 	return a, nil
+}
+
+// appendRendererInstructions tells the model what an auto_render renderer
+// actually expects it to write. Without this, a renderers[].auto_render
+// registration (spec-20 §4.2) is entirely invisible to the model: unlike a
+// tool call, there's no input_schema/description round-trip through the
+// provider's function-calling API to communicate the required fenced-block
+// shape — the model has to be told in the persona itself, or it just
+// guesses (and, per the built-in chart renderer's own strict labels-field
+// check, guesses wrong more often than not). Registrations with no
+// FencedLangs (explicit tools[].ui ones) or no Description are skipped —
+// their format is already covered by the tool's own declaration, or the
+// plugin author didn't provide one to add.
+func appendRendererInstructions(persona string, renderers []RendererRegistration) string {
+	var b strings.Builder
+	b.WriteString(persona)
+	for _, r := range renderers {
+		if len(r.FencedLangs) == 0 || r.Description == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(r.Description)
+	}
+	return b.String()
 }
 
 func parseModelSpecs(def map[string]any) (primary modelgateway.ModelSpec, fallbacks []modelgateway.ModelSpec, err error) {

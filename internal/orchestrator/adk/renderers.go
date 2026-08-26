@@ -29,6 +29,15 @@ type RendererRegistration struct {
 	// TriggerTool is non-empty for an explicit tools[].ui registration: the
 	// tool name whose successful call hands its result to this renderer.
 	TriggerTool string
+	// Description is the renderers[] entry's own output-format explanation
+	// (schemas/plugin.schema.json's renderers[].description) — the model
+	// has no other way to learn what shape an auto_render fenced block
+	// needs (there's no input_schema the way a tool call has one), so
+	// CompileAgent appends this to the agent's persona for every
+	// auto_render registration. Empty for an explicit tools[].ui
+	// registration, whose format is already covered by the tool's own
+	// description/input_schema.
+	Description string
 }
 
 // ResourceURI is what the frontend uses to fetch this renderer's iframe
@@ -46,6 +55,7 @@ const (
 	PluginRendererConfigKeyName        = "renderer_name"
 	PluginRendererConfigKeyOSSPrefix   = "renderer_oss_prefix"
 	PluginRendererConfigKeyEntry       = "renderer_entry"
+	PluginRendererConfigKeyDescription = "renderer_description"
 	PluginRendererConfigKeyFencedLangs = "renderer_fenced_langs" // []string
 )
 
@@ -60,10 +70,11 @@ func RendererRegistrationFromRendererSpec(spec ToolSpec) (RendererRegistration, 
 	version, _ := spec.Config[PluginRendererConfigKeyVersion].(string)
 	ossPrefix, _ := spec.Config[PluginRendererConfigKeyOSSPrefix].(string)
 	entry, _ := spec.Config[PluginRendererConfigKeyEntry].(string)
+	description, _ := spec.Config[PluginRendererConfigKeyDescription].(string)
 	fencedLangs, _ := spec.Config[PluginRendererConfigKeyFencedLangs].([]string)
 	return RendererRegistration{
 		PluginID: pluginID, Version: version, RendererName: name,
-		OSSPrefix: ossPrefix, Entry: entry, FencedLangs: fencedLangs,
+		OSSPrefix: ossPrefix, Entry: entry, Description: description, FencedLangs: fencedLangs,
 	}, true
 }
 

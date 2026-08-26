@@ -84,6 +84,7 @@ func TestRendererRegistrationFromRendererSpec(t *testing.T) {
 		PluginRendererConfigKeyName:        "chart",
 		PluginRendererConfigKeyOSSPrefix:   "plugins/acme.charts/1.0.0",
 		PluginRendererConfigKeyEntry:       "ui/chart.html",
+		PluginRendererConfigKeyDescription: "emit a ```chart block shaped {labels, datasets}",
 		PluginRendererConfigKeyFencedLangs: []string{"chart"},
 	}}
 	reg, ok := RendererRegistrationFromRendererSpec(spec)
@@ -92,6 +93,9 @@ func TestRendererRegistrationFromRendererSpec(t *testing.T) {
 	}
 	if reg.PluginID != "acme.charts" || reg.Version != "1.0.0" || reg.Entry != "ui/chart.html" {
 		t.Fatalf("unexpected registration: %+v", reg)
+	}
+	if reg.Description != "emit a ```chart block shaped {labels, datasets}" {
+		t.Fatalf("unexpected description: %q", reg.Description)
 	}
 	if len(reg.FencedLangs) != 1 || reg.FencedLangs[0] != "chart" {
 		t.Fatalf("unexpected fenced langs: %+v", reg.FencedLangs)

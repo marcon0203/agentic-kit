@@ -106,6 +106,10 @@
             "properties": {
               "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
               "entry": { "type": "string", "description": "包内相对路径（静态 HTML/JS）" },
+              "description": {
+                "type": "string",
+                "description": "auto_render 命中的输出格式说明——模型据此知道要生成什么样的 fenced code block 内容（如 JSON 形状 + 示例）。仅 auto_render 场景需要：显式 tools[].ui 触发的渲染器不需要，因为格式已经由该 tool 的 input_schema/description 约束。"
+              },
               "auto_render": {
                 "type": "object",
                 "description": "命中即接管渲染，不需要模型显式调用",

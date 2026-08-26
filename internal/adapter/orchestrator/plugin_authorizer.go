@@ -104,7 +104,7 @@ func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpe
 	// Not a tools[] entry — try renderers[] (spec-20 §4.2's auto_render
 	// registration; connectors resolve through tools[]'s own
 	// connector_resource_id binding above, P3, not a separate ref kind).
-	if entry, fencedLangs, ok := findRendererEntry(manifest, name); ok {
+	if entry, description, fencedLangs, ok := findRendererEntry(manifest, name); ok {
 		return adk.ToolSpec{
 			Ref: "plugin:" + pluginID + "/" + name, Kind: adk.KindPluginRenderer,
 			Config: map[string]any{
@@ -113,6 +113,7 @@ func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpe
 				adk.PluginRendererConfigKeyName:        name,
 				adk.PluginRendererConfigKeyOSSPrefix:   ver.OssPrefix,
 				adk.PluginRendererConfigKeyEntry:       entry,
+				adk.PluginRendererConfigKeyDescription: description,
 				adk.PluginRendererConfigKeyFencedLangs: fencedLangs,
 			},
 			OwnerID: a.ownerID,
@@ -270,8 +271,8 @@ func findToolUIEntry(manifest map[string]any, name string) string {
 }
 
 // findRendererEntry looks up one renderers[] item by name, returning its
-// entry path and auto_render.fenced_lang list.
-func findRendererEntry(manifest map[string]any, name string) (entry string, fencedLangs []string, ok bool) {
+// entry path, output-format description, and auto_render.fenced_lang list.
+func findRendererEntry(manifest map[string]any, name string) (entry, description string, fencedLangs []string, ok bool) {
 	extensions, _ := manifest["extensions"].(map[string]any)
 	items, _ := extensions["renderers"].([]any)
 	for _, item := range items {
@@ -284,8 +285,9 @@ func findRendererEntry(manifest map[string]any, name string) (entry string, fenc
 		}
 		entry, _ = m["entry"].(string)
 		if entry == "" {
-			return "", nil, false
+			return "", "", nil, false
 		}
+		description, _ = m["description"].(string)
 		autoRender, _ := m["auto_render"].(map[string]any)
 		rawLangs, _ := autoRender["fenced_lang"].([]any)
 		for _, v := range rawLangs {
@@ -293,9 +295,9 @@ func findRendererEntry(manifest map[string]any, name string) (entry string, fenc
 				fencedLangs = append(fencedLangs, s)
 			}
 		}
-		return entry, fencedLangs, true
+		return entry, description, fencedLangs, true
 	}
-	return "", nil, false
+	return "", "", nil, false
 }
 
 // findExtensionEntry looks up one named item in manifest.extensions[point]

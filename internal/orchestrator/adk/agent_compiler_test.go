@@ -126,3 +126,50 @@ func TestCompileAgent_InvalidFallbackSpec_ReturnsError(t *testing.T) {
 		t.Fatal("expected an error for a malformed model.fallback entry")
 	}
 }
+
+// TestAppendRendererInstructions is the regression test for "图表数据缺少
+// labels 字段": an auto_render registration has no input_schema/description
+// round-trip through the model's own function-calling API the way a tool
+// call does, so if its manifest description never reaches the persona, the
+// model is left guessing the fenced-block shape entirely on its own.
+func TestAppendRendererInstructions_AutoRenderWithDescription_Appended(t *testing.T) {
+	regs := []RendererRegistration{
+		{RendererName: "chart", FencedLangs: []string{"chart"}, Description: "emit a ```chart block shaped {labels, datasets}"},
+	}
+	got := appendRendererInstructions("You are a helpful assistant.", regs)
+	want := "You are a helpful assistant.\n\nemit a ```chart block shaped {labels, datasets}"
+	if got != want {
+		t.Fatalf("appendRendererInstructions = %q, want %q", got, want)
+	}
+}
+
+func TestAppendRendererInstructions_SkipsExplicitToolUIRegistration(t *testing.T) {
+	// TriggerTool set, FencedLangs empty: an explicit tools[].ui
+	// registration whose format is already covered by the tool's own
+	// description/input_schema — appending here would just be noise.
+	regs := []RendererRegistration{{RendererName: "chart", TriggerTool: "render_chart", Description: "should be ignored"}}
+	got := appendRendererInstructions("persona", regs)
+	if got != "persona" {
+		t.Fatalf("expected persona unchanged, got %q", got)
+	}
+}
+
+func TestAppendRendererInstructions_SkipsAutoRenderWithNoDescription(t *testing.T) {
+	regs := []RendererRegistration{{RendererName: "chart", FencedLangs: []string{"chart"}}}
+	got := appendRendererInstructions("persona", regs)
+	if got != "persona" {
+		t.Fatalf("expected persona unchanged for a renderer with no description, got %q", got)
+	}
+}
+
+func TestAppendRendererInstructions_MultipleRenderers_JoinedWithBlankLine(t *testing.T) {
+	regs := []RendererRegistration{
+		{RendererName: "chart", FencedLangs: []string{"chart"}, Description: "chart format"},
+		{RendererName: "table", FencedLangs: []string{"table"}, Description: "table format"},
+	}
+	got := appendRendererInstructions("persona", regs)
+	want := "persona\n\nchart format\n\ntable format"
+	if got != want {
+		t.Fatalf("appendRendererInstructions = %q, want %q", got, want)
+	}
+}

@@ -14,6 +14,7 @@
       {
         "name": "chart",
         "entry": "ui/chart.html",
+        "description": "要渲染图表，回复中放一个 ```chart 代码块，内容是这样形状的 JSON（不要任何注释或多余文字）：{\"type\": \"bar\"|\"line\"|\"pie\", \"title\": \"可选标题\", \"labels\": [\"分类1\", \"分类2\", ...], \"datasets\": [{\"label\": \"系列名\", \"data\": [数字, 数字, ...]}]}。labels 是必填字段，其长度必须和每个 dataset.data 的长度一致；pie 图只用第一个 dataset。示例：```chart\n{\"type\": \"bar\", \"title\": \"月度销量\", \"labels\": [\"一月\", \"二月\", \"三月\"], \"datasets\": [{\"label\": \"销量\", \"data\": [120, 200, 150]}]}\n```",
         "auto_render": { "fenced_lang": ["chart"] }
       }
     ]

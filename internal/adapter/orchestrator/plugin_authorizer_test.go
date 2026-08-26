@@ -78,24 +78,27 @@ func TestFindRendererEntry(t *testing.T) {
 		"extensions": map[string]any{
 			"renderers": []any{
 				map[string]any{
-					"name": "chart", "entry": "ui/chart.html",
+					"name": "chart", "entry": "ui/chart.html", "description": "emit a ```chart block shaped {labels, datasets}",
 					"auto_render": map[string]any{"fenced_lang": []any{"chart", "acme-chart"}},
 				},
 			},
 		},
 	}
-	entry, fencedLangs, ok := findRendererEntry(manifest, "chart")
+	entry, description, fencedLangs, ok := findRendererEntry(manifest, "chart")
 	if !ok {
 		t.Fatal("expected ok")
 	}
 	if entry != "ui/chart.html" {
 		t.Fatalf("unexpected entry: %q", entry)
 	}
+	if description != "emit a ```chart block shaped {labels, datasets}" {
+		t.Fatalf("unexpected description: %q", description)
+	}
 	if len(fencedLangs) != 2 || fencedLangs[0] != "chart" || fencedLangs[1] != "acme-chart" {
 		t.Fatalf("unexpected fenced langs: %+v", fencedLangs)
 	}
 
-	if _, _, ok := findRendererEntry(manifest, "does_not_exist"); ok {
+	if _, _, _, ok := findRendererEntry(manifest, "does_not_exist"); ok {
 		t.Fatal("expected no match for an unknown renderer name")
 	}
 }
