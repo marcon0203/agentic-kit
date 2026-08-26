@@ -1596,7 +1596,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
 
-  # ────────────────────────── 插件体系（spec-20，P1）──────────────────────────
+  # ────────────────────────── 插件体系（spec-20）──────────────────────────
   /plugins/signing-key:
     post:
       tags: [Plugins]
@@ -1626,7 +1626,7 @@ paths:
       summary: 我上传过的插件版本
       description: |
         只返回调用者自己发布过的每个版本；插件广场的公开市场列表（visibility=public 且
-        review_status=passed）是 P5 才做的独立入口，不是这个接口。
+        review_status=passed）是 `GET /plugins/market`，不是这个接口。
       operationId: listMyPlugins
       responses:
         '200':
@@ -1696,17 +1696,115 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
 
-  /plugins/{id}:
-    parameters:
-      - name: id
-        in: path
+  /plugins/market:
+    get:
+      tags: [Plugins]
+      summary: 组件广场"插件" Tab 的公开市场列表
+      description: |
+        每个 plugin_id 一行，取其 `visibility=public` 且 `review_status=passed`
+        的最新版本——未上架、未审核通过、或审核被拒的版本一律不出现在这里。
+      operationId: listPluginMarket
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Plugin' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /moderation/plugins:
+    get:
+      tags: [Plugins]
+      summary: 插件审核队列（仅管理员）
+      description: 每一行是一个申请上架（visibility=public）、尚未审核（review_status=pending）的插件版本。
+      operationId: listPendingPluginReview
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/Plugin' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 非管理员（20003）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /moderation/plugins/{id}/review:
+    post:
+      tags: [Plugins]
+      summary: 审核通过/驳回一个插件版本（仅管理员）
+      operationId: reviewPlugin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 插件版本的数字行 id
+          schema: { type: string }
+      requestBody:
         required: true
-        description: plugin_id（反向域名式 ref，如 `acme.charts`）
-        schema: { type: string }
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean, description: 'true 通过（review_status=passed），false 驳回（review_status=rejected）' }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Plugin' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: 非管理员（20003）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '404':
+          description: 插件版本不存在（100001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /plugins/{id}:
     get:
       tags: [Plugins]
       summary: 插件详情（最新已启用版本）
       operationId: getPlugin
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: plugin_id（反向域名式 ref，如 `acme.charts`）
+          schema: { type: string }
       responses:
         '200':
           description: 成功
@@ -1721,6 +1819,51 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404':
           description: 插件不存在（100001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+    patch:
+      tags: [Plugins]
+      summary: 切换某个版本的可见性（private ⇄ public，spec-20 §5.4/P5）
+      description: |
+        注意这里的 `{id}` 和同路径 GET 用的不是同一个东西：GET 的 `{id}` 是
+        plugin_id ref，这里的 `{id}` 是某个具体版本的数字行 id（`Plugin.id`
+        字段）——可见性是按版本设置的，不是按 plugin_id。只有该版本的发布者
+        本人能操作。切到 `public` 即进入管理员审核队列
+        （`GET /moderation/plugins`），而不是立即可安装；切回 `private`
+        则退出队列。
+      operationId: setPluginVisibility
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 插件版本的数字行 id
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility: { type: string, enum: [private, public] }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Plugin' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 插件版本不存在，或不属于调用者（100001）
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }

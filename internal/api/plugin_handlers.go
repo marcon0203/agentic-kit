@@ -19,11 +19,9 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
 )
 
-// PluginHandlers is the 插件体系's HTTP transport (spec-20). P1 scope
-// matches the spec's own phasing: upload + private install/uninstall/
-// update work end to end; the public market listing and moderation queue
-// (visibility=public review flow) are P5's job, not wired to a route here
-// yet even though the domain service already supports them.
+// PluginHandlers is the 插件体系's HTTP transport (spec-20): upload,
+// private install/uninstall/update, the public market listing, visibility
+// toggling, and the admin moderation queue (spec-20 §5.4/P5).
 type PluginHandlers struct {
 	svc    *plugin.Service
 	assets assetGetter
@@ -237,11 +235,28 @@ func extractAKP(pkg []byte) (map[string]any, map[string][]byte, error) {
 	return manifest, files, nil
 }
 
+// Market handles GET /plugins/market — the 组件广场"插件" tab listing: one
+// row per plugin_id, its latest visibility=public + review_status=passed
+// version (spec-20 §5.4). Deliberately a different endpoint from List:
+// what List returns is "what I uploaded," what Market returns is "what's
+// installable," and those are almost never the same set for a given
+// caller.
+func (h *PluginHandlers) Market(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	items, err := h.svc.ListMarket(r.Context())
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{"items": toPluginDTOs(items)})
+}
+
 // List handles GET /plugins — every version the caller has published
-// themselves. The public market listing (visibility=public,
-// review_status=passed) is a separate P5 surface, deliberately not this
-// endpoint: what you get back here is "what I uploaded," not "what's
-// installable."
+// themselves. The public market listing is Market, above — deliberately
+// not this endpoint: what you get back here is "what I uploaded," not
+// "what's installable."
 func (h *PluginHandlers) List(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -350,6 +365,95 @@ func (h *PluginHandlers) Uninstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type setPluginVisibilityRequest struct {
+	Visibility string `json:"visibility"`
+}
+
+// SetVisibility handles PATCH /plugins/{id} — {id} here is a specific
+// version's numeric row id (pluginDTO.ID), not a plugin_id ref, since
+// visibility is a per-version flag: flipping one version to public does
+// not touch any other version of the same plugin. Only the version's own
+// publisher may do this (plugin.Service.SetVisibility enforces it);
+// flipping to public is what enters the version into the moderation queue
+// (spec-20 §5.4's private→public flow).
+func (h *PluginHandlers) SetVisibility(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "id must be a numeric plugin version id")
+		return
+	}
+	var req setPluginVisibilityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
+		return
+	}
+	visibility := plugin.Visibility(req.Visibility)
+	if visibility != plugin.VisibilityPrivate && visibility != plugin.VisibilityPublic {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, `visibility must be "private" or "public"`)
+		return
+	}
+
+	updated, err := h.svc.SetVisibility(r.Context(), userID, id, visibility)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, toPluginDTO(updated))
+}
+
+// ListPendingReview handles GET /moderation/plugins — the admin review
+// queue of every version awaiting a public-visibility decision (spec-20
+// §5.4). Admin gating happens inside plugin.Service.ListPendingReview,
+// same convention as operation.Service's report queue.
+func (h *PluginHandlers) ListPendingReview(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.svc.ListPendingReview(r.Context(), userID)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{"items": toPluginDTOs(items)})
+}
+
+type reviewPluginRequest struct {
+	Approve bool `json:"approve"`
+}
+
+// Review handles POST /moderation/plugins/{id}/review — {id} is the
+// version's numeric row id, same as SetVisibility. Approving sets
+// review_status=passed (making the version eligible for Market); rejecting
+// sets review_status=rejected. Admin-only, enforced inside the service.
+func (h *PluginHandlers) Review(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "id must be a numeric plugin version id")
+		return
+	}
+	var req reviewPluginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
+		return
+	}
+
+	updated, err := h.svc.Review(r.Context(), userID, id, req.Approve)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, toPluginDTO(updated))
 }
 
 // GetAsset handles GET /plugins/assets/{id}/{ver}/* — spec-20 §5.2's

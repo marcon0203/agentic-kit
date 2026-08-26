@@ -840,7 +840,7 @@ export interface paths {
         /**
          * 我上传过的插件版本
          * @description 只返回调用者自己发布过的每个版本；插件广场的公开市场列表（visibility=public 且
-         *     review_status=passed）是 P5 才做的独立入口，不是这个接口。
+         *     review_status=passed）是 `GET /plugins/market`，不是这个接口。
          */
         get: operations["listMyPlugins"];
         put?: never;
@@ -865,14 +865,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/plugins/market": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 组件广场"插件" Tab 的公开市场列表
+         * @description 每个 plugin_id 一行，取其 `visibility=public` 且 `review_status=passed`
+         *     的最新版本——未上架、未审核通过、或审核被拒的版本一律不出现在这里。
+         */
+        get: operations["listPluginMarket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/moderation/plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 插件审核队列（仅管理员）
+         * @description 每一行是一个申请上架（visibility=public）、尚未审核（review_status=pending）的插件版本。
+         */
+        get: operations["listPendingPluginReview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/moderation/plugins/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 审核通过/驳回一个插件版本（仅管理员） */
+        post: operations["reviewPlugin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/plugins/{id}": {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                /** @description plugin_id（反向域名式 ref，如 `acme.charts`） */
-                id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         /** 插件详情（最新已启用版本） */
@@ -882,7 +937,16 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * 切换某个版本的可见性（private ⇄ public，spec-20 §5.4/P5）
+         * @description 注意这里的 `{id}` 和同路径 GET 用的不是同一个东西：GET 的 `{id}` 是
+         *     plugin_id ref，这里的 `{id}` 是某个具体版本的数字行 id（`Plugin.id`
+         *     字段）——可见性是按版本设置的，不是按 plugin_id。只有该版本的发布者
+         *     本人能操作。切到 `public` 即进入管理员审核队列
+         *     （`GET /moderation/plugins`），而不是立即可安装；切回 `private`
+         *     则退出队列。
+         */
+        patch: operations["setPluginVisibility"];
         trace?: never;
     };
     "/plugins/{id}/install": {
@@ -3439,6 +3503,116 @@ export interface operations {
             };
         };
     };
+    listPluginMarket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items?: components["schemas"]["Plugin"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listPendingPluginReview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items?: components["schemas"]["Plugin"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 非管理员（20003） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    reviewPlugin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 插件版本的数字行 id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description true 通过（review_status=passed），false 驳回（review_status=rejected） */
+                    approve: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Plugin"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 非管理员（20003） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description 插件版本不存在（100001） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
     getPlugin: {
         parameters: {
             query?: never;
@@ -3464,6 +3638,49 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             /** @description 插件不存在（100001） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    setPluginVisibility: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 插件版本的数字行 id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    visibility: "private" | "public";
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Plugin"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 插件版本不存在，或不属于调用者（100001） */
             404: {
                 headers: {
                     [name: string]: unknown;

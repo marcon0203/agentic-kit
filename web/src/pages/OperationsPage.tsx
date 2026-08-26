@@ -5,9 +5,10 @@ import { RunMonitorTab } from '@/pages/operations/RunMonitorTab'
 import { CostAnalysisTab } from '@/pages/operations/CostAnalysisTab'
 import { AuditLogTab } from '@/pages/operations/AuditLogTab'
 import { ModerationTab } from '@/pages/operations/ModerationTab'
+import { PluginModerationTab } from '@/pages/operations/PluginModerationTab'
 import { useAuthStore } from '@/lib/auth/store'
 
-type Tab = 'monitor' | 'cost' | 'audit' | 'moderation'
+type Tab = 'monitor' | 'cost' | 'audit' | 'moderation' | 'plugin-moderation'
 
 export function OperationsPage() {
   const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false)
@@ -41,12 +42,18 @@ export function OperationsPage() {
             举报处理
           </TabRailItem>
         )}
+        {isAdmin && (
+          <TabRailItem active={tab === 'plugin-moderation'} onClick={() => setTab('plugin-moderation')}>
+            插件审核
+          </TabRailItem>
+        )}
       </TabRail>
 
       {tab === 'monitor' && <RunMonitorTab />}
       {tab === 'cost' && <CostAnalysisTab />}
       {tab === 'audit' && <AuditLogTab />}
       {tab === 'moderation' && isAdmin && <ModerationTab />}
+      {tab === 'plugin-moderation' && isAdmin && <PluginModerationTab />}
     </div>
   )
 }

@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search, Puzzle } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel } from '@/components/common/EmptyState'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
@@ -22,6 +30,7 @@ import {
 import type { components } from '@/lib/api/schema'
 
 type Resource = components['schemas']['Resource']
+type Plugin = components['schemas']['Plugin']
 
 type Tab = 'plugin' | 'custom'
 type StatusFilter = 'all' | 'enabled' | 'disabled'
@@ -36,8 +45,10 @@ const PAGE_SIZES = [12, 24, 48]
  * "核对"。
  *
  * 顶部 插件/自定义 两个 Tab：自定义是这个账号自己注册的组件；插件是平台统
- * 一提供的那一档，插件体系还没做（spec-05a §4 明确本轮只留判别位），所以
- * 那个 Tab 是一块"即将支持"的占位，而不是一个点了会报错的入口。
+ * 一提供、开箱即用的一档（spec-20），走 GET /plugins/market 拿到的公开市场
+ * 列表——只有 visibility=public 且 review_status=passed 的版本才会出现在
+ * 这里，安装前会先展示 manifest.requires.permissions 让用户知道自己在
+ * 授权什么。
  */
 export function ComponentPlazaPage() {
   const navigate = useNavigate()
@@ -59,6 +70,14 @@ export function ComponentPlazaPage() {
         await apiClient.GET('/resources', { params: { query: { type: 'tool' } } }),
       ),
   })
+
+  const pluginQuery = useQuery({
+    queryKey: ['plugins', 'market'],
+    queryFn: async () => unwrap<{ items: Plugin[] }>(await apiClient.GET('/plugins/market', {})),
+    enabled: tab === 'plugin',
+  })
+  const pluginItems = useMemo(() => pluginQuery.data?.items ?? [], [pluginQuery.data])
+  const [installTarget, setInstallTarget] = useState<Plugin | null>(null)
 
   const items = useMemo(() => query.data?.items ?? [], [query.data])
 
@@ -137,10 +156,34 @@ export function ComponentPlazaPage() {
       </div>
 
       {tab === 'plugin' ? (
-        <EmptyRail
-          title="插件体系即将支持"
-          description="插件是平台统一提供、开箱即用的一档组件，和这里自己注册的组件走同一套引用方式（Agent 的能力白名单里一个 ref 一个工具），只是不需要你自己填地址和凭证。这一档还在设计中，当前可用的是「自定义」。"
-        />
+        <>
+          {pluginQuery.isLoading && <CardGridSkeleton />}
+
+          {pluginQuery.isError && (
+            <ErrorPanel message="插件市场没能加载出来" onRetry={() => pluginQuery.refetch()} />
+          )}
+
+          {pluginQuery.isSuccess && pluginItems.length === 0 && (
+            <EmptyRail
+              title="市场上还没有已上架的插件"
+              description="插件由发布者上传并申请上架，经管理员审核通过后才会出现在这里——和这里自己注册的组件走同一套引用方式（Agent 的能力白名单里一个 ref 一个工具），只是不需要你自己填地址和凭证。"
+            />
+          )}
+
+          {pluginItems.length > 0 && (
+            <ul className="grid grid-cols-1 gap-space-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+              {pluginItems.map((p) => (
+                <PluginCard key={p.id} plugin={p} onInstall={() => setInstallTarget(p)} />
+              ))}
+            </ul>
+          )}
+
+          <PluginInstallDialog
+            plugin={installTarget}
+            onClose={() => setInstallTarget(null)}
+            onInstalled={() => queryClient.invalidateQueries({ queryKey: ['plugins'] })}
+          />
+        </>
       ) : (
         <>
           <div className="flex flex-wrap items-center justify-end gap-space-2">
@@ -338,6 +381,125 @@ function ComponentCard({ resource, onToggle }: { resource: Resource; onToggle: (
         </span>
       </div>
     </li>
+  )
+}
+
+function pluginManifest(p: Plugin): { description?: string; requires?: { permissions?: string[] } } {
+  return (p.manifest ?? {}) as { description?: string; requires?: { permissions?: string[] } }
+}
+
+function PluginCard({ plugin, onInstall }: { plugin: Plugin; onInstall: () => void }) {
+  const manifest = pluginManifest(plugin)
+  const name = plugin.display_name || plugin.plugin_id
+
+  return (
+    <li className="flex flex-col gap-space-3 rounded-lg border border-border bg-surface p-space-4">
+      <div className="flex items-start gap-space-3">
+        <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-md bg-blueprint-tint text-blueprint">
+          <Puzzle className="size-4" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="text-label-md truncate text-ink-900" title={name}>
+            {name}
+          </span>
+          <span className="text-ref truncate text-ink-500" title={plugin.plugin_id}>
+            {plugin.plugin_id}@{plugin.version}
+          </span>
+        </span>
+        <Button variant="ghost" size="sm" className="text-caption -mt-1 -mr-2 h-7 shrink-0 px-space-2 text-ink-500" onClick={onInstall}>
+          安装
+        </Button>
+      </div>
+
+      <p className="text-body-sm line-clamp-2 min-h-10 text-ink-500">{manifest.description || '（发布者未填写说明）'}</p>
+    </li>
+  )
+}
+
+/**
+ * 安装前把 manifest.requires.permissions 摊开来给用户看——插件运行在
+ * WASM 沙箱里，能碰到什么完全由这份权限声明决定，装之前应该让用户知道
+ * 自己在同意什么，而不是装完才发现。
+ */
+function PluginInstallDialog({
+  plugin,
+  onClose,
+  onInstalled,
+}: {
+  plugin: Plugin | null
+  onClose: () => void
+  onInstalled: () => void
+}) {
+  const [installing, setInstalling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setError(null)
+    setInstalling(false)
+  }, [plugin])
+
+  if (!plugin) return null
+  const permissions = pluginManifest(plugin).requires?.permissions ?? []
+
+  async function install() {
+    if (!plugin) return
+    setInstalling(true)
+    setError(null)
+    try {
+      unwrap(
+        await apiClient.POST('/plugins/{id}/install', {
+          params: { path: { id: plugin.plugin_id } },
+          body: { granted: permissions },
+        }),
+      )
+      onInstalled()
+      onClose()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '安装没能完成，请再试一次')
+      setInstalling(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>安装「{plugin.display_name || plugin.plugin_id}」</DialogTitle>
+          <DialogDescription>
+            {plugin.plugin_id}@{plugin.version}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-space-2">
+          <p className="text-body-sm text-ink-700">
+            {permissions.length > 0 ? '安装后这个插件将拥有以下权限：' : '这个插件没有声明任何额外权限。'}
+          </p>
+          {permissions.length > 0 && (
+            <ul className="flex flex-col gap-space-1 rounded-md bg-surface-muted p-space-3">
+              {permissions.map((perm) => (
+                <li key={perm} className="text-body-sm font-mono text-ink-900">
+                  {perm}
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && (
+            <p role="alert" className="text-body-sm text-rust">
+              {error}
+            </p>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={installing}>
+            取消
+          </Button>
+          <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={install} disabled={installing}>
+            {installing ? '安装中…' : '确认安装'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

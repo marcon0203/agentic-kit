@@ -188,10 +188,14 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Post("/plugins/signing-key", cfg.Plugins.RegisterSigningKey)
 				r.Get("/plugins", cfg.Plugins.List)
 				r.Post("/plugins", cfg.Plugins.Upload)
+				r.Get("/plugins/market", cfg.Plugins.Market)
 				r.Get("/plugins/{id}", cfg.Plugins.Get)
+				r.Patch("/plugins/{id}", cfg.Plugins.SetVisibility)
 				r.Post("/plugins/{id}/install", cfg.Plugins.Install)
 				r.Patch("/plugins/{id}/install", cfg.Plugins.UpdateInstall)
 				r.Delete("/plugins/{id}/install", cfg.Plugins.Uninstall)
+				r.Get("/moderation/plugins", cfg.Plugins.ListPendingReview)
+				r.Post("/moderation/plugins/{id}/review", cfg.Plugins.Review)
 			}
 			r.Get("/features", FeaturesHandler(cfg.Features))
 			if cfg.Usage != nil {
