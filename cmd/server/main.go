@@ -18,7 +18,6 @@ import (
 
 	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
 	esstore "github.com/marcon0203/agentic-kit/internal/adapter/elasticsearch"
-	"github.com/marcon0203/agentic-kit/internal/builtinplugins"
 	"github.com/marcon0203/agentic-kit/internal/adapter/extism"
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
 	"github.com/marcon0203/agentic-kit/internal/adapter/milvus"
@@ -31,6 +30,7 @@ import (
 	adapterschema "github.com/marcon0203/agentic-kit/internal/adapter/schema"
 	"github.com/marcon0203/agentic-kit/internal/api"
 	"github.com/marcon0203/agentic-kit/internal/auth"
+	"github.com/marcon0203/agentic-kit/internal/builtinplugins"
 	"github.com/marcon0203/agentic-kit/internal/config"
 	"github.com/marcon0203/agentic-kit/internal/crypto"
 	"github.com/marcon0203/agentic-kit/internal/domain/agent"

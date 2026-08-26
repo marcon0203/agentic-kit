@@ -3,6 +3,7 @@ package adk
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/agent/llmagent"
@@ -93,6 +94,19 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 	}
 
 	llm := NewGatewayLLM(opts.Gateway, primary, fallbacks, opts.Credentials)
+
+	// Visibility into what a run actually sends the model — without this,
+	// a silently-empty tool list or a persona that never made it through is
+	// invisible until someone notices the model behaving as if it had
+	// neither. Persona is logged in full (not just a length) because that's
+	// exactly what "试运行看不到实际 prompt" needs to debug; it's the
+	// author's own agent definition, not a secret.
+	toolNames := make([]string, 0, len(tools))
+	for _, t := range tools {
+		toolNames = append(toolNames, t.Name())
+	}
+	slog.Info("agent_compiled", "agent_ref", ref, "provider", primary.Provider, "model", primary.Name,
+		"persona", persona, "tools", toolNames)
 
 	cfg := llmagent.Config{
 		Name:        ref,

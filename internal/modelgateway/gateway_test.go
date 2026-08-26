@@ -176,6 +176,102 @@ func TestAnthropicClient_Complete(t *testing.T) {
 	}
 }
 
+// TestAnthropicClient_SendsToolsAndParsesToolUse is the regression test for
+// the bug this was written to fix: a model with capabilities.tools[]
+// configured that behaved as if it had no tools at all, because
+// CompletionRequest never carried a Tools field and no Client ever sent
+// one. This asserts both directions: the outgoing request actually
+// contains the tool's input_schema, the system prompt is a top-level
+// field (not a "system"-role message, which the real Anthropic API
+// rejects), and a tool_use response block round-trips into a ToolCall.
+func TestAnthropicClient_SendsToolsAndParsesToolUse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["system"] != "be helpful" {
+			t.Fatalf("expected system prompt as a top-level field, got %v", body)
+		}
+		tools, _ := body["tools"].([]any)
+		if len(tools) != 1 {
+			t.Fatalf("expected 1 tool in request, got %v", body["tools"])
+		}
+		tool := tools[0].(map[string]any)
+		if tool["name"] != "run_query" {
+			t.Fatalf("unexpected tool name: %v", tool["name"])
+		}
+		schema := tool["input_schema"].(map[string]any)
+		if schema["type"] != "object" {
+			t.Fatalf("expected input_schema to carry a lowercase JSON Schema type, got %v", schema)
+		}
+		messages, _ := body["messages"].([]any)
+		for _, m := range messages {
+			if m.(map[string]any)["role"] == "system" {
+				t.Fatal("system prompt must never appear as a message role for Anthropic")
+			}
+		}
+		_, _ = w.Write([]byte(`{"content":[{"type":"tool_use","id":"toolu_1","name":"run_query","input":{"sql":"select 1"}}],"usage":{"input_tokens":20,"output_tokens":10}}`))
+	}))
+	defer srv.Close()
+
+	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
+	result, err := c.Complete(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{
+		Messages: []Message{{Role: "system", Content: "be helpful"}, {Role: "user", Content: "how many agents?"}},
+		Tools: []Tool{{
+			Name: "run_query", Description: "runs a SQL query",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"sql": map[string]any{"type": "string"}}},
+		}},
+		MaxTokens: 100,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "run_query" || result.ToolCalls[0].ID != "toolu_1" {
+		t.Fatalf("unexpected tool calls: %+v", result.ToolCalls)
+	}
+	if result.ToolCalls[0].Arguments["sql"] != "select 1" {
+		t.Fatalf("unexpected tool call arguments: %+v", result.ToolCalls[0].Arguments)
+	}
+}
+
+// TestAnthropicClient_SendsToolResultForToolMessage verifies the reverse
+// leg: replaying a tool's result back as the next turn produces a
+// tool_result content block tagged with the same tool_use_id, not a plain
+// user-role text message (which Anthropic would silently misinterpret as
+// unrelated conversation, not a function result).
+func TestAnthropicClient_SendsToolResultForToolMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		messages, _ := body["messages"].([]any)
+		if len(messages) != 2 {
+			t.Fatalf("expected 2 messages, got %v", messages)
+		}
+		toolMsg := messages[1].(map[string]any)
+		if toolMsg["role"] != "user" {
+			t.Fatalf("tool results must be sent as role=user for Anthropic, got %v", toolMsg["role"])
+		}
+		blocks := toolMsg["content"].([]any)
+		block := blocks[0].(map[string]any)
+		if block["type"] != "tool_result" || block["tool_use_id"] != "toolu_1" || block["content"] != "3 agents" {
+			t.Fatalf("unexpected tool_result block: %+v", block)
+		}
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"there are 3 agents"}],"usage":{"input_tokens":5,"output_tokens":5}}`))
+	}))
+	defer srv.Close()
+
+	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
+	_, err := c.Complete(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{
+		Messages: []Message{
+			{Role: "assistant", ToolCalls: []ToolCall{{ID: "toolu_1", Name: "run_query", Arguments: map[string]any{"sql": "select count(*) from agents"}}}},
+			{Role: "tool", ToolCallID: "toolu_1", ToolName: "run_query", Content: "3 agents"},
+		},
+		MaxTokens: 100,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestAnthropicClient_ErrorResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -208,6 +304,66 @@ func TestOpenAICompatibleClient_Complete(t *testing.T) {
 	}
 	if result.Content != "hi from openai" || result.InputTokens != 8 || result.OutputTokens != 4 {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestOpenAICompatibleClient_SendsToolsAndParsesToolCalls(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		tools, _ := body["tools"].([]any)
+		if len(tools) != 1 {
+			t.Fatalf("expected 1 tool in request, got %v", body["tools"])
+		}
+		fn := tools[0].(map[string]any)["function"].(map[string]any)
+		if fn["name"] != "run_query" {
+			t.Fatalf("unexpected function name: %v", fn["name"])
+		}
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"run_query","arguments":"{\"sql\":\"select 1\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`))
+	}))
+	defer srv.Close()
+
+	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
+	result, err := c.Complete(context.Background(), "key", "", "gpt-4o", CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "how many agents?"}},
+		Tools: []Tool{{
+			Name: "run_query", Description: "runs a SQL query",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"sql": map[string]any{"type": "string"}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "run_query" || result.ToolCalls[0].ID != "call_1" {
+		t.Fatalf("unexpected tool calls: %+v", result.ToolCalls)
+	}
+	if result.ToolCalls[0].Arguments["sql"] != "select 1" {
+		t.Fatalf("unexpected tool call arguments: %+v", result.ToolCalls[0].Arguments)
+	}
+}
+
+func TestOpenAICompatibleClient_SendsToolResultWithToolCallID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		messages, _ := body["messages"].([]any)
+		toolMsg := messages[len(messages)-1].(map[string]any)
+		if toolMsg["role"] != "tool" || toolMsg["tool_call_id"] != "call_1" || toolMsg["content"] != "3 agents" {
+			t.Fatalf("unexpected tool-result message: %+v", toolMsg)
+		}
+		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"there are 3"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer srv.Close()
+
+	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
+	_, err := c.Complete(context.Background(), "key", "", "gpt-4o", CompletionRequest{
+		Messages: []Message{
+			{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_1", Name: "run_query", Arguments: map[string]any{"sql": "select count(*) from agents"}}}},
+			{Role: "tool", ToolCallID: "call_1", ToolName: "run_query", Content: "3 agents"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -285,6 +441,45 @@ func TestGoogleClient_Complete(t *testing.T) {
 	}
 	if result.Content != "hi from gemini" || result.InputTokens != 6 || result.OutputTokens != 3 {
 		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestGoogleClient_SendsFunctionDeclarationsAndParsesFunctionCall(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		sysInstr, ok := body["systemInstruction"].(map[string]any)
+		if !ok || sysInstr["parts"].([]any)[0].(map[string]any)["text"] != "be helpful" {
+			t.Fatalf("expected systemInstruction as a top-level field, got %v", body)
+		}
+		tools, _ := body["tools"].([]any)
+		if len(tools) != 1 {
+			t.Fatalf("expected 1 tools entry, got %v", body["tools"])
+		}
+		decls := tools[0].(map[string]any)["functionDeclarations"].([]any)
+		if len(decls) != 1 || decls[0].(map[string]any)["name"] != "run_query" {
+			t.Fatalf("unexpected functionDeclarations: %v", decls)
+		}
+		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"run_query","args":{"sql":"select 1"}}}]}}],"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":3}}`))
+	}))
+	defer srv.Close()
+
+	c := &googleClient{client: srv.Client(), baseURL: srv.URL}
+	result, err := c.Complete(context.Background(), "key", "", "gemini-1.5-pro", CompletionRequest{
+		Messages: []Message{{Role: "system", Content: "be helpful"}, {Role: "user", Content: "how many agents?"}},
+		Tools: []Tool{{
+			Name: "run_query", Description: "runs a SQL query",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"sql": map[string]any{"type": "string"}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "run_query" {
+		t.Fatalf("unexpected tool calls: %+v", result.ToolCalls)
+	}
+	if result.ToolCalls[0].Arguments["sql"] != "select 1" {
+		t.Fatalf("unexpected tool call arguments: %+v", result.ToolCalls[0].Arguments)
 	}
 }
 

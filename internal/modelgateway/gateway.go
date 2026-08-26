@@ -21,15 +21,53 @@ import (
 const completionTimeout = 60 * time.Second
 
 // Message is one turn in a completion request, provider-agnostic.
+//
+// Role "tool" and the ToolCalls/ToolCallID/ToolName fields exist for
+// function-calling: an "assistant" message with ToolCalls set is the model
+// deciding to invoke tool(s) instead of (or alongside) answering in
+// Content; a "tool" message with ToolCallID/ToolName set is that call's
+// result being replayed back for the next turn.
 type Message struct {
-	Role    string // "user" | "assistant" | "system"
+	Role    string // "user" | "assistant" | "system" | "tool"
 	Content string
+	// ToolCalls is set on an "assistant" message that invoked one or more
+	// tools instead of, or alongside, answering directly.
+	ToolCalls []ToolCall
+	// ToolCallID/ToolName identify which call a "tool" role message is the
+	// result of — ToolCallID must match the ID on the ToolCall it answers.
+	ToolCallID string
+	ToolName   string
+}
+
+// Tool is a provider-agnostic function-calling declaration: what
+// capabilities.tools[] resolves into once compiled by the ADK layer, then
+// translated once more here into each provider's own tool-definition wire
+// shape (Anthropic's input_schema, the OpenAI-compatible family's
+// parameters, Google's functionDeclarations).
+type Tool struct {
+	Name        string
+	Description string
+	// InputSchema is a standard JSON Schema object — lowercase "type"
+	// values, "properties"/"required"/"items" etc. — never genai's own
+	// upper-cased Schema shape, which no provider's wire API accepts as-is.
+	InputSchema map[string]any
+}
+
+// ToolCall is one function invocation the model decided to make. ID is
+// provider-assigned (Anthropic's tool_use.id, OpenAI's tool_calls[].id) and
+// must be echoed back verbatim on the Message that carries this call's
+// result, so the provider can correlate the two turns.
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments map[string]any
 }
 
 // CompletionRequest is the platform-side shape of an LLM call; each Client
 // translates it into its provider's own wire format.
 type CompletionRequest struct {
 	Messages    []Message
+	Tools       []Tool
 	MaxTokens   int
 	Temperature float64
 }
@@ -37,9 +75,12 @@ type CompletionRequest struct {
 // CompletionResult is what every Client normalizes its provider's response
 // into. Provider/Model report which link in the fallback chain actually
 // answered; CostUSD is computed by the Gateway after a successful call, not
-// by the Client itself (pricing isn't provider-reported).
+// by the Client itself (pricing isn't provider-reported). ToolCalls is set
+// instead of (or alongside) Content when the model decided to invoke one or
+// more of the Tools it was offered.
 type CompletionResult struct {
 	Content      string
+	ToolCalls    []ToolCall
 	InputTokens  int64
 	OutputTokens int64
 	CostUSD      float64
@@ -247,30 +288,105 @@ type anthropicClient struct {
 	baseURL string
 }
 
+// anthropicTool is Anthropic's tool-definition wire shape
+// (https://docs.anthropic.com/en/docs/build-with-claude/tool-use):
+// input_schema is a standard JSON Schema object, taken as-is from
+// Tool.InputSchema.
+type anthropicTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
+// anthropicMessage's Content is either a plain string (ordinary text turns)
+// or a []map[string]any of content blocks (tool_use/tool_result turns) —
+// Anthropic accepts both shapes, so building whichever is simplest per
+// message avoids a content-block wrapper for the common all-text case.
+type anthropicMessage struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"`
+}
+
+// buildAnthropicMessages translates the platform's provider-agnostic
+// Messages into Anthropic's turn shape. "system" messages are excluded —
+// Anthropic takes the system prompt as a separate top-level field, never a
+// message role, so the caller pulls it out via extractSystemPrompt first
+// and passes the rest here.
+func buildAnthropicMessages(msgs []Message) []anthropicMessage {
+	out := make([]anthropicMessage, 0, len(msgs))
+	for _, m := range msgs {
+		switch m.Role {
+		case "system":
+			continue
+		case "tool":
+			out = append(out, anthropicMessage{Role: "user", Content: []map[string]any{{
+				"type": "tool_result", "tool_use_id": m.ToolCallID, "content": m.Content,
+			}}})
+		case "assistant":
+			if len(m.ToolCalls) == 0 {
+				out = append(out, anthropicMessage{Role: "assistant", Content: m.Content})
+				continue
+			}
+			var blocks []map[string]any
+			if m.Content != "" {
+				blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				blocks = append(blocks, map[string]any{"type": "tool_use", "id": tc.ID, "name": tc.Name, "input": tc.Arguments})
+			}
+			out = append(out, anthropicMessage{Role: "assistant", Content: blocks})
+		default:
+			out = append(out, anthropicMessage{Role: "user", Content: m.Content})
+		}
+	}
+	return out
+}
+
+// extractSystemPrompt concatenates every "system" message's Content —
+// Anthropic (and Google) take one system prompt string, not a role inside
+// the turn sequence.
+func extractSystemPrompt(msgs []Message) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		if m.Role != "system" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(m.Content)
+	}
+	return b.String()
+}
+
 func (c *anthropicClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
 	base := c.baseURL
 	if baseURL != "" {
 		base = baseURL
 	}
 
-	type msg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
 	body := struct {
-		Model       string  `json:"model"`
-		MaxTokens   int     `json:"max_tokens"`
-		Temperature float64 `json:"temperature,omitempty"`
-		Messages    []msg   `json:"messages"`
-	}{Model: model, MaxTokens: req.MaxTokens, Temperature: req.Temperature}
-	for _, m := range req.Messages {
-		body.Messages = append(body.Messages, msg(m))
+		Model       string             `json:"model"`
+		MaxTokens   int                `json:"max_tokens"`
+		Temperature float64            `json:"temperature,omitempty"`
+		System      string             `json:"system,omitempty"`
+		Messages    []anthropicMessage `json:"messages"`
+		Tools       []anthropicTool    `json:"tools,omitempty"`
+	}{
+		Model: model, MaxTokens: req.MaxTokens, Temperature: req.Temperature,
+		System: extractSystemPrompt(req.Messages), Messages: buildAnthropicMessages(req.Messages),
+	}
+	for _, t := range req.Tools {
+		body.Tools = append(body.Tools, anthropicTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
 	}
 
 	var out struct {
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type  string         `json:"type"`
+			Text  string         `json:"text"`
+			ID    string         `json:"id"`
+			Name  string         `json:"name"`
+			Input map[string]any `json:"input"`
 		} `json:"content"`
 		Usage struct {
 			InputTokens  int64 `json:"input_tokens"`
@@ -294,12 +410,19 @@ func (c *anthropicClient) Complete(ctx context.Context, apiKey, baseURL, model s
 	}
 
 	var text strings.Builder
+	var toolCalls []ToolCall
 	for _, block := range out.Content {
-		if block.Type == "text" {
+		switch block.Type {
+		case "text":
 			text.WriteString(block.Text)
+		case "tool_use":
+			toolCalls = append(toolCalls, ToolCall{ID: block.ID, Name: block.Name, Arguments: block.Input})
 		}
 	}
-	return CompletionResult{Content: text.String(), InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens}, nil
+	return CompletionResult{
+		Content: text.String(), ToolCalls: toolCalls,
+		InputTokens: out.Usage.InputTokens, OutputTokens: out.Usage.OutputTokens,
+	}, nil
 }
 
 // ── OpenAI-compatible family ─────────────────────────────────────────
@@ -335,12 +458,31 @@ func (c *openAICompatibleClient) Complete(ctx context.Context, apiKey, baseURL, 
 
 	messages := make([]openai.ChatCompletionMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
-		messages = append(messages, openai.ChatCompletionMessage{Role: m.Role, Content: m.Content})
+		msg := openai.ChatCompletionMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
+		for _, tc := range m.ToolCalls {
+			args, _ := json.Marshal(tc.Arguments)
+			msg.ToolCalls = append(msg.ToolCalls, openai.ToolCall{
+				ID: tc.ID, Type: openai.ToolTypeFunction,
+				Function: openai.FunctionCall{Name: tc.Name, Arguments: string(args)},
+			})
+		}
+		messages = append(messages, msg)
+	}
+
+	var tools []openai.Tool
+	for _, t := range req.Tools {
+		tools = append(tools, openai.Tool{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name: t.Name, Description: t.Description, Parameters: t.InputSchema,
+			},
+		})
 	}
 
 	resp, err := client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:       model,
 		Messages:    messages,
+		Tools:       tools,
 		MaxTokens:   req.MaxTokens,
 		Temperature: float32(req.Temperature),
 	})
@@ -350,8 +492,15 @@ func (c *openAICompatibleClient) Complete(ctx context.Context, apiKey, baseURL, 
 	if len(resp.Choices) == 0 {
 		return CompletionResult{}, fmt.Errorf("%s: no choices in response", c.label)
 	}
+
+	var toolCalls []ToolCall
+	for _, tc := range resp.Choices[0].Message.ToolCalls {
+		var args map[string]any
+		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+		toolCalls = append(toolCalls, ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: args})
+	}
 	return CompletionResult{
-		Content:      resp.Choices[0].Message.Content,
+		Content: resp.Choices[0].Message.Content, ToolCalls: toolCalls,
 		InputTokens:  int64(resp.Usage.PromptTokens),
 		OutputTokens: int64(resp.Usage.CompletionTokens),
 	}, nil
@@ -403,40 +552,99 @@ type googleClient struct {
 	baseURL string
 }
 
+// googlePart covers the three part shapes this client speaks: plain text,
+// a model-issued function call, and the function's result being replayed
+// back. Gemini correlates a functionResponse to its functionCall by name
+// only — there is no id field in this wire format, unlike Anthropic/OpenAI.
+type googlePart struct {
+	Text             string          `json:"text,omitempty"`
+	FunctionCall     *googleFuncCall `json:"functionCall,omitempty"`
+	FunctionResponse *googleFuncResp `json:"functionResponse,omitempty"`
+}
+type googleFuncCall struct {
+	Name string         `json:"name"`
+	Args map[string]any `json:"args,omitempty"`
+}
+type googleFuncResp struct {
+	Name     string         `json:"name"`
+	Response map[string]any `json:"response,omitempty"`
+}
+type googleContent struct {
+	Role  string       `json:"role,omitempty"`
+	Parts []googlePart `json:"parts"`
+}
+type googleFunctionDeclaration struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+}
+
+// buildGoogleContents translates the platform's provider-agnostic Messages
+// into Gemini's turn shape. "system" messages are excluded — Gemini takes
+// the system prompt as a separate top-level systemInstruction, never a
+// role inside contents[].
+func buildGoogleContents(msgs []Message) []googleContent {
+	out := make([]googleContent, 0, len(msgs))
+	for _, m := range msgs {
+		switch m.Role {
+		case "system":
+			continue
+		case "tool":
+			out = append(out, googleContent{Role: "user", Parts: []googlePart{{
+				FunctionResponse: &googleFuncResp{Name: m.ToolName, Response: map[string]any{"output": m.Content}},
+			}}})
+		case "assistant":
+			var parts []googlePart
+			if m.Content != "" {
+				parts = append(parts, googlePart{Text: m.Content})
+			}
+			for _, tc := range m.ToolCalls {
+				parts = append(parts, googlePart{FunctionCall: &googleFuncCall{Name: tc.Name, Args: tc.Arguments}})
+			}
+			out = append(out, googleContent{Role: "model", Parts: parts})
+		default:
+			out = append(out, googleContent{Role: "user", Parts: []googlePart{{Text: m.Content}}})
+		}
+	}
+	return out
+}
+
 func (c *googleClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
 	base := c.baseURL
 	if baseURL != "" {
 		base = baseURL
 	}
 
-	type part struct {
-		Text string `json:"text"`
-	}
-	type content struct {
-		Role  string `json:"role,omitempty"`
-		Parts []part `json:"parts"`
-	}
 	body := struct {
-		Contents         []content `json:"contents"`
+		Contents          []googleContent `json:"contents"`
+		SystemInstruction *googleContent  `json:"systemInstruction,omitempty"`
+		Tools             []struct {
+			FunctionDeclarations []googleFunctionDeclaration `json:"functionDeclarations"`
+		} `json:"tools,omitempty"`
 		GenerationConfig struct {
 			MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
 			Temperature     float64 `json:"temperature,omitempty"`
 		} `json:"generationConfig"`
-	}{}
+	}{Contents: buildGoogleContents(req.Messages)}
 	body.GenerationConfig.MaxOutputTokens = req.MaxTokens
 	body.GenerationConfig.Temperature = req.Temperature
-	for _, m := range req.Messages {
-		role := "user"
-		if m.Role == "assistant" {
-			role = "model"
+	if sys := extractSystemPrompt(req.Messages); sys != "" {
+		body.SystemInstruction = &googleContent{Parts: []googlePart{{Text: sys}}}
+	}
+	if len(req.Tools) > 0 {
+		decls := make([]googleFunctionDeclaration, 0, len(req.Tools))
+		for _, t := range req.Tools {
+			decls = append(decls, googleFunctionDeclaration{Name: t.Name, Description: t.Description, Parameters: t.InputSchema})
 		}
-		body.Contents = append(body.Contents, content{Role: role, Parts: []part{{Text: m.Content}}})
+		body.Tools = append(body.Tools, struct {
+			FunctionDeclarations []googleFunctionDeclaration `json:"functionDeclarations"`
+		}{FunctionDeclarations: decls})
 	}
 
 	var out struct {
 		Candidates []struct {
 			Content struct {
-				Parts []part `json:"parts"`
+				Parts []googlePart `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
 		UsageMetadata struct {
@@ -461,8 +669,18 @@ func (c *googleClient) Complete(ctx context.Context, apiKey, baseURL, model stri
 	if len(out.Candidates) == 0 || len(out.Candidates[0].Content.Parts) == 0 {
 		return CompletionResult{}, errors.New("google: no candidates in response")
 	}
+
+	var text strings.Builder
+	var toolCalls []ToolCall
+	for _, p := range out.Candidates[0].Content.Parts {
+		if p.FunctionCall != nil {
+			toolCalls = append(toolCalls, ToolCall{Name: p.FunctionCall.Name, Arguments: p.FunctionCall.Args})
+			continue
+		}
+		text.WriteString(p.Text)
+	}
 	return CompletionResult{
-		Content:      out.Candidates[0].Content.Parts[0].Text,
+		Content: text.String(), ToolCalls: toolCalls,
 		InputTokens:  out.UsageMetadata.PromptTokenCount,
 		OutputTokens: out.UsageMetadata.CandidatesTokenCount,
 	}, nil
