@@ -286,7 +286,11 @@ export function AgentStudioPage() {
                   onChange={(refs) => set('tools', refs)}
                 />
               </Field>
-              <Field label="插件" htmlFor="studio-plugin-tools" helper="已安装插件暴露的工具，装了插件却没在这里看到，先去组件广场的「插件」Tab 确认已安装。">
+              <Field
+                label="插件"
+                htmlFor="studio-plugin-tools"
+                helper="已安装插件暴露的能力——包括可调用的工具和渲染器（比如图表渲染，需要勾选才会生效）。装了插件却没在这里看到，先去组件广场的「插件」Tab 确认已安装。"
+              >
                 <PluginToolMultiSelect selected={form.tools} onChange={(refs) => set('tools', refs)} />
               </Field>
               <Field label="Skill" htmlFor="studio-skills" helper="一段打包好的固定做法，调用时把步骤交给模型照做。">

@@ -8,11 +8,12 @@ type InstalledPluginTool = components['schemas']['InstalledPluginTool']
 
 /**
  * capabilities.tools[] 能力选择器的插件半边——GET /plugins/installed/tools
- * 把每个已安装插件的 manifest.extensions.tools[] 解析成
- * "plugin:{plugin_id}/{tool_name}" 这样的 ref，和 ResourceMultiSelect 挑的
- * 资源中心 ref 写进同一个 tools 数组（spec-20 §5.1："不新增字段"）。装了
- * 插件却在这里找不到入口是不给用，所以这个选择器必须和 ResourceMultiSelect
- * 并排放在同一个"tools"字段下，而不是单独一个"插件"步骤。
+ * 把每个已安装插件的 manifest.extensions.tools[] 和 renderers[] 都解析成
+ * "plugin:{plugin_id}/{name}" 这样的 ref，和 ResourceMultiSelect 挑的资源
+ * 中心 ref 写进同一个 tools 数组（spec-20 §5.1："不新增字段"）。renderers[]
+ * 必须一起列出来：一个纯渲染器插件（比如图表渲染，没有任何模型可调用的
+ * 工具）只有它的 ref 被勾进这里，auto_render 才会真的生效——不是装了就自动
+ * 生效，这一步不能省。
  */
 export function PluginToolMultiSelect({ selected, onChange }: { selected: string[]; onChange: (refs: string[]) => void }) {
   const query = useQuery({

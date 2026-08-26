@@ -516,9 +516,16 @@ func (s *Service) ListInstallations(ctx context.Context, ownerID int64) ([]Insta
 // editor's capability picker shows alongside ordinary resource-center
 // refs (spec-20 §5.1: a plugin's tools live in the same namespace, an
 // Agent DSL author never needs to know a ref came from a plugin instead of
-// the resource center). A version whose manifest can no longer be read
-// (deleted, malformed) is skipped for that one installation rather than
-// failing the whole list.
+// the resource center). This includes renderers[] entries, not just
+// tools[]: an auto_render registration only activates once its
+// "plugin:{id}/{renderer_name}" ref appears in some Agent's
+// capabilities.tools[] (authorizePlugin's KindPluginRenderer branch) — a
+// renderer the model never explicitly calls still needs to be referenced
+// for that to happen, so leaving it out here would make a renderer-only
+// plugin (like a chart renderer with no callable tools at all)
+// unreferenceable from the Agent editor, permanently inert. A version
+// whose manifest can no longer be read (deleted, malformed) is skipped for
+// that one installation rather than failing the whole list.
 func (s *Service) ListInstalledTools(ctx context.Context, ownerID int64) ([]InstalledTool, error) {
 	installs, err := s.repo.ListInstallations(ctx, ownerID)
 	if err != nil {
@@ -540,6 +547,12 @@ func (s *Service) ListInstalledTools(ctx context.Context, ownerID int64) ([]Inst
 				ToolName: t.name, Description: t.description,
 			})
 		}
+		for _, r := range manifestRenderers(ver.Manifest) {
+			out = append(out, InstalledTool{
+				Ref: "plugin:" + inst.PluginID + "/" + r.name, PluginID: inst.PluginID,
+				ToolName: r.name, Description: r.description,
+			})
+		}
 	}
 	return out, nil
 }
@@ -550,8 +563,24 @@ type manifestTool struct{ name, description string }
 // wasmEntryFuncNames already walks for the automated gate, but this keeps
 // the name/description instead of the entry's function half.
 func manifestTools(manifest map[string]any) []manifestTool {
+	return namedManifestEntries(manifest, "tools", "")
+}
+
+// manifestRenderers reads manifest.extensions.renderers[] — same {name,
+// entry} shape as tools[], but renderers[] items don't declare their own
+// description (schemas/plugin.schema.json), so a fixed hint fills in
+// instead: added purely so the capability picker doesn't show a bare name
+// with no context about why it's there.
+func manifestRenderers(manifest map[string]any) []manifestTool {
+	return namedManifestEntries(manifest, "renderers", "渲染器：命中即自动接管展示，不需要模型显式调用")
+}
+
+// namedManifestEntries reads one manifest.extensions[point][] array,
+// keeping each item's name and description (tools[] has its own; renderers[]
+// gets defaultDescription instead).
+func namedManifestEntries(manifest map[string]any, point, defaultDescription string) []manifestTool {
 	extensions, _ := manifest["extensions"].(map[string]any)
-	items, _ := extensions["tools"].([]any)
+	items, _ := extensions[point].([]any)
 	out := make([]manifestTool, 0, len(items))
 	for _, item := range items {
 		m, ok := item.(map[string]any)
@@ -563,6 +592,9 @@ func manifestTools(manifest map[string]any) []manifestTool {
 			continue
 		}
 		description, _ := m["description"].(string)
+		if description == "" {
+			description = defaultDescription
+		}
 		out = append(out, manifestTool{name: name, description: description})
 	}
 	return out

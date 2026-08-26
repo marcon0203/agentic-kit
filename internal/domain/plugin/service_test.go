@@ -557,6 +557,45 @@ func TestListInstalledTools_ResolvesManifestToolRefs(t *testing.T) {
 	}
 }
 
+func TestListInstalledTools_IncludesRendererOnlyPlugins(t *testing.T) {
+	// A renderer-only plugin (like the built-in chart renderer) declares
+	// no tools[] at all — its auto_render entry only ever activates once
+	// its ref is in some Agent's capabilities.tools[], so it must still
+	// show up here or it can never be referenced from anywhere.
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
+	ctx := context.Background()
+	cmd := signedUpload(t, priv, "acme.chart-renderer", "1.0.0")
+	cmd.Manifest["extensions"] = map[string]any{
+		"renderers": []any{
+			map[string]any{"name": "chart", "entry": "ui/chart.html", "auto_render": map[string]any{"fenced_lang": []any{"chart"}}},
+		},
+	}
+	if _, err := svc.Upload(ctx, 1, cmd); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if _, err := svc.Install(ctx, 1, plugin.InstallCommand{PluginID: "acme.chart-renderer"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	tools, err := svc.ListInstalledTools(ctx, 1)
+	if err != nil {
+		t.Fatalf("ListInstalledTools: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 installed renderer ref, got %+v", tools)
+	}
+	if tools[0].Ref != "plugin:acme.chart-renderer/chart" {
+		t.Fatalf("unexpected ref: %+v", tools[0])
+	}
+	if tools[0].Description == "" {
+		t.Fatal("expected a non-empty default description for a renderer with none of its own")
+	}
+}
+
 func TestListInstalledTools_EmptyWhenNothingInstalled(t *testing.T) {
 	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	tools, err := svc.ListInstalledTools(context.Background(), 1)

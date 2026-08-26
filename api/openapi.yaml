@@ -1749,11 +1749,15 @@ paths:
   /plugins/installed/tools:
     get:
       tags: [Plugins]
-      summary: 我安装的插件里能引用的 tools[] 能力
+      summary: 我安装的插件里能引用的能力（tools[] + renderers[]）
       description: |
-        把每个已安装且启用的插件版本，其 manifest 里 `extensions.tools[]` 声明的每一项，
-        解析成 `plugin:{plugin_id}/{tool_name}` 这样的 ref——和资源中心的 ref 走同一个
-        `capabilities.tools[]` 数组，Agent 编辑器的能力选择器用这个接口列出可选的插件工具。
+        把每个已安装且启用的插件版本，其 manifest 里 `extensions.tools[]` 和
+        `extensions.renderers[]` 声明的每一项，解析成 `plugin:{plugin_id}/{name}`
+        这样的 ref——和资源中心的 ref 走同一个 `capabilities.tools[]` 数组，Agent
+        编辑器的能力选择器用这个接口列出可选项。renderers[] 也必须出现在这里：一个
+        auto_render 注册只有在它的 ref 被写进某个 Agent 的 capabilities.tools[] 之后
+        才会真正生效（spec-20 §4.2）——纯渲染器插件（没有任何 tools[]）如果不在这里
+        列出来，就永远没有办法被引用、也就永远不会生效。
       operationId: listInstalledPluginTools
       responses:
         '200':
