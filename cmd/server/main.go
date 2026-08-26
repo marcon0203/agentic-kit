@@ -178,6 +178,15 @@ func run() error {
 		pluginRuntime,
 	).WithObjectStore(pluginObjectStore)
 
+	// capabilities.tools[] refs a plugin's tools/renderers under the same
+	// "plugin:{plugin_id}/{name}" namespace resource-center refs live in —
+	// resourceCatalog needs pluginService to resolve those, but pluginService
+	// isn't built until here. Both agentService and runService's dependency
+	// checker already hold this same *postgres.ResourceCatalog pointer, so
+	// wiring the resolver in now (rather than through NewResourceCatalog's
+	// constructor) reaches them too.
+	resourceCatalog.SetPluginResolver(pluginService)
+
 	// Built-in plugins (spec-20 §5.1's "publisher_id NULL = 平台内置") ship
 	// inside this binary and need no upload/signature step — seeding is a
 	// no-op past the first successful run, safe to call on every startup.

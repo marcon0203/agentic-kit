@@ -607,6 +607,88 @@ func TestListInstalledTools_EmptyWhenNothingInstalled(t *testing.T) {
 	}
 }
 
+func TestToolRefStatus_FoundAndEnabledForInstalledTool(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
+	ctx := context.Background()
+	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
+	cmd.Manifest["extensions"] = map[string]any{
+		"tools": []any{
+			map[string]any{"name": "render_chart", "description": "renders a chart", "entry": "plugin.wasm#render_chart"},
+		},
+	}
+	cmd.Files = map[string][]byte{"plugin.wasm": {0x00, 0x61, 0x73, 0x6d}}
+	if _, err := svc.Upload(ctx, 1, cmd); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if _, err := svc.Install(ctx, 1, plugin.InstallCommand{PluginID: "acme.charts"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	found, enabled, ok, err := svc.ToolRefStatus(ctx, 1, "plugin:acme.charts/render_chart")
+	if err != nil {
+		t.Fatalf("ToolRefStatus: %v", err)
+	}
+	if !ok || !found || !enabled {
+		t.Fatalf("expected found+enabled, got found=%v enabled=%v ok=%v", found, enabled, ok)
+	}
+}
+
+func TestToolRefStatus_NotAPluginRefFallsThrough(t *testing.T) {
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
+	_, _, ok, err := svc.ToolRefStatus(context.Background(), 1, "tool:42")
+	if err != nil {
+		t.Fatalf("ToolRefStatus: %v", err)
+	}
+	if ok {
+		t.Fatal("expected ok=false for a non-plugin ref, so callers fall through to their own lookups")
+	}
+}
+
+func TestToolRefStatus_NotInstalledReportsNotFound(t *testing.T) {
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
+	found, _, ok, err := svc.ToolRefStatus(context.Background(), 1, "plugin:acme.charts/render_chart")
+	if err != nil {
+		t.Fatalf("ToolRefStatus: %v", err)
+	}
+	if !ok || found {
+		t.Fatalf("expected ok=true found=false for an uninstalled plugin, got found=%v ok=%v", found, ok)
+	}
+}
+
+func TestToolRefStatus_UnknownToolNameReportsNotFound(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
+	ctx := context.Background()
+	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
+	cmd.Manifest["extensions"] = map[string]any{
+		"tools": []any{
+			map[string]any{"name": "render_chart", "description": "renders a chart", "entry": "plugin.wasm#render_chart"},
+		},
+	}
+	cmd.Files = map[string][]byte{"plugin.wasm": {0x00, 0x61, 0x73, 0x6d}}
+	if _, err := svc.Upload(ctx, 1, cmd); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if _, err := svc.Install(ctx, 1, plugin.InstallCommand{PluginID: "acme.charts"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	found, _, ok, err := svc.ToolRefStatus(ctx, 1, "plugin:acme.charts/does_not_exist")
+	if err != nil {
+		t.Fatalf("ToolRefStatus: %v", err)
+	}
+	if !ok || found {
+		t.Fatalf("expected ok=true found=false for a name the manifest doesn't declare, got found=%v ok=%v", found, ok)
+	}
+}
+
 func TestUninstall_NotInstalledReturnsNotFound(t *testing.T) {
 	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	err := svc.Uninstall(context.Background(), 1, "acme.charts")

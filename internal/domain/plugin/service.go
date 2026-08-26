@@ -557,6 +557,50 @@ func (s *Service) ListInstalledTools(ctx context.Context, ownerID int64) ([]Inst
 	return out, nil
 }
 
+// pluginRefPrefix is the "plugin:" namespace capabilities.tools[] refs use
+// for both callable tools and renderer registrations (spec-20 §5.1).
+const pluginRefPrefix = "plugin:"
+
+// ToolRefStatus resolves one capabilities.tools[] entry that names a plugin
+// ref ("plugin:{plugin_id}/{name}") against the caller's own installations
+// — the plugin-side half of Agent save-time validation, mirrored by
+// ResourceCatalog.ToolStatus for ordinary resource-center refs so both
+// share the same "found"/"enabled" namespace an Agent DSL author never has
+// to tell apart. ok=false means ref isn't shaped like a plugin ref at all,
+// so the caller should fall through to its other lookups instead of
+// reporting not-found on a ref this package was never meant to resolve.
+func (s *Service) ToolRefStatus(ctx context.Context, ownerID int64, ref string) (found, enabled, ok bool, err error) {
+	rest, isPlugin := strings.CutPrefix(ref, pluginRefPrefix)
+	if !isPlugin {
+		return false, false, false, nil
+	}
+	pluginID, name, hasSlash := strings.Cut(rest, "/")
+	if !hasSlash || pluginID == "" || name == "" {
+		return false, false, true, nil
+	}
+
+	inst, err := s.repo.GetInstallation(ctx, ownerID, pluginID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return false, false, true, nil
+		}
+		return false, false, true, err
+	}
+
+	ver, err := s.repo.GetVersion(ctx, inst.PluginID, inst.Version)
+	if err != nil {
+		return false, false, true, nil
+	}
+	names := manifestTools(ver.Manifest)
+	names = append(names, manifestRenderers(ver.Manifest)...)
+	for _, n := range names {
+		if n.name == name {
+			return true, inst.Status == StatusEnabled, true, nil
+		}
+	}
+	return false, false, true, nil
+}
+
 type manifestTool struct{ name, description string }
 
 // manifestTools reads manifest.extensions.tools[] — the same shape
