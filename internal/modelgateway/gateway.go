@@ -1,6 +1,7 @@
 package modelgateway
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -216,6 +217,56 @@ func (e *chainStepError) Unwrap() error { return e.cause }
 // next link; only running out of chain is fatal
 // (ErrAllProvidersUnavailable).
 func (g *Gateway) Complete(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, creds map[string]Credential, req CompletionRequest) (CompletionResult, error) {
+	return g.resolve(ctx, primary, fallbacks, creds, func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error) {
+		return client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, req)
+	})
+}
+
+// StreamDelta is one incremental chunk of a streaming completion — just the
+// text piece a provider just produced. Tool calls are never streamed
+// incrementally here (a partial function-call argument string isn't
+// meaningful to display or act on); they still arrive complete on the
+// terminal CompletionResult exactly as Complete already returns them.
+type StreamDelta struct {
+	TextDelta string
+}
+
+// StreamingClient is implemented by Clients that can speak their
+// provider's token-streaming wire format. Not every provider's Client
+// bothers (CompleteStream degrades gracefully via resolve when one
+// doesn't), so this is a separate, optional interface rather than a method
+// on Client, matching EmbeddingClient's pattern above.
+type StreamingClient interface {
+	CompleteStream(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error)
+}
+
+// CompleteStream is Complete's streaming sibling: onDelta is called with
+// each text chunk as the resolved provider produces it (real incremental
+// deltas for a Client implementing StreamingClient; one single delta
+// carrying the whole answer for one that doesn't — every caller gets
+// *some* progressive callback either way, they just don't all get real
+// token-level granularity). The final CompletionResult is identical in
+// shape to what Complete would have returned, aggregated across the whole
+// stream.
+func (g *Gateway) CompleteStream(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, creds map[string]Credential, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error) {
+	return g.resolve(ctx, primary, fallbacks, creds, func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error) {
+		if sc, ok := client.(StreamingClient); ok {
+			return sc.CompleteStream(ctx, cred.APIKey, cred.BaseURL, spec.Name, req, onDelta)
+		}
+		result, err := client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, req)
+		if err == nil && result.Content != "" && onDelta != nil {
+			onDelta(StreamDelta{TextDelta: result.Content})
+		}
+		return result, err
+	})
+}
+
+// resolve is Complete/CompleteStream's shared fallback-chain walk: try
+// primary, then each fallback in order, stopping at the first call that
+// succeeds. Every failure — network, auth, unknown provider, missing
+// credential — advances to the next link; only running out of chain is
+// fatal (ErrAllProvidersUnavailable).
+func (g *Gateway) resolve(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, creds map[string]Credential, call func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error)) (CompletionResult, error) {
 	chain := make([]ModelSpec, 0, 1+len(fallbacks))
 	chain = append(chain, primary)
 	chain = append(chain, fallbacks...)
@@ -244,7 +295,7 @@ func (g *Gateway) Complete(ctx context.Context, primary ModelSpec, fallbacks []M
 			continue
 		}
 
-		result, err := client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, req)
+		result, err := call(client, cred, spec)
 		if err != nil {
 			lastErr = &chainStepError{spec.Provider, err}
 			continue
@@ -359,12 +410,9 @@ func extractSystemPrompt(msgs []Message) string {
 	return b.String()
 }
 
-func (c *anthropicClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
-	base := c.baseURL
-	if baseURL != "" {
-		base = baseURL
-	}
-
+// anthropicRequestBody builds the request Complete and CompleteStream both
+// send — only the stream field differs between them.
+func anthropicRequestBody(model string, req CompletionRequest, stream bool) any {
 	body := struct {
 		Model       string             `json:"model"`
 		MaxTokens   int                `json:"max_tokens"`
@@ -372,13 +420,25 @@ func (c *anthropicClient) Complete(ctx context.Context, apiKey, baseURL, model s
 		System      string             `json:"system,omitempty"`
 		Messages    []anthropicMessage `json:"messages"`
 		Tools       []anthropicTool    `json:"tools,omitempty"`
+		Stream      bool               `json:"stream,omitempty"`
 	}{
 		Model: model, MaxTokens: req.MaxTokens, Temperature: req.Temperature,
 		System: extractSystemPrompt(req.Messages), Messages: buildAnthropicMessages(req.Messages),
+		Stream: stream,
 	}
 	for _, t := range req.Tools {
 		body.Tools = append(body.Tools, anthropicTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
 	}
+	return body
+}
+
+func (c *anthropicClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
+	base := c.baseURL
+	if baseURL != "" {
+		base = baseURL
+	}
+
+	body := anthropicRequestBody(model, req, false)
 
 	var out struct {
 		Content []struct {
@@ -425,6 +485,135 @@ func (c *anthropicClient) Complete(ctx context.Context, apiKey, baseURL, model s
 	}, nil
 }
 
+// anthropicStreamBlock accumulates one content_block's streamed pieces —
+// either a growing text answer or a tool_use call's incrementally-streamed
+// JSON arguments (input_json_delta), which only parse once content_block_stop
+// says the block is complete.
+type anthropicStreamBlock struct {
+	kind       string // "text" | "tool_use"
+	id, name   string
+	text       strings.Builder
+	partialArg strings.Builder
+}
+
+// CompleteStream implements StreamingClient — Anthropic's
+// text/event-stream framing (https://docs.anthropic.com/en/docs/build-with-claude/streaming):
+// content_block_delta.delta.text_delta chunks are what onDelta forwards;
+// tool_use blocks stream their arguments the same incremental way but are
+// only parsed and surfaced once complete, on content_block_stop.
+func (c *anthropicClient) CompleteStream(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error) {
+	base := c.baseURL
+	if baseURL != "" {
+		base = baseURL
+	}
+	body := anthropicRequestBody(model, req, true)
+
+	blocks := map[int]*anthropicStreamBlock{}
+	var order []int
+	var inputTokens, outputTokens int64
+	var streamErr error
+
+	status, err := postSSE(ctx, c.client, base+"/v1/messages", map[string]string{
+		"x-api-key": apiKey, "anthropic-version": "2023-06-01",
+	}, body, func(eventType string, data []byte) {
+		switch eventType {
+		case "message_start":
+			var ev struct {
+				Message struct {
+					Usage struct {
+						InputTokens int64 `json:"input_tokens"`
+					} `json:"usage"`
+				} `json:"message"`
+			}
+			if json.Unmarshal(data, &ev) == nil {
+				inputTokens = ev.Message.Usage.InputTokens
+			}
+		case "content_block_start":
+			var ev struct {
+				Index        int `json:"index"`
+				ContentBlock struct {
+					Type string `json:"type"`
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				} `json:"content_block"`
+			}
+			if json.Unmarshal(data, &ev) == nil {
+				blocks[ev.Index] = &anthropicStreamBlock{kind: ev.ContentBlock.Type, id: ev.ContentBlock.ID, name: ev.ContentBlock.Name}
+				order = append(order, ev.Index)
+			}
+		case "content_block_delta":
+			var ev struct {
+				Index int `json:"index"`
+				Delta struct {
+					Type        string `json:"type"`
+					Text        string `json:"text"`
+					PartialJSON string `json:"partial_json"`
+				} `json:"delta"`
+			}
+			if json.Unmarshal(data, &ev) != nil {
+				return
+			}
+			b, ok := blocks[ev.Index]
+			if !ok {
+				return
+			}
+			switch ev.Delta.Type {
+			case "text_delta":
+				b.text.WriteString(ev.Delta.Text)
+				if onDelta != nil && ev.Delta.Text != "" {
+					onDelta(StreamDelta{TextDelta: ev.Delta.Text})
+				}
+			case "input_json_delta":
+				b.partialArg.WriteString(ev.Delta.PartialJSON)
+			}
+		case "message_delta":
+			var ev struct {
+				Usage struct {
+					OutputTokens int64 `json:"output_tokens"`
+				} `json:"usage"`
+			}
+			if json.Unmarshal(data, &ev) == nil && ev.Usage.OutputTokens > 0 {
+				outputTokens = ev.Usage.OutputTokens
+			}
+		case "error":
+			var ev struct {
+				Error struct {
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(data, &ev) == nil {
+				streamErr = errors.New(ev.Error.Message)
+			}
+		}
+	})
+	if err != nil {
+		return CompletionResult{}, err
+	}
+	if streamErr != nil {
+		return CompletionResult{}, streamErr
+	}
+	if status < 200 || status >= 300 {
+		return CompletionResult{}, fmt.Errorf("anthropic: http %d", status)
+	}
+
+	var text strings.Builder
+	var toolCalls []ToolCall
+	for _, idx := range order {
+		b := blocks[idx]
+		switch b.kind {
+		case "text":
+			text.WriteString(b.text.String())
+		case "tool_use":
+			var args map[string]any
+			if b.partialArg.Len() > 0 {
+				_ = json.Unmarshal([]byte(b.partialArg.String()), &args)
+			}
+			toolCalls = append(toolCalls, ToolCall{ID: b.id, Name: b.name, Arguments: args})
+		}
+	}
+	return CompletionResult{Content: text.String(), ToolCalls: toolCalls, InputTokens: inputTokens, OutputTokens: outputTokens}, nil
+}
+
 // ── OpenAI-compatible family ─────────────────────────────────────────
 //
 // OpenAI, DeepSeek and Qwen (via DashScope's compatible-mode endpoint) all
@@ -442,20 +631,26 @@ type openAICompatibleClient struct {
 	label string
 }
 
-func (c *openAICompatibleClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
+// openAIClientAndBase resolves the effective base URL and builds an SDK
+// client against it — shared setup between Complete/CompleteStream/Embed.
+func (c *openAICompatibleClient) openAIClientAndBase(apiKey, baseURL string) (*openai.Client, string, error) {
 	base := c.defaultBaseURL
 	if baseURL != "" {
 		base = baseURL
 	}
 	if base == "" {
-		return CompletionResult{}, fmt.Errorf("%s: no base_url configured", c.label)
+		return nil, "", fmt.Errorf("%s: no base_url configured", c.label)
 	}
-
 	cfg := openai.DefaultConfig(apiKey)
 	cfg.BaseURL = strings.TrimSuffix(base, "/")
 	cfg.HTTPClient = c.httpClient
-	client := openai.NewClientWithConfig(cfg)
+	return openai.NewClientWithConfig(cfg), base, nil
+}
 
+// buildOpenAIMessagesAndTools translates the platform's provider-agnostic
+// request into go-openai's shapes — shared between Complete and
+// CompleteStream, which differ only in how they call the SDK.
+func buildOpenAIMessagesAndTools(req CompletionRequest) ([]openai.ChatCompletionMessage, []openai.Tool) {
 	messages := make([]openai.ChatCompletionMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
 		msg := openai.ChatCompletionMessage{Role: m.Role, Content: m.Content, ToolCallID: m.ToolCallID}
@@ -478,6 +673,15 @@ func (c *openAICompatibleClient) Complete(ctx context.Context, apiKey, baseURL, 
 			},
 		})
 	}
+	return messages, tools
+}
+
+func (c *openAICompatibleClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
+	client, _, err := c.openAIClientAndBase(apiKey, baseURL)
+	if err != nil {
+		return CompletionResult{}, err
+	}
+	messages, tools := buildOpenAIMessagesAndTools(req)
 
 	resp, err := client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:       model,
@@ -506,23 +710,108 @@ func (c *openAICompatibleClient) Complete(ctx context.Context, apiKey, baseURL, 
 	}, nil
 }
 
+// openAIToolCallBuilder accumulates one streamed tool_calls[] entry's
+// pieces — the SDK delivers a call's id/name up front and its JSON
+// arguments incrementally across multiple chunks, all addressed by Index
+// (a call's position in the assistant turn, not to be confused with
+// ToolCall.ID).
+type openAIToolCallBuilder struct {
+	id, name string
+	args     strings.Builder
+}
+
+// CompleteStream implements StreamingClient via go-openai's native
+// CreateChatCompletionStream — the SDK already speaks the OpenAI-compatible
+// family's SSE framing, so this needs no hand-rolled parsing the way the
+// two hand-rolled clients (Anthropic, Google) do.
+func (c *openAICompatibleClient) CompleteStream(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error) {
+	client, _, err := c.openAIClientAndBase(apiKey, baseURL)
+	if err != nil {
+		return CompletionResult{}, err
+	}
+	messages, tools := buildOpenAIMessagesAndTools(req)
+
+	stream, err := client.CreateChatCompletionStream(ctx, openai.ChatCompletionRequest{
+		Model:         model,
+		Messages:      messages,
+		Tools:         tools,
+		MaxTokens:     req.MaxTokens,
+		Temperature:   float32(req.Temperature),
+		Stream:        true,
+		StreamOptions: &openai.StreamOptions{IncludeUsage: true},
+	})
+	if err != nil {
+		return CompletionResult{}, fmt.Errorf("%s: %w", c.label, err)
+	}
+	defer stream.Close()
+
+	var text strings.Builder
+	toolBuilders := map[int]*openAIToolCallBuilder{}
+	var toolOrder []int
+	var inputTokens, outputTokens int64
+	for {
+		resp, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return CompletionResult{}, fmt.Errorf("%s: %w", c.label, err)
+		}
+		if resp.Usage != nil {
+			inputTokens, outputTokens = int64(resp.Usage.PromptTokens), int64(resp.Usage.CompletionTokens)
+		}
+		if len(resp.Choices) == 0 {
+			continue
+		}
+		delta := resp.Choices[0].Delta
+		if delta.Content != "" {
+			text.WriteString(delta.Content)
+			if onDelta != nil {
+				onDelta(StreamDelta{TextDelta: delta.Content})
+			}
+		}
+		for _, tc := range delta.ToolCalls {
+			idx := 0
+			if tc.Index != nil {
+				idx = *tc.Index
+			}
+			b, ok := toolBuilders[idx]
+			if !ok {
+				b = &openAIToolCallBuilder{}
+				toolBuilders[idx] = b
+				toolOrder = append(toolOrder, idx)
+			}
+			if tc.ID != "" {
+				b.id = tc.ID
+			}
+			if tc.Function.Name != "" {
+				b.name = tc.Function.Name
+			}
+			b.args.WriteString(tc.Function.Arguments)
+		}
+	}
+
+	var toolCalls []ToolCall
+	for _, idx := range toolOrder {
+		b := toolBuilders[idx]
+		var args map[string]any
+		if b.args.Len() > 0 {
+			_ = json.Unmarshal([]byte(b.args.String()), &args)
+		}
+		toolCalls = append(toolCalls, ToolCall{ID: b.id, Name: b.name, Arguments: args})
+	}
+	return CompletionResult{Content: text.String(), ToolCalls: toolCalls, InputTokens: inputTokens, OutputTokens: outputTokens}, nil
+}
+
 // Embed implements EmbeddingClient. OpenAI, DeepSeek, Qwen (compatible
 // mode) and any "custom" OpenAI-wire-compatible endpoint all publish the
 // same POST /embeddings shape, so this is the one implementation for the
 // whole family, mirroring Complete above.
 func (c *openAICompatibleClient) Embed(ctx context.Context, apiKey, baseURL, model string, texts []string) ([][]float32, error) {
-	base := c.defaultBaseURL
-	if baseURL != "" {
-		base = baseURL
+	client, _, err := c.openAIClientAndBase(apiKey, baseURL)
+	if err != nil {
+		return nil, err
 	}
-	if base == "" {
-		return nil, fmt.Errorf("%s: no base_url configured", c.label)
-	}
-
-	cfg := openai.DefaultConfig(apiKey)
-	cfg.BaseURL = strings.TrimSuffix(base, "/")
-	cfg.HTTPClient = c.httpClient
-	client := openai.NewClientWithConfig(cfg)
 
 	resp, err := client.CreateEmbeddings(ctx, openai.EmbeddingRequestStrings{
 		Input: texts,
@@ -609,19 +898,23 @@ func buildGoogleContents(msgs []Message) []googleContent {
 	return out
 }
 
-func (c *googleClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
-	base := c.baseURL
-	if baseURL != "" {
-		base = baseURL
-	}
+// googleTool mirrors one entry of Gemini's top-level "tools" array — a
+// named type (rather than the inline anonymous struct Complete used to
+// build ad hoc) so CompleteStream can build the identical request shape
+// without duplicating the field tags.
+type googleTool struct {
+	FunctionDeclarations []googleFunctionDeclaration `json:"functionDeclarations"`
+}
 
+// googleRequestBody builds the request Complete and CompleteStream both
+// send — identical for both; Gemini's streaming endpoint takes the exact
+// same body, just a different URL path (:streamGenerateContent).
+func googleRequestBody(req CompletionRequest) any {
 	body := struct {
 		Contents          []googleContent `json:"contents"`
 		SystemInstruction *googleContent  `json:"systemInstruction,omitempty"`
-		Tools             []struct {
-			FunctionDeclarations []googleFunctionDeclaration `json:"functionDeclarations"`
-		} `json:"tools,omitempty"`
-		GenerationConfig struct {
+		Tools             []googleTool    `json:"tools,omitempty"`
+		GenerationConfig  struct {
 			MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
 			Temperature     float64 `json:"temperature,omitempty"`
 		} `json:"generationConfig"`
@@ -636,10 +929,17 @@ func (c *googleClient) Complete(ctx context.Context, apiKey, baseURL, model stri
 		for _, t := range req.Tools {
 			decls = append(decls, googleFunctionDeclaration{Name: t.Name, Description: t.Description, Parameters: t.InputSchema})
 		}
-		body.Tools = append(body.Tools, struct {
-			FunctionDeclarations []googleFunctionDeclaration `json:"functionDeclarations"`
-		}{FunctionDeclarations: decls})
+		body.Tools = append(body.Tools, googleTool{FunctionDeclarations: decls})
 	}
+	return body
+}
+
+func (c *googleClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
+	base := c.baseURL
+	if baseURL != "" {
+		base = baseURL
+	}
+	body := googleRequestBody(req)
 
 	var out struct {
 		Candidates []struct {
@@ -686,6 +986,81 @@ func (c *googleClient) Complete(ctx context.Context, apiKey, baseURL, model stri
 	}, nil
 }
 
+// CompleteStream implements StreamingClient against Gemini's
+// :streamGenerateContent?alt=sse endpoint — each SSE frame's data payload
+// is one full candidate JSON object (not a raw text delta the way
+// Anthropic/OpenAI frame it), so onDelta is called with each frame's text
+// parts as they arrive; a functionCall part is buffered into the final
+// ToolCalls rather than streamed, matching every other Client here.
+func (c *googleClient) CompleteStream(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error) {
+	base := c.baseURL
+	if baseURL != "" {
+		base = baseURL
+	}
+	body := googleRequestBody(req)
+
+	var text strings.Builder
+	var toolCalls []ToolCall
+	var inputTokens, outputTokens int64
+	var streamErr error
+
+	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", base, model, apiKey)
+	status, err := postSSE(ctx, c.client, url, nil, body, func(_ string, data []byte) {
+		var chunk struct {
+			Candidates []struct {
+				Content struct {
+					Parts []googlePart `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+			UsageMetadata struct {
+				PromptTokenCount     int64 `json:"promptTokenCount"`
+				CandidatesTokenCount int64 `json:"candidatesTokenCount"`
+			} `json:"usageMetadata"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(data, &chunk); err != nil {
+			return
+		}
+		if chunk.Error != nil {
+			streamErr = errors.New(chunk.Error.Message)
+			return
+		}
+		if chunk.UsageMetadata.PromptTokenCount > 0 {
+			inputTokens = chunk.UsageMetadata.PromptTokenCount
+		}
+		if chunk.UsageMetadata.CandidatesTokenCount > 0 {
+			outputTokens = chunk.UsageMetadata.CandidatesTokenCount
+		}
+		if len(chunk.Candidates) == 0 {
+			return
+		}
+		for _, p := range chunk.Candidates[0].Content.Parts {
+			if p.FunctionCall != nil {
+				toolCalls = append(toolCalls, ToolCall{Name: p.FunctionCall.Name, Arguments: p.FunctionCall.Args})
+				continue
+			}
+			if p.Text != "" {
+				text.WriteString(p.Text)
+				if onDelta != nil {
+					onDelta(StreamDelta{TextDelta: p.Text})
+				}
+			}
+		}
+	})
+	if err != nil {
+		return CompletionResult{}, err
+	}
+	if streamErr != nil {
+		return CompletionResult{}, streamErr
+	}
+	if status < 200 || status >= 300 {
+		return CompletionResult{}, fmt.Errorf("google: http %d", status)
+	}
+	return CompletionResult{Content: text.String(), ToolCalls: toolCalls, InputTokens: inputTokens, OutputTokens: outputTokens}, nil
+}
+
 // postJSON is the shared low-level helper for the two hand-rolled clients
 // (Anthropic, Google) that don't go through the go-openai SDK.
 func postJSON(ctx context.Context, client *http.Client, url string, headers map[string]string, body, out any) (status int, err error) {
@@ -720,4 +1095,65 @@ func postJSON(ctx context.Context, client *http.Client, url string, headers map[
 		return resp.StatusCode, fmt.Errorf("non-JSON response body: %s", snippet)
 	}
 	return resp.StatusCode, nil
+}
+
+// postSSE is postJSON's streaming sibling for the two hand-rolled clients'
+// CompleteStream (Anthropic, Google) — both speak plain text/event-stream:
+// zero or more "event: <type>\ndata: <json>\n\n" frames (Anthropic always
+// sets event:; Google's alt=sse omits it, so an empty eventType is valid
+// too), terminated by the connection closing. onEvent is called once per
+// complete frame with its accumulated data payload; a frame with an empty
+// data buffer (a bare blank-line keepalive) is skipped.
+func postSSE(ctx context.Context, client *http.Client, url string, headers map[string]string, body any, onEvent func(eventType string, data []byte)) (status int, err error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var eventType string
+	var dataBuf bytes.Buffer
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "event:"):
+			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			if dataBuf.Len() > 0 {
+				dataBuf.WriteByte('\n')
+			}
+			dataBuf.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		case line == "":
+			if dataBuf.Len() > 0 {
+				onEvent(eventType, dataBuf.Bytes())
+			}
+			eventType = ""
+			dataBuf.Reset()
+		}
+	}
+	if dataBuf.Len() > 0 {
+		onEvent(eventType, dataBuf.Bytes())
+	}
+	return resp.StatusCode, scanner.Err()
 }

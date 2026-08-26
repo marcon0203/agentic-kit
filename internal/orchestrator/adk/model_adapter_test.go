@@ -2,6 +2,7 @@ package adk
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"google.golang.org/adk/model"
@@ -154,6 +155,103 @@ func TestGatewayLLM_GenerateContent_ReplaysFunctionCallHistory(t *testing.T) {
 	toolMsg := client.gotReq.Messages[2]
 	if toolMsg.Role != "tool" || toolMsg.ToolCallID != "call_1" || toolMsg.Content != "3 agents" {
 		t.Fatalf("expected the function response to correlate back to call_1 via history, got %+v", toolMsg)
+	}
+}
+
+// TestGatewayLLM_GenerateContent_ReplaysDuplicateToolCallsInOneTurn is the
+// regression test for the follow-up bug: a model calling the same tool
+// twice in one turn (e.g. run_query, run_query) previously lost the first
+// call's ID — a plain map[string]string keyed by function name let the
+// second FunctionCall silently overwrite the first before either
+// FunctionResponse arrived, so one tool_call_id never got a matching tool
+// message and OpenAI-compatible providers rejected the whole request
+// ("assistant message with tool_calls must be followed by tool messages
+// responding to each tool_call_id"). Both calls must now resolve to
+// distinct IDs via FIFO order.
+func TestGatewayLLM_GenerateContent_ReplaysDuplicateToolCallsInOneTurn(t *testing.T) {
+	client := &fakeToolGWClient{}
+	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{"deepseek": client}, nil)
+	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "deepseek", Name: "deepseek-v4-flash"}, nil,
+		map[string]modelgateway.Credential{"deepseek": {APIKey: "sk-test"}})
+
+	req := &model.LLMRequest{
+		Contents: []*genai.Content{
+			genai.NewContentFromText("list two tables", genai.RoleUser),
+			{Role: string(genai.RoleModel), Parts: []*genai.Part{
+				{FunctionCall: &genai.FunctionCall{ID: "call_1", Name: "run_query", Args: map[string]any{"sql": "select 1"}}},
+				{FunctionCall: &genai.FunctionCall{ID: "call_2", Name: "run_query", Args: map[string]any{"sql": "select 2"}}},
+			}},
+			genai.NewContentFromFunctionResponse("run_query", map[string]any{"output": "result 1"}, genai.RoleUser),
+			genai.NewContentFromFunctionResponse("run_query", map[string]any{"output": "result 2"}, genai.RoleUser),
+		},
+	}
+	for range llm.GenerateContent(context.Background(), req, false) {
+	}
+
+	assistantMsg := client.gotReq.Messages[1]
+	if len(assistantMsg.ToolCalls) != 2 || assistantMsg.ToolCalls[0].ID != "call_1" || assistantMsg.ToolCalls[1].ID != "call_2" {
+		t.Fatalf("unexpected assistant tool calls: %+v", assistantMsg.ToolCalls)
+	}
+	toolMsg1, toolMsg2 := client.gotReq.Messages[2], client.gotReq.Messages[3]
+	if toolMsg1.ToolCallID != "call_1" || toolMsg1.Content != "result 1" {
+		t.Fatalf("expected the first response to resolve call_1, got %+v", toolMsg1)
+	}
+	if toolMsg2.ToolCallID != "call_2" || toolMsg2.Content != "result 2" {
+		t.Fatalf("expected the second response to resolve call_2 (not overwritten by call_1), got %+v", toolMsg2)
+	}
+}
+
+// fakeStreamingGWClient implements both modelgateway.Client and
+// modelgateway.StreamingClient — used to verify GenerateContent actually
+// takes the CompleteStream path (and yields Partial responses per delta)
+// when stream=true, instead of the single-shot Complete path.
+type fakeStreamingGWClient struct{ deltas []string }
+
+func (c *fakeStreamingGWClient) Complete(context.Context, string, string, string, modelgateway.CompletionRequest) (modelgateway.CompletionResult, error) {
+	panic("Complete should not be called when stream=true and the client supports CompleteStream")
+}
+
+func (c *fakeStreamingGWClient) CompleteStream(_ context.Context, _, _, _ string, _ modelgateway.CompletionRequest, onDelta func(modelgateway.StreamDelta)) (modelgateway.CompletionResult, error) {
+	var full strings.Builder
+	for _, d := range c.deltas {
+		onDelta(modelgateway.StreamDelta{TextDelta: d})
+		full.WriteString(d)
+	}
+	return modelgateway.CompletionResult{Content: full.String(), InputTokens: 1, OutputTokens: 1}, nil
+}
+
+// TestGatewayLLM_GenerateContent_StreamTrueYieldsPartialChunksThenFinal is
+// the regression test for "试运行的时候消息没有流式输出": runner.go now
+// requests StreamingModeSSE, which makes ADK pass stream=true here — this
+// asserts GenerateContent actually takes the streaming path (not just
+// silently falling back to one blocking call) and yields one Partial
+// LLMResponse per delta before the final non-partial one.
+func TestGatewayLLM_GenerateContent_StreamTrueYieldsPartialChunksThenFinal(t *testing.T) {
+	client := &fakeStreamingGWClient{deltas: []string{"Hello", ", world"}}
+	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{"anthropic": client}, nil)
+	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil,
+		map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}})
+
+	req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hi", genai.RoleUser)}}
+	var responses []*model.LLMResponse
+	for resp, err := range llm.GenerateContent(context.Background(), req, true) {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		responses = append(responses, resp)
+	}
+
+	if len(responses) != 3 {
+		t.Fatalf("expected 2 partial chunks + 1 final response, got %d: %+v", len(responses), responses)
+	}
+	if !responses[0].Partial || contentText(responses[0].Content) != "Hello" {
+		t.Fatalf("unexpected first partial response: %+v", responses[0])
+	}
+	if !responses[1].Partial || contentText(responses[1].Content) != ", world" {
+		t.Fatalf("unexpected second partial response: %+v", responses[1])
+	}
+	if responses[2].Partial || !responses[2].TurnComplete || contentText(responses[2].Content) != "Hello, world" {
+		t.Fatalf("unexpected final response: %+v", responses[2])
 	}
 }
 

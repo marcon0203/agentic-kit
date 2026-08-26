@@ -272,6 +272,51 @@ func TestAnthropicClient_SendsToolResultForToolMessage(t *testing.T) {
 	}
 }
 
+// TestAnthropicClient_CompleteStream_StreamsTextDeltas is the regression
+// test for "试运行的时候消息没有流式输出": Complete always made one blocking
+// call and returned the whole answer at once — this is CompleteStream's
+// SSE path, asserting onDelta actually fires per chunk (not just once at
+// the end) and the aggregated CompletionResult still matches what a
+// non-streaming Complete would have produced.
+func TestAnthropicClient_CompleteStream_StreamsTextDeltas(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body["stream"] != true {
+			t.Fatalf("expected stream=true in the request body, got %v", body["stream"])
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		frames := []string{
+			`event: message_start` + "\n" + `data: {"type":"message_start","message":{"usage":{"input_tokens":10}}}` + "\n\n",
+			`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}` + "\n\n",
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}` + "\n\n",
+			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", world"}}` + "\n\n",
+			`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":0}` + "\n\n",
+			`event: message_delta` + "\n" + `data: {"type":"message_delta","delta":{},"usage":{"output_tokens":5}}` + "\n\n",
+			`event: message_stop` + "\n" + `data: {"type":"message_stop"}` + "\n\n",
+		}
+		for _, f := range frames {
+			_, _ = w.Write([]byte(f))
+		}
+	}))
+	defer srv.Close()
+
+	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
+	var deltas []string
+	result, err := c.CompleteStream(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}}, MaxTokens: 100,
+	}, func(d StreamDelta) { deltas = append(deltas, d.TextDelta) })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deltas) != 2 || deltas[0] != "Hello" || deltas[1] != ", world" {
+		t.Fatalf("expected 2 incremental deltas, got %v", deltas)
+	}
+	if result.Content != "Hello, world" || result.InputTokens != 10 || result.OutputTokens != 5 {
+		t.Fatalf("unexpected aggregated result: %+v", result)
+	}
+}
+
 func TestAnthropicClient_ErrorResponse(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -364,6 +409,37 @@ func TestOpenAICompatibleClient_SendsToolResultWithToolCallID(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestOpenAICompatibleClient_CompleteStream_StreamsTextDeltas(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunks := []string{
+			`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}`,
+			`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":", world"},"finish_reason":null}]}`,
+			`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`,
+		}
+		for _, c := range chunks {
+			_, _ = w.Write([]byte("data: " + c + "\n\n"))
+		}
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
+	var deltas []string
+	result, err := c.CompleteStream(context.Background(), "key", "", "gpt-4o", CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, func(d StreamDelta) { deltas = append(deltas, d.TextDelta) })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deltas) != 2 || deltas[0] != "Hello" || deltas[1] != ", world" {
+		t.Fatalf("expected 2 incremental deltas, got %v", deltas)
+	}
+	if result.Content != "Hello, world" || result.InputTokens != 8 || result.OutputTokens != 4 {
+		t.Fatalf("unexpected aggregated result: %+v", result)
 	}
 }
 
@@ -480,6 +556,38 @@ func TestGoogleClient_SendsFunctionDeclarationsAndParsesFunctionCall(t *testing.
 	}
 	if result.ToolCalls[0].Arguments["sql"] != "select 1" {
 		t.Fatalf("unexpected tool call arguments: %+v", result.ToolCalls[0].Arguments)
+	}
+}
+
+func TestGoogleClient_CompleteStream_StreamsTextDeltas(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.Path, ":streamGenerateContent") {
+			t.Fatalf("expected the streaming endpoint, got %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunks := []string{
+			`{"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}`,
+			`{"candidates":[{"content":{"parts":[{"text":", world"}]}}],"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":3}}`,
+		}
+		for _, c := range chunks {
+			_, _ = w.Write([]byte("data: " + c + "\n\n"))
+		}
+	}))
+	defer srv.Close()
+
+	c := &googleClient{client: srv.Client(), baseURL: srv.URL}
+	var deltas []string
+	result, err := c.CompleteStream(context.Background(), "key", "", "gemini-1.5-pro", CompletionRequest{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, func(d StreamDelta) { deltas = append(deltas, d.TextDelta) })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deltas) != 2 || deltas[0] != "Hello" || deltas[1] != ", world" {
+		t.Fatalf("expected 2 incremental deltas, got %v", deltas)
+	}
+	if result.Content != "Hello, world" || result.InputTokens != 6 || result.OutputTokens != 3 {
+		t.Fatalf("unexpected aggregated result: %+v", result)
 	}
 }
 
@@ -630,6 +738,28 @@ func (f baseURLCapturingClient) Complete(ctx context.Context, apiKey, baseURL, m
 }
 
 // ── pricing ──────────────────────────────────────────────────────────
+
+// TestGateway_CompleteStream_DegradesGracefullyForNonStreamingClient
+// verifies a Client that doesn't implement StreamingClient still works
+// through CompleteStream — one onDelta call with the whole answer, rather
+// than an error or a silently-empty stream.
+func TestGateway_CompleteStream_DegradesGracefullyForNonStreamingClient(t *testing.T) {
+	gw := NewGatewayWithClients(map[string]Client{
+		"anthropic": &fakeClient{content: "the whole answer at once", in: 10, out: 5},
+	}, nil)
+	var deltas []string
+	result, err := gw.CompleteStream(context.Background(), ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil,
+		map[string]Credential{"anthropic": {APIKey: "key"}}, CompletionRequest{}, func(d StreamDelta) { deltas = append(deltas, d.TextDelta) })
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(deltas) != 1 || deltas[0] != "the whole answer at once" {
+		t.Fatalf("expected one delta carrying the whole answer, got %v", deltas)
+	}
+	if result.Content != "the whole answer at once" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
 
 func TestEstimateCost_KnownModel(t *testing.T) {
 	cost := EstimateCost("anthropic", "claude-sonnet-5", 1000, 1000)

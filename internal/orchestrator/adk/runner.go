@@ -80,7 +80,14 @@ func (r *ADKRunner) Run(ctx context.Context, in AgentInput, emit func(Event)) (A
 
 	msg := genai.NewContentFromText(in.Message, genai.RoleUser)
 	var out AgentOutput
-	for ev, err := range rn.Run(ctx, in.UserID, in.SessionID, msg, agent.RunConfig{}) {
+	// StreamingModeSSE is what makes ADK's base flow pass stream=true into
+	// gatewayLLM.GenerateContent (internal/llminternal/base_flow.go's
+	// useStream) — the zero-value RunConfig this used to pass left it
+	// false, so the model call was always single-shot and the frontend's
+	// already-built node.thinking typewriter effect (timeline.ts) never
+	// had anything incremental to accumulate.
+	cfg := agent.RunConfig{StreamingMode: agent.StreamingModeSSE}
+	for ev, err := range rn.Run(ctx, in.UserID, in.SessionID, msg, cfg) {
 		if err != nil {
 			return out, err
 		}

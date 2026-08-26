@@ -39,11 +39,17 @@ func NewGatewayLLM(gw *modelgateway.Gateway, primary modelgateway.ModelSpec, fal
 
 func (m *gatewayLLM) Name() string { return m.primary.Provider + "/" + m.primary.Name }
 
-// GenerateContent implements model.LLM. Streaming isn't supported by the
-// modelgateway completion abstraction yet (spec-09 defines a request/
-// response call, not token streaming) — a stream=true request still gets a
-// single, complete LLMResponse, which is valid per ADK's iterator contract
-// (a non-streaming response is just an iterator of length one).
+// GenerateContent implements model.LLM. stream is true whenever runner.go's
+// RunConfig.StreamingMode is StreamingModeSSE (ADK's base flow decides this
+// upstream, this adapter only reacts to it): each provider text delta then
+// becomes its own Partial LLMResponse via modelgateway.Gateway.CompleteStream,
+// followed by one final non-partial response carrying the aggregated
+// result — exactly what ADK's iterator contract expects, and what
+// TranslateEvent's IsFinalResponse() check already relies on to tell a
+// node.thinking chunk from the node's committed node.finished output.
+// stream=false (sub-agent calls that don't need live display, or a
+// StreamingMode left at its zero value) takes the simpler single-shot
+// Complete path, unchanged from before this existed.
 func (m *gatewayLLM) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
 	return func(yield func(*model.LLMResponse, error) bool) {
 		messages := contentsToMessages(req.Contents)
@@ -74,14 +80,41 @@ func (m *gatewayLLM) GenerateContent(ctx context.Context, req *model.LLMRequest,
 			toolNames = append(toolNames, t.Name)
 		}
 		slog.Info("model_generate_content", "provider", m.primary.Provider, "model", m.primary.Name,
-			"message_count", len(messages), "tools", toolNames)
+			"message_count", len(messages), "tools", toolNames, "stream", stream)
 
-		result, err := m.gateway.Complete(ctx, m.primary, m.fallbacks, m.creds, modelgateway.CompletionRequest{
-			Messages: messages, Tools: tools, MaxTokens: maxTokens, Temperature: temperature,
-		})
+		gwReq := modelgateway.CompletionRequest{Messages: messages, Tools: tools, MaxTokens: maxTokens, Temperature: temperature}
+
+		var result modelgateway.CompletionResult
+		var err error
+		stopped := false
+		if stream {
+			// runner.go requests StreamingModeSSE, which is what makes ADK
+			// pass stream=true here — each text delta becomes its own
+			// Partial LLMResponse so the frontend's node.thinking
+			// typewriter effect (timeline.ts, already built to accumulate
+			// chunks) has something incremental to accumulate instead of
+			// one response arriving all at once at the very end.
+			result, err = m.gateway.CompleteStream(ctx, m.primary, m.fallbacks, m.creds, gwReq, func(d modelgateway.StreamDelta) {
+				if stopped || d.TextDelta == "" {
+					return
+				}
+				if !yield(&model.LLMResponse{
+					Content:      genai.NewContentFromText(d.TextDelta, genai.RoleModel),
+					Partial:      true,
+					TurnComplete: false,
+				}, nil) {
+					stopped = true
+				}
+			})
+		} else {
+			result, err = m.gateway.Complete(ctx, m.primary, m.fallbacks, m.creds, gwReq)
+		}
 		if err != nil {
 			slog.Warn("model_generate_content_failed", "provider", m.primary.Provider, "model", m.primary.Name, "error", err.Error())
 			yield(nil, err)
+			return
+		}
+		if stopped {
 			return
 		}
 		slog.Info("model_generate_content_result", "provider", result.Provider, "model", result.Model,
@@ -215,12 +248,21 @@ func genaiTypeToJSONType(t genai.Type) string {
 // had never been offered any tool at all.
 func contentsToMessages(contents []*genai.Content) []modelgateway.Message {
 	messages := make([]modelgateway.Message, 0, len(contents))
-	// pendingCallID tracks, by function name, the ID of the most recent
-	// unresolved FunctionCall — genai.NewContentFromFunctionResponse (what
-	// ADK's own flow uses to replay a tool's result) never carries the
-	// call's ID, only its Name, so this is how the ID a provider actually
-	// assigned gets recovered for the matching tool-result turn.
-	pendingCallID := map[string]string{}
+	// pendingCallIDs tracks, per function name, the IDs of unresolved
+	// FunctionCalls in call order — genai.NewContentFromFunctionResponse
+	// (what ADK's own flow uses to replay a tool's result) never carries
+	// the call's ID, only its Name, so this is how the ID a provider
+	// actually assigned gets recovered for the matching tool-result turn.
+	// A plain map[string]string here is not enough: when a model calls the
+	// same tool twice in one turn (e.g. two run_query calls), the second
+	// call's ID would silently overwrite the first before either response
+	// arrived, so one of the two original tool_call_ids would never get a
+	// matching tool message — providers reject that outright ("assistant
+	// message with tool_calls must be followed by tool messages responding
+	// to each tool_call_id"). A FIFO queue per name resolves each response
+	// to the earliest still-unanswered call with that name, which matches
+	// how ADK's flow issues and resolves calls in order.
+	pendingCallIDs := map[string][]string{}
 
 	for _, c := range contents {
 		if c == nil {
@@ -238,16 +280,17 @@ func contentsToMessages(contents []*genai.Content) []modelgateway.Message {
 			case p.FunctionCall != nil:
 				id := p.FunctionCall.ID
 				if id == "" {
-					id = "call_" + p.FunctionCall.Name
+					id = fmt.Sprintf("call_%s_%d", p.FunctionCall.Name, len(pendingCallIDs[p.FunctionCall.Name]))
 				}
-				pendingCallID[p.FunctionCall.Name] = id
+				pendingCallIDs[p.FunctionCall.Name] = append(pendingCallIDs[p.FunctionCall.Name], id)
 				calls = append(calls, modelgateway.ToolCall{ID: id, Name: p.FunctionCall.Name, Arguments: p.FunctionCall.Args})
 			case p.FunctionResponse != nil:
-				id, ok := pendingCallID[p.FunctionResponse.Name]
-				if !ok {
+				var id string
+				if queue := pendingCallIDs[p.FunctionResponse.Name]; len(queue) > 0 {
+					id, pendingCallIDs[p.FunctionResponse.Name] = queue[0], queue[1:]
+				} else {
 					id = "call_" + p.FunctionResponse.Name
 				}
-				delete(pendingCallID, p.FunctionResponse.Name)
 				responses = append(responses, modelgateway.Message{
 					Role: "tool", Content: functionResponseText(p.FunctionResponse),
 					ToolCallID: id, ToolName: p.FunctionResponse.Name,
