@@ -1,21 +1,41 @@
 {
   "manifest_version": 1,
   "id": "agentic-kit.chart-renderer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "display_name": "图表渲染器",
-  "description": "系统内置的图表渲染插件：智能体在回复里写一个 ```chart 代码块（JSON 规格：{type, title?, labels, datasets}，type 为 bar/line/pie），无需模型显式调用任何工具，运行时看到这样的代码块就自动接管渲染成图表卡片。纯前端渲染，不需要网络，也不需要 WASM 后端。",
+  "description": "系统内置的图表渲染插件：调用 render_chart 工具，传入图表数据（{type, title?, labels, datasets}，type 为 bar/line/pie），结果自动渲染成图表卡片。工具调用是一个真正的函数调用，在事件流里有确定的先后顺序，不会像\"模型自己在正文里写代码块，再靠事后匹配接管渲染\"那样，在消息里同时出现文字和图表时错位。",
   "author": { "name": "agentic-kit" },
   "license": "MIT",
   "requires": {
     "host_api": ">=1.0 <2.0"
   },
   "extensions": {
-    "renderers": [
+    "tools": [
       {
-        "name": "chart",
-        "entry": "ui/chart.html",
-        "description": "要渲染图表，回复中放一个 ```chart 代码块，内容是这样形状的 JSON（不要任何注释或多余文字）：{\"type\": \"bar\"|\"line\"|\"pie\", \"title\": \"可选标题\", \"labels\": [\"分类1\", \"分类2\", ...], \"datasets\": [{\"label\": \"系列名\", \"data\": [数字, 数字, ...]}]}。labels 是必填字段，其长度必须和每个 dataset.data 的长度一致；pie 图只用第一个 dataset。示例：```chart\n{\"type\": \"bar\", \"title\": \"月度销量\", \"labels\": [\"一月\", \"二月\", \"三月\"], \"datasets\": [{\"label\": \"销量\", \"data\": [120, 200, 150]}]}\n```",
-        "auto_render": { "fenced_lang": ["chart"] }
+        "name": "render_chart",
+        "description": "把图表数据渲染成一张图表卡片展示给用户。先把你要说的话说完（比如\"按智能体分布情况绘制饼图如下：\"），再调用这个工具——不要把图表数据写成 ```chart 代码块贴在正文里，正文里也不需要再重复图表里的数字。labels 长度必须和每个 dataset.data 的长度一致；pie 图只用第一个 dataset。",
+        "input_schema": {
+          "type": "object",
+          "required": ["type", "labels", "datasets"],
+          "properties": {
+            "type": { "type": "string", "enum": ["bar", "line", "pie"] },
+            "title": { "type": "string", "description": "可选标题" },
+            "labels": { "type": "array", "items": { "type": "string" }, "description": "分类/横轴标签" },
+            "datasets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["label", "data"],
+                "properties": {
+                  "label": { "type": "string" },
+                  "data": { "type": "array", "items": { "type": "number" } }
+                }
+              }
+            }
+          }
+        },
+        "entry": "plugin.wasm#render_chart",
+        "ui": "ui/chart.html"
       }
     ]
   }

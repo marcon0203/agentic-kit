@@ -55,11 +55,14 @@
     <canvas id="canvas"></canvas>
     <div id="error"></div>
     <script>
-      // Renderer plugin, no library: a fenced ```chart block's JSON body is
-      // {type: "bar"|"line"|"pie", title?, labels: string[], datasets:
-      // [{label, data: number[]}]}. This is spec-20 §4.2's auto_render
-      // method B — the host decides this block gets handed here purely by
-      // matching the fenced language, the model never calls anything.
+      // Renderer plugin, no library: the render_chart tool's result — a
+      // plain {type: "bar"|"line"|"pie", title?, labels: string[],
+      // datasets: [{label, data: number[]}]} object — is exactly the spec
+      // this renders. This is spec-20 §4.2's method A: an explicit tool
+      // call whose result the host hands straight here as `data`, already
+      // a real JS object (never a JSON string to re-parse) because it
+      // arrived as a real tool result, not text pattern-matched out of the
+      // model's own reply.
       var PALETTE = ['#4f6bed', '#e08a2c', '#2ca089', '#c0475a', '#8a5cd6', '#4a9bd1']
       var PADDING = { top: 16, right: 20, bottom: 28, left: 44 }
 
@@ -212,21 +215,9 @@
       window.addEventListener('message', function (ev) {
         var msg = ev.data
         if (!msg || msg.type !== 'agentic-kit:init') return
-        var payload = msg.data || {}
-        var content = payload.content
-        if (typeof content !== 'string') {
-          showError('没有收到图表数据。')
-          return
-        }
-        var spec
-        try {
-          spec = JSON.parse(content)
-        } catch (e) {
-          showError('图表数据不是合法的 JSON：\n' + content)
-          return
-        }
+        var spec = msg.data
         if (!spec || !Array.isArray(spec.labels)) {
-          showError('图表数据缺少 labels 字段。')
+          showError('没有收到图表数据，或数据缺少 labels 字段。')
           return
         }
         try {

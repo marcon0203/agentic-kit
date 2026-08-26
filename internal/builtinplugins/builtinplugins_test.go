@@ -65,8 +65,12 @@ func TestSeedAll_LoadsAllThreeBuiltins(t *testing.T) {
 	if len(chart.Files["ui/chart.html"]) == 0 {
 		t.Error("expected the chart renderer's ui/chart.html to be non-empty")
 	}
-	if len(chart.Files["plugin.wasm"]) != 0 {
-		t.Error("expected the chart renderer (frontend-only) to ship no wasm module")
+	// The chart renderer is now a real tools[] call (spec-20 §4.2 method
+	// A, render_chart) rather than a frontend-only auto_render match, so
+	// it ships a wasm module like the connectors do — the export does no
+	// real computation, but the call still has to be real.
+	if len(chart.Files["plugin.wasm"]) == 0 {
+		t.Error("expected the chart renderer's plugin.wasm to be non-empty")
 	}
 
 	for id, cmd := range byID {

@@ -20,7 +20,7 @@ var postgresConnectorFS embed.FS
 //go:embed mysqlconnector/plugin.json mysqlconnector/plugin.wasm
 var mysqlConnectorFS embed.FS
 
-//go:embed chartrenderer/plugin.json chartrenderer/ui/chart.html
+//go:embed chartrenderer/plugin.json chartrenderer/plugin.wasm chartrenderer/ui/chart.html
 var chartRendererFS embed.FS
 
 // seedService is the one plugin.Service method SeedAll needs — narrowed to
@@ -42,16 +42,23 @@ type builtin struct {
 // SeedAll seeds every built-in plugin this binary ships with: the
 // PostgreSQL and MySQL connectors (both share one dialect-agnostic wasm
 // module — dialect lives on the connector resource a user binds, not on
-// the plugin — spec-20 §4.3) and the chart renderer (frontend-only, no
-// wasm at all). Safe to call on every server startup — plugin.Service.
-// SeedBuiltin is itself a no-op for a version that already exists. The
-// first error is returned rather than continuing past it, so a caller
-// sees which built-in failed rather than a swallowed partial seed.
+// the plugin — spec-20 §4.3) and the chart renderer (a render_chart tool
+// call whose result an explicit tools[].ui entry renders — spec-20 §4.2
+// method A; its wasm export does no real computation, it only exists so
+// the call is a real, sequenced tool call rather than a fenced code block
+// pattern-matched out of the model's own free text after the fact). Safe
+// to call on every server startup — plugin.Service.SeedBuiltin is itself a
+// no-op for a version that already exists. The first error is returned
+// rather than continuing past it, so a caller sees which built-in failed
+// rather than a swallowed partial seed.
 func SeedAll(ctx context.Context, svc seedService) error {
 	builtins := []builtin{
 		{fs: postgresConnectorFS, files: map[string]string{"plugin.wasm": "postgresconnector/plugin.wasm"}},
 		{fs: mysqlConnectorFS, files: map[string]string{"plugin.wasm": "mysqlconnector/plugin.wasm"}},
-		{fs: chartRendererFS, files: map[string]string{"ui/chart.html": "chartrenderer/ui/chart.html"}},
+		{fs: chartRendererFS, files: map[string]string{
+			"plugin.wasm":   "chartrenderer/plugin.wasm",
+			"ui/chart.html": "chartrenderer/ui/chart.html",
+		}},
 	}
 	manifestPaths := []string{"postgresconnector/plugin.json", "mysqlconnector/plugin.json", "chartrenderer/plugin.json"}
 
