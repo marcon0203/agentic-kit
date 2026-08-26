@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ResourceMultiSelect } from '@/components/agents/ResourceMultiSelect'
+import { PluginToolMultiSelect } from '@/components/agents/PluginToolMultiSelect'
 import { cn } from '@/lib/utils'
 import { validateAgentDefinition, type FieldError } from '@/lib/validation/validateAgent'
 import {
@@ -378,7 +379,13 @@ export function AgentForm({
       {step === 3 && (
       <Section title="能力白名单">
         <Field label="tools" htmlFor="agent-tools">
-          <ResourceMultiSelect types={['tool', 'mcp', 'knowledge_base']} selected={form.tools} onChange={(v) => set('tools', v)} />
+          <div id="agent-tools" className="flex flex-col gap-space-3">
+            <ResourceMultiSelect types={['tool', 'mcp', 'knowledge_base']} selected={form.tools} onChange={(v) => set('tools', v)} />
+            <div>
+              <p className="text-caption mb-space-2 text-ink-500">已安装的插件</p>
+              <PluginToolMultiSelect selected={form.tools} onChange={(v) => set('tools', v)} />
+            </div>
+          </div>
         </Field>
         <Field label="skills" htmlFor="agent-skills">
           <ResourceMultiSelect types={['skill']} selected={form.skills} onChange={(v) => set('skills', v)} />

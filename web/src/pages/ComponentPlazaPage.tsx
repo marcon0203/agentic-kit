@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Search, Puzzle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Search, Puzzle, Check } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -54,7 +55,11 @@ export function ComponentPlazaPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
-  const [tab, setTab] = useState<Tab>('custom')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab: Tab = searchParams.get('tab') === 'plugin' ? 'plugin' : 'custom'
+  function setTab(t: Tab) {
+    setSearchParams(t === 'custom' ? {} : { tab: t })
+  }
   const [draft, setDraft] = useState('')
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
@@ -77,6 +82,18 @@ export function ComponentPlazaPage() {
     enabled: tab === 'plugin',
   })
   const pluginItems = useMemo(() => pluginQuery.data?.items ?? [], [pluginQuery.data])
+
+  const installedQuery = useQuery({
+    queryKey: ['plugins', 'installed'],
+    queryFn: async () =>
+      unwrap<{ items: components['schemas']['PluginInstallation'][] }>(await apiClient.GET('/plugins/installed', {})),
+    enabled: tab === 'plugin',
+  })
+  const installedPluginIDs = useMemo(
+    () => new Set((installedQuery.data?.items ?? []).map((i) => i.plugin_id)),
+    [installedQuery.data],
+  )
+
   const [installTarget, setInstallTarget] = useState<Plugin | null>(null)
 
   const items = useMemo(() => query.data?.items ?? [], [query.data])
@@ -173,7 +190,12 @@ export function ComponentPlazaPage() {
           {pluginItems.length > 0 && (
             <ul className="grid grid-cols-1 gap-space-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {pluginItems.map((p) => (
-                <PluginCard key={p.id} plugin={p} onInstall={() => setInstallTarget(p)} />
+                <PluginCard
+                  key={p.id}
+                  plugin={p}
+                  installed={installedPluginIDs.has(p.plugin_id)}
+                  onInstall={() => setInstallTarget(p)}
+                />
               ))}
             </ul>
           )}
@@ -181,7 +203,10 @@ export function ComponentPlazaPage() {
           <PluginInstallDialog
             plugin={installTarget}
             onClose={() => setInstallTarget(null)}
-            onInstalled={() => queryClient.invalidateQueries({ queryKey: ['plugins'] })}
+            onInstalled={() => {
+              toast('安装成功')
+              queryClient.invalidateQueries({ queryKey: ['plugins'] })
+            }}
           />
         </>
       ) : (
@@ -388,7 +413,7 @@ function pluginManifest(p: Plugin): { description?: string; requires?: { permiss
   return (p.manifest ?? {}) as { description?: string; requires?: { permissions?: string[] } }
 }
 
-function PluginCard({ plugin, onInstall }: { plugin: Plugin; onInstall: () => void }) {
+function PluginCard({ plugin, installed, onInstall }: { plugin: Plugin; installed: boolean; onInstall: () => void }) {
   const manifest = pluginManifest(plugin)
   const name = plugin.display_name || plugin.plugin_id
 
@@ -406,9 +431,16 @@ function PluginCard({ plugin, onInstall }: { plugin: Plugin; onInstall: () => vo
             {plugin.plugin_id}@{plugin.version}
           </span>
         </span>
-        <Button variant="ghost" size="sm" className="text-caption -mt-1 -mr-2 h-7 shrink-0 px-space-2 text-ink-500" onClick={onInstall}>
-          安装
-        </Button>
+        {installed ? (
+          <span className="text-caption -mt-1 -mr-2 flex h-7 shrink-0 items-center gap-1 px-space-2 text-emerald-600">
+            <Check className="size-3.5" aria-hidden />
+            已安装
+          </span>
+        ) : (
+          <Button variant="ghost" size="sm" className="text-caption -mt-1 -mr-2 h-7 shrink-0 px-space-2 text-ink-500" onClick={onInstall}>
+            安装
+          </Button>
+        )}
       </div>
 
       <p className="text-body-sm line-clamp-2 min-h-10 text-ink-500">{manifest.description || '（发布者未填写说明）'}</p>

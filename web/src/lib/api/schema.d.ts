@@ -886,6 +886,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/plugins/installed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我安装过的插件
+         * @description 用于市场列表标出"已安装"，而不是让每个已经装过的插件仍然显示"安装"按钮。
+         */
+        get: operations["listInstalledPlugins"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plugins/installed/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我安装的插件里能引用的 tools[] 能力
+         * @description 把每个已安装且启用的插件版本，其 manifest 里 `extensions.tools[]` 声明的每一项，
+         *     解析成 `plugin:{plugin_id}/{tool_name}` 这样的 ref——和资源中心的 ref 走同一个
+         *     `capabilities.tools[]` 数组，Agent 编辑器的能力选择器用这个接口列出可选的插件工具。
+         */
+        get: operations["listInstalledPluginTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/moderation/plugins": {
         parameters: {
             query?: never;
@@ -1781,6 +1823,13 @@ export interface components {
             status: components["schemas"]["Status"];
             /** Format: date-time */
             created_at: string;
+        };
+        InstalledPluginTool: {
+            /** @example plugin:agentic-kit.postgres-connector/run_query */
+            ref: string;
+            plugin_id: string;
+            tool_name: string;
+            description?: string;
         };
     };
     responses: {
@@ -3521,6 +3570,56 @@ export interface operations {
                     "application/json": components["schemas"]["Envelope"] & {
                         data?: {
                             items?: components["schemas"]["Plugin"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listInstalledPlugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items?: components["schemas"]["PluginInstallation"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    listInstalledPluginTools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items?: components["schemas"]["InstalledPluginTool"][];
                         };
                     };
                 };

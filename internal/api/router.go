@@ -189,6 +189,8 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Get("/plugins", cfg.Plugins.List)
 				r.Post("/plugins", cfg.Plugins.Upload)
 				r.Get("/plugins/market", cfg.Plugins.Market)
+				r.Get("/plugins/installed", cfg.Plugins.ListInstalled)
+				r.Get("/plugins/installed/tools", cfg.Plugins.ListInstalledTools)
 				r.Get("/plugins/{id}", cfg.Plugins.Get)
 				r.Patch("/plugins/{id}", cfg.Plugins.SetVisibility)
 				r.Post("/plugins/{id}/install", cfg.Plugins.Install)

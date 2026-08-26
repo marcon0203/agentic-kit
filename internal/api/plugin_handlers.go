@@ -253,6 +253,56 @@ func (h *PluginHandlers) Market(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, map[string]any{"items": toPluginDTOs(items)})
 }
 
+// ListInstalled handles GET /plugins/installed — every plugin the caller
+// has installed into their own account, so the market UI can mark an
+// already-installed entry instead of always offering "安装".
+func (h *PluginHandlers) ListInstalled(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.svc.ListInstallations(r.Context(), userID)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	out := make([]pluginInstallationDTO, 0, len(items))
+	for _, in := range items {
+		out = append(out, toPluginInstallationDTO(in))
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{"items": out})
+}
+
+type installedToolDTO struct {
+	Ref         string `json:"ref"`
+	PluginID    string `json:"plugin_id"`
+	ToolName    string `json:"tool_name"`
+	Description string `json:"description,omitempty"`
+}
+
+// ListInstalledTools handles GET /plugins/installed/tools — every
+// "plugin:{plugin_id}/{tool_name}" ref the caller's installed plugins make
+// available, resolved from each installed version's manifest. This is
+// what the Agent editor's capability picker needs to let a plugin's tools
+// be added to capabilities.tools[] the same way any resource-center ref
+// is (spec-20 §5.1).
+func (h *PluginHandlers) ListInstalledTools(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.svc.ListInstalledTools(r.Context(), userID)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	out := make([]installedToolDTO, 0, len(items))
+	for _, t := range items {
+		out = append(out, installedToolDTO{Ref: t.Ref, PluginID: t.PluginID, ToolName: t.ToolName, Description: t.Description})
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{"items": out})
+}
+
 // List handles GET /plugins — every version the caller has published
 // themselves. The public market listing is Market, above — deliberately
 // not this endpoint: what you get back here is "what I uploaded," not

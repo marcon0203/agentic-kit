@@ -519,6 +519,55 @@ func TestSeedBuiltin_RequiresObjectStore(t *testing.T) {
 	}
 }
 
+func TestListInstalledTools_ResolvesManifestToolRefs(t *testing.T) {
+	keys := newFakeKeys()
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	keys.byUser[1] = pub
+
+	wasm := &fakeWasmValidator{}
+	svc := plugin.NewService(newFakeRepo(), keys, passValidator{}, &fakeAdmins{}, fakeCipher{}, wasm).WithObjectStore(&fakeObjectStore{})
+	ctx := context.Background()
+	cmd := signedUpload(t, priv, "acme.charts", "1.0.0")
+	cmd.Manifest["extensions"] = map[string]any{
+		"tools": []any{
+			map[string]any{"name": "render_chart", "description": "renders a chart", "entry": "plugin.wasm#render_chart"},
+		},
+	}
+	cmd.Files = map[string][]byte{"plugin.wasm": {0x00, 0x61, 0x73, 0x6d}}
+	if _, err := svc.Upload(ctx, 1, cmd); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if _, err := svc.Install(ctx, 1, plugin.InstallCommand{PluginID: "acme.charts"}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	tools, err := svc.ListInstalledTools(ctx, 1)
+	if err != nil {
+		t.Fatalf("ListInstalledTools: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 installed tool, got %+v", tools)
+	}
+	want := plugin.InstalledTool{
+		Ref: "plugin:acme.charts/render_chart", PluginID: "acme.charts",
+		ToolName: "render_chart", Description: "renders a chart",
+	}
+	if tools[0] != want {
+		t.Fatalf("got %+v, want %+v", tools[0], want)
+	}
+}
+
+func TestListInstalledTools_EmptyWhenNothingInstalled(t *testing.T) {
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
+	tools, err := svc.ListInstalledTools(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("ListInstalledTools: %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("expected no installed tools, got %+v", tools)
+	}
+}
+
 func TestUninstall_NotInstalledReturnsNotFound(t *testing.T) {
 	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	err := svc.Uninstall(context.Background(), 1, "acme.charts")

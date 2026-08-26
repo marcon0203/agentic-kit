@@ -108,6 +108,18 @@ func (c Config) Redact() Config {
 	return out
 }
 
+// InstalledTool is one capabilities.tools[]-referenceable action an
+// installed plugin version exposes (its manifest's extensions.tools[]
+// entries) — what the Agent editor's capability picker needs to let a
+// user add "plugin:{plugin_id}/{tool_name}" to an Agent the same way they
+// pick any other resource ref (spec-20 §5.1: "不新增字段").
+type InstalledTool struct {
+	Ref         string // "plugin:{plugin_id}/{tool_name}"
+	PluginID    string
+	ToolName    string
+	Description string
+}
+
 // Installation is one account's install of one plugin, pinned to a version.
 type Installation struct {
 	ID          int64

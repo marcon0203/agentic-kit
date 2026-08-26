@@ -511,6 +511,63 @@ func (s *Service) ListInstallations(ctx context.Context, ownerID int64) ([]Insta
 	return rows, nil
 }
 
+// ListInstalledTools resolves every enabled installation's manifest into
+// the capabilities.tools[] refs it makes available — what the Agent
+// editor's capability picker shows alongside ordinary resource-center
+// refs (spec-20 §5.1: a plugin's tools live in the same namespace, an
+// Agent DSL author never needs to know a ref came from a plugin instead of
+// the resource center). A version whose manifest can no longer be read
+// (deleted, malformed) is skipped for that one installation rather than
+// failing the whole list.
+func (s *Service) ListInstalledTools(ctx context.Context, ownerID int64) ([]InstalledTool, error) {
+	installs, err := s.repo.ListInstallations(ctx, ownerID)
+	if err != nil {
+		return nil, domain.Internal(err)
+	}
+
+	out := []InstalledTool{}
+	for _, inst := range installs {
+		if inst.Status != StatusEnabled {
+			continue
+		}
+		ver, err := s.repo.GetVersion(ctx, inst.PluginID, inst.Version)
+		if err != nil {
+			continue
+		}
+		for _, t := range manifestTools(ver.Manifest) {
+			out = append(out, InstalledTool{
+				Ref: "plugin:" + inst.PluginID + "/" + t.name, PluginID: inst.PluginID,
+				ToolName: t.name, Description: t.description,
+			})
+		}
+	}
+	return out, nil
+}
+
+type manifestTool struct{ name, description string }
+
+// manifestTools reads manifest.extensions.tools[] — the same shape
+// wasmEntryFuncNames already walks for the automated gate, but this keeps
+// the name/description instead of the entry's function half.
+func manifestTools(manifest map[string]any) []manifestTool {
+	extensions, _ := manifest["extensions"].(map[string]any)
+	items, _ := extensions["tools"].([]any)
+	out := make([]manifestTool, 0, len(items))
+	for _, item := range items {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := m["name"].(string)
+		if name == "" {
+			continue
+		}
+		description, _ := m["description"].(string)
+		out = append(out, manifestTool{name: name, description: description})
+	}
+	return out
+}
+
 // encryptConfig mirrors resource.Service's credential encryption: every
 // IsCredentialKey field's string value is replaced by its ciphertext,
 // everything else passes through.

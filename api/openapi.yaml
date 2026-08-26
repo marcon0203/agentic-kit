@@ -1722,6 +1722,57 @@ paths:
                             items: { $ref: '#/components/schemas/Plugin' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /plugins/installed:
+    get:
+      tags: [Plugins]
+      summary: 我安装过的插件
+      description: 用于市场列表标出"已安装"，而不是让每个已经装过的插件仍然显示"安装"按钮。
+      operationId: listInstalledPlugins
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/PluginInstallation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /plugins/installed/tools:
+    get:
+      tags: [Plugins]
+      summary: 我安装的插件里能引用的 tools[] 能力
+      description: |
+        把每个已安装且启用的插件版本，其 manifest 里 `extensions.tools[]` 声明的每一项，
+        解析成 `plugin:{plugin_id}/{tool_name}` 这样的 ref——和资源中心的 ref 走同一个
+        `capabilities.tools[]` 数组，Agent 编辑器的能力选择器用这个接口列出可选的插件工具。
+      operationId: listInstalledPluginTools
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/InstalledPluginTool' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /moderation/plugins:
     get:
       tags: [Plugins]
@@ -3290,3 +3341,12 @@ components:
           description: 实际授予的 requires.permissions 子集
         status: { $ref: '#/components/schemas/Status' }
         created_at: { type: string, format: date-time }
+
+    InstalledPluginTool:
+      type: object
+      required: [ref, plugin_id, tool_name]
+      properties:
+        ref: { type: string, example: 'plugin:agentic-kit.postgres-connector/run_query' }
+        plugin_id: { type: string }
+        tool_name: { type: string }
+        description: { type: string }
