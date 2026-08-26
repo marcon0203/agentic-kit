@@ -1,0 +1,43 @@
+{
+  "manifest_version": 1,
+  "id": "agentic-kit.postgres-connector",
+  "version": "1.0.0",
+  "display_name": "PostgreSQL 连接器",
+  "description": "系统内置的 PostgreSQL 连接器：通过宿主注入的 connection_ref 读写一个已绑定的 PostgreSQL 连接，插件本身永远拿不到连接串或密码。写权限（allow_write）由连接自身的绑定决定，与本插件的调用无关。",
+  "author": { "name": "agentic-kit" },
+  "license": "MIT",
+  "requires": {
+    "host_api": ">=1.0 <2.0",
+    "services": ["sql"],
+    "permissions": ["read:connection", "write:connection"]
+  },
+  "extensions": {
+    "tools": [
+      {
+        "name": "list_tables",
+        "description": "列出已绑定 PostgreSQL 连接的 public schema 下所有表名（只读，不需要 allow_write）。",
+        "entry": "plugin.wasm#list_tables"
+      },
+      {
+        "name": "run_query",
+        "description": "在已绑定的 PostgreSQL 连接上执行一条只读 SQL 查询，返回行列表。",
+        "input_schema": {
+          "type": "object",
+          "required": ["query"],
+          "properties": { "query": { "type": "string" } }
+        },
+        "entry": "plugin.wasm#run_query"
+      },
+      {
+        "name": "run_write",
+        "description": "在已绑定的 PostgreSQL 连接上执行一条写 SQL 语句。连接若未被授予 allow_write，宿主会直接拒绝，不管这里传什么。",
+        "input_schema": {
+          "type": "object",
+          "required": ["query"],
+          "properties": { "query": { "type": "string" } }
+        },
+        "entry": "plugin.wasm#run_write"
+      }
+    ]
+  }
+}

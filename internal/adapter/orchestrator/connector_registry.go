@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
 
@@ -19,14 +20,28 @@ var (
 )
 
 // dsnBuilders maps a connector resource's declared dialect to how its
-// config fields become a database/sql DSN — a registry-of-one-entry today
-// (postgres, via pgx's own database/sql driver, already an indirect
-// dependency — no new driver to add for a first connector). Adding mysql
-// or clickhouse later is one more map entry, not a redesign, same
-// "注册表项不是 switch" shape as modelgateway's provider registry.
+// config fields become a database/sql DSN — postgres via pgx's own
+// database/sql driver, mysql via go-sql-driver/mysql's, both already
+// dependencies elsewhere in the module (pgx directly, mysql transitively)
+// so neither is a new supply-chain addition for these two built-in
+// connectors. Adding clickhouse or another dialect later is one more map
+// entry, not a redesign, same "注册表项不是 switch" shape as modelgateway's
+// provider registry.
 var dsnBuilders = map[string]func(cfg ConnectorConfig) (driver, dsn string){
 	"postgres": func(cfg ConnectorConfig) (string, string) {
 		return "pgx", fmt.Sprintf("postgres://%s:%s@%s:%d/%s", cfg.Username, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
+	},
+	"mysql": func(cfg ConnectorConfig) (string, string) {
+		// mysql.Config.FormatDSN/ParseDSN round-trip a password containing
+		// DSN-special characters ("@", ":") correctly — building the DSN
+		// by hand the way the postgres builder above does would not.
+		dsnCfg := mysql.NewConfig()
+		dsnCfg.User, dsnCfg.Passwd = cfg.Username, cfg.Password
+		dsnCfg.Net = "tcp"
+		dsnCfg.Addr = fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+		dsnCfg.DBName = cfg.Database
+		dsnCfg.ParseTime = true
+		return "mysql", dsnCfg.FormatDSN()
 	},
 }
 
@@ -61,6 +76,13 @@ type connectorRegistry struct {
 type registeredConn struct {
 	db         *sql.DB
 	allowWrite bool
+	// dialect/database are kept alongside the connection because
+	// SQLSchema's query is dialect-specific (Postgres scopes
+	// information_schema by a fixed "public" schema name; MySQL scopes it
+	// by the database name itself) — everything else here is plain SQL
+	// the driver already made portable.
+	dialect  string
+	database string
 }
 
 // kvStore backs the kv.get/set host functions — persisted so a plugin's
@@ -103,7 +125,7 @@ func (r *connectorRegistry) Bind(ctx context.Context, cfg ConnectorConfig) (conn
 
 	connRef = uuid.NewString()
 	r.mu.Lock()
-	r.conns[connRef] = &registeredConn{db: db, allowWrite: cfg.AllowWrite}
+	r.conns[connRef] = &registeredConn{db: db, allowWrite: cfg.AllowWrite, dialect: cfg.Dialect, database: cfg.Database}
 	r.mu.Unlock()
 	return connRef, nil
 }
@@ -159,12 +181,34 @@ func (r *connectorRegistry) SQLExecute(ctx context.Context, connRef, query strin
 	return result.RowsAffected()
 }
 
+// schemaQueries mirrors dsnBuilders' one-map-entry-per-dialect shape:
+// Postgres' information_schema is scoped by a fixed "public" schema name,
+// MySQL's by the database name itself, so this is the one query that
+// can't be written portably across both.
+var schemaQueries = map[string]struct {
+	sql  string
+	args func(c *registeredConn) []any
+}{
+	"postgres": {
+		sql:  `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`,
+		args: func(*registeredConn) []any { return nil },
+	},
+	"mysql": {
+		sql:  `SELECT table_name FROM information_schema.tables WHERE table_schema = ? ORDER BY table_name`,
+		args: func(c *registeredConn) []any { return []any{c.database} },
+	},
+}
+
 func (r *connectorRegistry) SQLSchema(ctx context.Context, connRef string) ([]string, error) {
 	c, ok := r.get(connRef)
 	if !ok {
 		return nil, errUnknownConnRef
 	}
-	rows, err := c.db.QueryContext(ctx, `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name`)
+	q, ok := schemaQueries[c.dialect]
+	if !ok {
+		return nil, fmt.Errorf("connector: unsupported dialect %q", c.dialect)
+	}
+	rows, err := c.db.QueryContext(ctx, q.sql, q.args(c)...)
 	if err != nil {
 		return nil, err
 	}

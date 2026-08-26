@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"testing"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 func TestDSNBuilders_Postgres(t *testing.T) {
@@ -19,6 +21,64 @@ func TestDSNBuilders_Postgres(t *testing.T) {
 	want := "postgres://u:p@db.internal:5432/app"
 	if dsn != want {
 		t.Errorf("dsn = %q, want %q", dsn, want)
+	}
+}
+
+func TestDSNBuilders_MySQL(t *testing.T) {
+	build, ok := dsnBuilders["mysql"]
+	if !ok {
+		t.Fatal("expected a \"mysql\" dsnBuilder to be registered")
+	}
+	driver, dsn := build(ConnectorConfig{
+		Host: "db.internal", Port: 3306, Database: "app", Username: "u", Password: "p",
+	})
+	if driver != "mysql" {
+		t.Errorf("driver = %q, want \"mysql\"", driver)
+	}
+	want := "u:p@tcp(db.internal:3306)/app?parseTime=true"
+	if dsn != want {
+		t.Errorf("dsn = %q, want %q", dsn, want)
+	}
+}
+
+func TestDSNBuilders_MySQL_RoundTripsSpecialCharacters(t *testing.T) {
+	build, ok := dsnBuilders["mysql"]
+	if !ok {
+		t.Fatal("expected a \"mysql\" dsnBuilder to be registered")
+	}
+	// Building the DSN via mysql.Config.FormatDSN (rather than by hand,
+	// the way the postgres builder does) is what guarantees this parses
+	// back to the same credentials even when the password itself contains
+	// DSN-special characters like "@" or ":".
+	_, dsn := build(ConnectorConfig{Host: "db", Port: 3306, Database: "app", Username: "u", Password: "p@ss:word"})
+	parsed, err := mysql.ParseDSN(dsn)
+	if err != nil {
+		t.Fatalf("ParseDSN(%q): %v", dsn, err)
+	}
+	if parsed.User != "u" || parsed.Passwd != "p@ss:word" || parsed.DBName != "app" {
+		t.Errorf("parsed = %+v, want User=u Passwd=p@ss:word DBName=app", parsed)
+	}
+}
+
+func TestConnectorRegistry_SQLSchema_DispatchesByDialect(t *testing.T) {
+	r := NewConnectorRegistry(nil)
+	r.conns["pg-ref"] = &registeredConn{dialect: "postgres", database: "app"}
+	r.conns["mysql-ref"] = &registeredConn{dialect: "mysql", database: "app"}
+	r.conns["unknown-ref"] = &registeredConn{dialect: "clickhouse"}
+
+	if _, ok := schemaQueries["postgres"]; !ok {
+		t.Fatal("expected a \"postgres\" schema query to be registered")
+	}
+	if _, ok := schemaQueries["mysql"]; !ok {
+		t.Fatal("expected a \"mysql\" schema query to be registered")
+	}
+
+	// SQLSchema itself needs a real *sql.DB to run the query against, so
+	// this only checks the dialect-dispatch failure mode, not a live
+	// query — that's covered by the sql-connector plugin's own end-to-end
+	// test (internal/adapter/extism/connector_plugin_test.go).
+	if _, err := r.SQLSchema(context.Background(), "unknown-ref"); err == nil {
+		t.Fatal("expected an error for a connection bound to an unsupported dialect")
 	}
 }
 

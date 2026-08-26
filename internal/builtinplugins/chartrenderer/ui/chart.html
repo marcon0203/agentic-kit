@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>chart</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        font-family:
+          -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+        color: #1a1a1a;
+        background: #fff;
+      }
+      #title {
+        font-size: 14px;
+        font-weight: 600;
+        padding: 12px 16px 0 16px;
+      }
+      #legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        padding: 4px 16px 0 16px;
+        font-size: 12px;
+        color: #555;
+      }
+      #legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      #legend i {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+      }
+      #error {
+        padding: 16px;
+        color: #b3261e;
+        font-size: 13px;
+        white-space: pre-wrap;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="title"></div>
+    <div id="legend"></div>
+    <canvas id="canvas"></canvas>
+    <div id="error"></div>
+    <script>
+      // Renderer plugin, no library: a fenced ```chart block's JSON body is
+      // {type: "bar"|"line"|"pie", title?, labels: string[], datasets:
+      // [{label, data: number[]}]}. This is spec-20 §4.2's auto_render
+      // method B — the host decides this block gets handed here purely by
+      // matching the fenced language, the model never calls anything.
+      var PALETTE = ['#4f6bed', '#e08a2c', '#2ca089', '#c0475a', '#8a5cd6', '#4a9bd1']
+      var PADDING = { top: 16, right: 20, bottom: 28, left: 44 }
+
+      function postResize() {
+        var height = document.body.scrollHeight
+        parent.postMessage({ type: 'agentic-kit:resize', height: height }, '*')
+      }
+
+      function showError(message) {
+        document.getElementById('error').textContent = message
+        postResize()
+      }
+
+      function drawBarOrLine(ctx, w, h, spec) {
+        var labels = spec.labels || []
+        var datasets = spec.datasets || []
+        var allValues = datasets.reduce(function (acc, d) {
+          return acc.concat(d.data || [])
+        }, [])
+        var maxV = Math.max(0, allValues.reduce(function (a, b) { return Math.max(a, b) }, 0))
+        var minV = Math.min(0, allValues.reduce(function (a, b) { return Math.min(a, b) }, 0))
+        var range = maxV - minV || 1
+
+        var plotW = w - PADDING.left - PADDING.right
+        var plotH = h - PADDING.top - PADDING.bottom
+        var zeroY = PADDING.top + plotH * (maxV / range)
+
+        // axes
+        ctx.strokeStyle = '#ddd'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(PADDING.left, PADDING.top)
+        ctx.lineTo(PADDING.left, PADDING.top + plotH)
+        ctx.lineTo(PADDING.left + plotW, PADDING.top + plotH)
+        ctx.stroke()
+
+        // y ticks (0, mid, max)
+        ctx.fillStyle = '#888'
+        ctx.font = '10px sans-serif'
+        ctx.textAlign = 'right'
+        ;[maxV, (maxV + minV) / 2, minV].forEach(function (v) {
+          var y = PADDING.top + plotH * ((maxV - v) / range)
+          ctx.fillText(v.toFixed(v % 1 === 0 ? 0 : 1), PADDING.left - 6, y + 3)
+        })
+
+        var n = labels.length || 1
+        var slot = plotW / n
+
+        if (spec.type === 'line') {
+          datasets.forEach(function (ds, di) {
+            ctx.strokeStyle = PALETTE[di % PALETTE.length]
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ;(ds.data || []).forEach(function (v, i) {
+              var x = PADDING.left + slot * (i + 0.5)
+              var y = PADDING.top + plotH * ((maxV - v) / range)
+              if (i === 0) ctx.moveTo(x, y)
+              else ctx.lineTo(x, y)
+            })
+            ctx.stroke()
+            ctx.fillStyle = PALETTE[di % PALETTE.length]
+            ;(ds.data || []).forEach(function (v, i) {
+              var x = PADDING.left + slot * (i + 0.5)
+              var y = PADDING.top + plotH * ((maxV - v) / range)
+              ctx.beginPath()
+              ctx.arc(x, y, 2.5, 0, Math.PI * 2)
+              ctx.fill()
+            })
+          })
+        } else {
+          var groupW = slot * 0.7
+          var barW = groupW / Math.max(1, datasets.length)
+          datasets.forEach(function (ds, di) {
+            ctx.fillStyle = PALETTE[di % PALETTE.length]
+            ;(ds.data || []).forEach(function (v, i) {
+              var x = PADDING.left + slot * i + (slot - groupW) / 2 + barW * di
+              var y = PADDING.top + plotH * ((maxV - Math.max(v, 0)) / range)
+              var barH = Math.abs(plotH * (v / range))
+              ctx.fillRect(x, v >= 0 ? y : zeroY, Math.max(1, barW - 2), barH)
+            })
+          })
+        }
+
+        ctx.fillStyle = '#555'
+        ctx.font = '11px sans-serif'
+        ctx.textAlign = 'center'
+        labels.forEach(function (label, i) {
+          var x = PADDING.left + slot * (i + 0.5)
+          ctx.fillText(String(label), x, PADDING.top + plotH + 18)
+        })
+      }
+
+      function drawPie(ctx, w, h, spec) {
+        var labels = spec.labels || []
+        var values = (spec.datasets && spec.datasets[0] && spec.datasets[0].data) || []
+        var total = values.reduce(function (a, b) { return a + b }, 0) || 1
+        var cx = w / 2
+        var cy = PADDING.top + (h - PADDING.top - PADDING.bottom) / 2
+        var r = Math.max(10, Math.min(cx, cy) - 8)
+
+        var start = -Math.PI / 2
+        values.forEach(function (v, i) {
+          var angle = (v / total) * Math.PI * 2
+          ctx.fillStyle = PALETTE[i % PALETTE.length]
+          ctx.beginPath()
+          ctx.moveTo(cx, cy)
+          ctx.arc(cx, cy, r, start, start + angle)
+          ctx.closePath()
+          ctx.fill()
+          start += angle
+        })
+      }
+
+      function renderLegend(spec) {
+        var el = document.getElementById('legend')
+        var labels = spec.type === 'pie' ? spec.labels || [] : (spec.datasets || []).map(function (d) { return d.label || '' })
+        el.innerHTML = ''
+        labels.forEach(function (label, i) {
+          if (!label) return
+          var span = document.createElement('span')
+          var swatch = document.createElement('i')
+          swatch.style.background = PALETTE[i % PALETTE.length]
+          span.appendChild(swatch)
+          span.appendChild(document.createTextNode(label))
+          el.appendChild(span)
+        })
+      }
+
+      function render(spec) {
+        document.getElementById('title').textContent = spec.title || ''
+        renderLegend(spec)
+
+        var canvas = document.getElementById('canvas')
+        var w = document.body.clientWidth || 480
+        var h = 260
+        var dpr = window.devicePixelRatio || 1
+        canvas.width = w * dpr
+        canvas.height = h * dpr
+        canvas.style.height = h + 'px'
+        var ctx = canvas.getContext('2d')
+        ctx.scale(dpr, dpr)
+        ctx.clearRect(0, 0, w, h)
+
+        if (spec.type === 'pie') drawPie(ctx, w, h, spec)
+        else drawBarOrLine(ctx, w, h, spec)
+
+        postResize()
+      }
+
+      window.addEventListener('message', function (ev) {
+        var msg = ev.data
+        if (!msg || msg.type !== 'agentic-kit:init') return
+        var payload = msg.data || {}
+        var content = payload.content
+        if (typeof content !== 'string') {
+          showError('没有收到图表数据。')
+          return
+        }
+        var spec
+        try {
+          spec = JSON.parse(content)
+        } catch (e) {
+          showError('图表数据不是合法的 JSON：\n' + content)
+          return
+        }
+        if (!spec || !Array.isArray(spec.labels)) {
+          showError('图表数据缺少 labels 字段。')
+          return
+        }
+        try {
+          render(spec)
+        } catch (e) {
+          showError('渲染失败：' + e.message)
+        }
+      })
+
+      window.addEventListener('resize', postResize)
+    </script>
+  </body>
+</html>

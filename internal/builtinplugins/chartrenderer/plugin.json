@@ -1,0 +1,21 @@
+{
+  "manifest_version": 1,
+  "id": "agentic-kit.chart-renderer",
+  "version": "1.0.0",
+  "display_name": "图表渲染器",
+  "description": "系统内置的图表渲染插件：智能体在回复里写一个 ```chart 代码块（JSON 规格：{type, title?, labels, datasets}，type 为 bar/line/pie），无需模型显式调用任何工具，运行时看到这样的代码块就自动接管渲染成图表卡片。纯前端渲染，不需要网络，也不需要 WASM 后端。",
+  "author": { "name": "agentic-kit" },
+  "license": "MIT",
+  "requires": {
+    "host_api": ">=1.0 <2.0"
+  },
+  "extensions": {
+    "renderers": [
+      {
+        "name": "chart",
+        "entry": "ui/chart.html",
+        "auto_render": { "fenced_lang": ["chart"] }
+      }
+    ]
+  }
+}

@@ -14,8 +14,14 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
 )
 
-//go:embed sqlconnector/plugin.json sqlconnector/plugin.wasm
-var sqlConnectorFS embed.FS
+//go:embed postgresconnector/plugin.json postgresconnector/plugin.wasm
+var postgresConnectorFS embed.FS
+
+//go:embed mysqlconnector/plugin.json mysqlconnector/plugin.wasm
+var mysqlConnectorFS embed.FS
+
+//go:embed chartrenderer/plugin.json chartrenderer/ui/chart.html
+var chartRendererFS embed.FS
 
 // seedService is the one plugin.Service method SeedAll needs — narrowed to
 // a port so this package doesn't have to import the concrete Service type
@@ -24,44 +30,68 @@ type seedService interface {
 	SeedBuiltin(ctx context.Context, cmd plugin.SeedBuiltinCommand) (plugin.Plugin, error)
 }
 
-// SeedAll seeds every built-in plugin this binary ships with. Safe to call
-// on every server startup — plugin.Service.SeedBuiltin is itself a no-op
-// for a version that already exists. svc.SeedBuiltin returning an error
-// here (most likely "OSS not configured on this deployment") is reported
-// to the caller rather than swallowed, since a caller may want to log it
-// as a warning rather than fail startup over it.
+// builtin is one embedded plugin's file set: its plugin.json plus every
+// other file the manifest's OSS prefix needs, each already keyed the way
+// they'll be stored (a wasm module always under "plugin.wasm", a
+// renderer's static assets under their own manifest-relative path).
+type builtin struct {
+	fs    embed.FS
+	files map[string]string // OSS-relative path -> path inside fs
+}
+
+// SeedAll seeds every built-in plugin this binary ships with: the
+// PostgreSQL and MySQL connectors (both share one dialect-agnostic wasm
+// module — dialect lives on the connector resource a user binds, not on
+// the plugin — spec-20 §4.3) and the chart renderer (frontend-only, no
+// wasm at all). Safe to call on every server startup — plugin.Service.
+// SeedBuiltin is itself a no-op for a version that already exists. The
+// first error is returned rather than continuing past it, so a caller
+// sees which built-in failed rather than a swallowed partial seed.
 func SeedAll(ctx context.Context, svc seedService) error {
-	cmd, err := loadEmbedded(sqlConnectorFS, "sqlconnector")
-	if err != nil {
-		return fmt.Errorf("builtinplugins: %w", err)
+	builtins := []builtin{
+		{fs: postgresConnectorFS, files: map[string]string{"plugin.wasm": "postgresconnector/plugin.wasm"}},
+		{fs: mysqlConnectorFS, files: map[string]string{"plugin.wasm": "mysqlconnector/plugin.wasm"}},
+		{fs: chartRendererFS, files: map[string]string{"ui/chart.html": "chartrenderer/ui/chart.html"}},
 	}
-	if _, err := svc.SeedBuiltin(ctx, cmd); err != nil {
-		return fmt.Errorf("builtinplugins: seed %q: %w", cmd.PluginID, err)
+	manifestPaths := []string{"postgresconnector/plugin.json", "mysqlconnector/plugin.json", "chartrenderer/plugin.json"}
+
+	for i, b := range builtins {
+		cmd, err := loadEmbedded(b.fs, manifestPaths[i], b.files)
+		if err != nil {
+			return fmt.Errorf("builtinplugins: %w", err)
+		}
+		if _, err := svc.SeedBuiltin(ctx, cmd); err != nil {
+			return fmt.Errorf("builtinplugins: seed %q: %w", cmd.PluginID, err)
+		}
 	}
 	return nil
 }
 
-// loadEmbedded reads one embedded plugin's plugin.json + plugin.wasm into
-// a SeedBuiltinCommand — the same {manifest, Files} shape UploadCommand
-// uses, so validateAndStore treats a built-in exactly like an upload.
-func loadEmbedded(fs embed.FS, dir string) (plugin.SeedBuiltinCommand, error) {
-	manifestRaw, err := fs.ReadFile(dir + "/plugin.json")
+// loadEmbedded reads one embedded plugin's plugin.json plus its other
+// files into a SeedBuiltinCommand — the same {manifest, Files} shape
+// UploadCommand uses, so validateAndStore treats a built-in exactly like
+// an upload. files maps the OSS-relative key each file is stored (and
+// referenced from the manifest) under, to its path inside fs.
+func loadEmbedded(fs embed.FS, manifestPath string, files map[string]string) (plugin.SeedBuiltinCommand, error) {
+	manifestRaw, err := fs.ReadFile(manifestPath)
 	if err != nil {
-		return plugin.SeedBuiltinCommand{}, fmt.Errorf("read %s/plugin.json: %w", dir, err)
+		return plugin.SeedBuiltinCommand{}, fmt.Errorf("read %s: %w", manifestPath, err)
 	}
 	var manifest map[string]any
 	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
-		return plugin.SeedBuiltinCommand{}, fmt.Errorf("parse %s/plugin.json: %w", dir, err)
+		return plugin.SeedBuiltinCommand{}, fmt.Errorf("parse %s: %w", manifestPath, err)
 	}
-	wasmBytes, err := fs.ReadFile(dir + "/plugin.wasm")
-	if err != nil {
-		return plugin.SeedBuiltinCommand{}, fmt.Errorf("read %s/plugin.wasm: %w", dir, err)
+
+	out := make(map[string][]byte, len(files))
+	for ossKey, fsPath := range files {
+		content, err := fs.ReadFile(fsPath)
+		if err != nil {
+			return plugin.SeedBuiltinCommand{}, fmt.Errorf("read %s: %w", fsPath, err)
+		}
+		out[ossKey] = content
 	}
 
 	pluginID, _ := manifest["id"].(string)
 	version, _ := manifest["version"].(string)
-	return plugin.SeedBuiltinCommand{
-		PluginID: pluginID, Version: version, Manifest: manifest,
-		Files: map[string][]byte{"plugin.wasm": wasmBytes},
-	}, nil
+	return plugin.SeedBuiltinCommand{PluginID: pluginID, Version: version, Manifest: manifest, Files: out}, nil
 }
