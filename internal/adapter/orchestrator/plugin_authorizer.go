@@ -61,7 +61,7 @@ func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpe
 		return adk.ToolSpec{}, false, err
 	}
 
-	if entry, description, ok := findExtensionEntry(manifest, "tools", name); ok {
+	if entry, description, inputSchema, ok := findExtensionEntry(manifest, "tools", name); ok {
 		funcName, err := adk.ParsePluginEntry(entry)
 		if err != nil {
 			return adk.ToolSpec{}, false, err
@@ -81,6 +81,9 @@ func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpe
 		}
 		if description != "" {
 			config["description"] = description
+		}
+		if len(inputSchema) > 0 {
+			config[adk.PluginConfigKeyInputSchema] = inputSchema
 		}
 		if uiEntry := findToolUIEntry(manifest, name); uiEntry != "" {
 			config[adk.PluginConfigKeyUIEntry] = uiEntry
@@ -297,9 +300,10 @@ func findRendererEntry(manifest map[string]any, name string) (entry string, fenc
 
 // findExtensionEntry looks up one named item in manifest.extensions[point]
 // (schemas/plugin.schema.json's tools/connectors array shape — both use
-// {name, entry, description?}), returning its entry string and optional
-// description.
-func findExtensionEntry(manifest map[string]any, point, name string) (entry, description string, ok bool) {
+// {name, entry, description?}), returning its entry string, optional
+// description, and optional input_schema (tools[] only — connectors[]
+// entries never carry one, so this is simply nil for that point).
+func findExtensionEntry(manifest map[string]any, point, name string) (entry, description string, inputSchema map[string]any, ok bool) {
 	extensions, _ := manifest["extensions"].(map[string]any)
 	items, _ := extensions[point].([]any)
 	for _, item := range items {
@@ -312,9 +316,10 @@ func findExtensionEntry(manifest map[string]any, point, name string) (entry, des
 		}
 		entry, _ = m["entry"].(string)
 		description, _ = m["description"].(string)
-		return entry, description, entry != ""
+		inputSchema, _ = m["input_schema"].(map[string]any)
+		return entry, description, inputSchema, entry != ""
 	}
-	return "", "", false
+	return "", "", nil, false
 }
 
 // requiresNetwork reads manifest.requires.network — the AllowedHosts

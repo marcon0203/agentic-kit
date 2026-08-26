@@ -31,22 +31,28 @@ func TestFindExtensionEntry(t *testing.T) {
 	manifest := map[string]any{
 		"extensions": map[string]any{
 			"tools": []any{
-				map[string]any{"name": "render_chart", "entry": "plugin.wasm#render_chart", "description": "renders a chart"},
+				map[string]any{
+					"name": "render_chart", "entry": "plugin.wasm#render_chart", "description": "renders a chart",
+					"input_schema": map[string]any{"type": "object", "required": []any{"query"}, "properties": map[string]any{"query": map[string]any{"type": "string"}}},
+				},
 			},
 		},
 	}
-	entry, description, ok := findExtensionEntry(manifest, "tools", "render_chart")
+	entry, description, inputSchema, ok := findExtensionEntry(manifest, "tools", "render_chart")
 	if !ok {
 		t.Fatal("expected ok")
 	}
 	if entry != "plugin.wasm#render_chart" || description != "renders a chart" {
 		t.Fatalf("unexpected result: entry=%q description=%q", entry, description)
 	}
+	if inputSchema["type"] != "object" {
+		t.Fatalf("expected input_schema to be passed through, got %+v", inputSchema)
+	}
 
-	if _, _, ok := findExtensionEntry(manifest, "tools", "does_not_exist"); ok {
+	if _, _, _, ok := findExtensionEntry(manifest, "tools", "does_not_exist"); ok {
 		t.Fatal("expected no match for an unknown tool name")
 	}
-	if _, _, ok := findExtensionEntry(manifest, "connectors", "render_chart"); ok {
+	if _, _, _, ok := findExtensionEntry(manifest, "connectors", "render_chart"); ok {
 		t.Fatal("expected no match when looking in the wrong extension point")
 	}
 }
