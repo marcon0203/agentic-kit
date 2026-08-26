@@ -2,9 +2,11 @@ package adk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/tool"
 	"google.golang.org/adk/tool/functiontool"
@@ -57,6 +59,15 @@ const (
 	// §4.2 method A) — compileTools reads this to also register a
 	// RendererRegistration alongside building the callable tool.
 	PluginConfigKeyUIEntry = "ui_entry"
+	// PluginConfigKeyInputSchema carries a tools[] entry's own
+	// input_schema (schemas/plugin.schema.json, a standard JSON Schema
+	// object, map[string]any) straight through to the ADK tool
+	// declaration the model sees — without this, every plugin tool
+	// declares the same generic {"input": "free-form text or JSON"}
+	// parameter regardless of what the manifest actually asks for, and
+	// the model has to guess (usually wrong, usually more than once) how
+	// to shape a request like run_query's {"query": "..."}.
+	PluginConfigKeyInputSchema = "input_schema"
 )
 
 // ParsePluginEntry splits a manifest tools[].entry string
@@ -74,17 +85,19 @@ func ParsePluginEntry(entry string) (funcName string, err error) {
 	return fn, nil
 }
 
-type pluginToolArgs struct {
-	Input string `json:"input" jsonschema_description:"Input passed to the plugin tool, as free-form text or JSON."`
-}
-type pluginToolResult struct {
-	Output string `json:"output"`
-}
-
 // BuildPluginTool builds the ADK tool.Tool for one plugin `tools[]`
 // extension entry. spec.Ref is the tool's registration name (what the
 // model sees); spec.Config carries everything BuildPluginTool needs to
 // actually invoke it, populated by the Authorizer.
+//
+// Arguments and results travel as plain map[string]any, not a fixed Go
+// struct: a plugin declares its own input_schema in plugin.json, so the
+// declaration the model sees — and the JSON bytes the WASM side actually
+// receives — must match whatever that plugin asked for (run_query's
+// {"query": "..."}, list_tables' no arguments at all, or anything a
+// third-party plugin author's own input_schema describes), not a single
+// generic "input" string every plugin was forced to squeeze itself into
+// before this.
 func BuildPluginTool(spec ToolSpec, runtime PluginRuntime) (tool.Tool, error) {
 	if runtime == nil {
 		return nil, fmt.Errorf("plugin tool %q: no plugin runtime configured", spec.Ref)
@@ -114,14 +127,66 @@ func BuildPluginTool(spec ToolSpec, runtime PluginRuntime) (tool.Tool, error) {
 		description = fmt.Sprintf("Calls the %q plugin tool.", spec.Ref)
 	}
 
-	return functiontool.New(functiontool.Config{Name: SanitizePluginToolName(spec.Ref), Description: description},
-		func(ctx agent.ToolContext, args pluginToolArgs) (pluginToolResult, error) {
-			output, err := runtime.Call(ctx, wasmKey, wasmBytes, opts, funcName, []byte(args.Input))
-			if err != nil {
-				return pluginToolResult{}, fmt.Errorf("plugin tool %q: %w", spec.Ref, err)
-			}
-			return pluginToolResult{Output: string(output)}, nil
+	cfg := functiontool.Config{Name: SanitizePluginToolName(spec.Ref), Description: description}
+	if raw, ok := spec.Config[PluginConfigKeyInputSchema].(map[string]any); ok && len(raw) > 0 {
+		schema, err := manifestInputSchema(raw)
+		if err != nil {
+			return nil, fmt.Errorf("plugin tool %q: manifest input_schema: %w", spec.Ref, err)
+		}
+		cfg.InputSchema = schema
+	}
+
+	return functiontool.New(cfg,
+		func(ctx agent.ToolContext, args map[string]any) (map[string]any, error) {
+			return callPluginTool(ctx, runtime, spec.Ref, wasmKey, wasmBytes, opts, funcName, args)
 		})
+}
+
+// callPluginTool does the actual marshal-call-unmarshal work behind a
+// plugin tool's Run. Split out from BuildPluginTool's closure so it can be
+// exercised directly in tests without going through ADK's functiontool.Run
+// — which requires a real, non-nil agent.ToolContext (it calls
+// ctx.ToolConfirmation()), unlike the ProcessRequest path.
+func callPluginTool(ctx context.Context, runtime PluginRuntime, ref, wasmKey string, wasmBytes []byte, opts PluginRuntimeOptions, funcName string, args map[string]any) (map[string]any, error) {
+	input, err := json.Marshal(args)
+	if err != nil {
+		return nil, fmt.Errorf("plugin tool %q: encode arguments: %w", ref, err)
+	}
+	output, err := runtime.Call(ctx, wasmKey, wasmBytes, opts, funcName, input)
+	if err != nil {
+		return nil, fmt.Errorf("plugin tool %q: %w", ref, err)
+	}
+	// A plugin's export normally returns a JSON object (the sample
+	// SQL connector's ToolOutput{rows}/WriteOutput{affected_rows},
+	// see examples/plugins/sql-connector) — hand that back as-is so
+	// the model sees real field names instead of one more layer of
+	// string-wrapping. A plugin that returns plain text/non-JSON
+	// still gets a usable result via the "output" fallback key.
+	var result map[string]any
+	if err := json.Unmarshal(output, &result); err != nil || result == nil {
+		return map[string]any{"output": string(output)}, nil
+	}
+	return result, nil
+}
+
+// manifestInputSchema converts a tools[] entry's input_schema — already
+// decoded as a generic map[string]any from the manifest's own JSON — into
+// the *jsonschema.Schema type functiontool.Config.InputSchema expects.
+// Round-tripping through json.Marshal/Unmarshal (rather than a field-by-
+// field conversion) is deliberate: jsonschema.Schema implements its own
+// UnmarshalJSON to handle JSON Schema's polymorphic bits (type vs types,
+// etc.), and re-deriving that logic by hand would just be a second,
+// drifting copy of it.
+func manifestInputSchema(raw map[string]any) (*jsonschema.Schema, error) {
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(b, &schema); err != nil {
+		return nil, err
+	}
+	return &schema, nil
 }
 
 // SanitizePluginToolName turns a "plugin:{id}/{tool}" ref into a name most

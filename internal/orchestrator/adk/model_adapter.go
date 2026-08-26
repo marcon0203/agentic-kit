@@ -9,6 +9,7 @@ package adk
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -153,6 +154,20 @@ func toolCallNames(calls []modelgateway.ToolCall) []string {
 // Tool shape. req.Tools (map[string]any, the raw tool.Tool values) is not
 // used here — Declaration()'s already-materialized genai.FunctionDeclaration
 // is all a wire-format translation needs.
+//
+// A declaration's schema can arrive on either of two mutually-exclusive
+// genai fields, and every tool this codebase builds via
+// google.golang.org/adk/tool/functiontool (BuildPluginTool included) uses
+// the second one, never the first: Parameters (*genai.Schema, the older
+// Vertex-flavored shape) is what a hand-built declaration sets, but
+// functiontool.New's own Declaration() always populates
+// ParametersJsonSchema instead (a *jsonschema.Schema — see
+// functiontool/function.go's `decl.ParametersJsonSchema = f.inputSchema.Schema()`).
+// Reading only Parameters here would silently see an empty schema for
+// every real tool in the platform, plugins included — this is what made
+// even a fully-declared input_schema (schemas/plugin.schema.json's
+// tools[].input_schema) never actually reach the model, forcing it to
+// guess a call's shape and often needing several tries to get it right.
 func declaredTools(req *model.LLMRequest) []modelgateway.Tool {
 	if req.Config == nil {
 		return nil
@@ -168,11 +183,30 @@ func declaredTools(req *model.LLMRequest) []modelgateway.Tool {
 			}
 			out = append(out, modelgateway.Tool{
 				Name: decl.Name, Description: decl.Description,
-				InputSchema: genaiSchemaToJSONSchema(decl.Parameters),
+				InputSchema: declarationInputSchema(decl),
 			})
 		}
 	}
 	return out
+}
+
+// declarationInputSchema resolves whichever of the two schema fields a
+// FunctionDeclaration actually populated into a standard JSON Schema
+// object. ParametersJsonSchema is preferred — it's what every functiontool-
+// built tool (i.e. nearly everything) uses, and it's already lowercase-
+// typed standard JSON Schema once marshaled, so no case-mapping is needed
+// the way genai.Schema's own upper-cased Type enum requires.
+func declarationInputSchema(decl *genai.FunctionDeclaration) map[string]any {
+	if decl.ParametersJsonSchema != nil {
+		b, err := json.Marshal(decl.ParametersJsonSchema)
+		if err == nil {
+			var m map[string]any
+			if json.Unmarshal(b, &m) == nil {
+				return m
+			}
+		}
+	}
+	return genaiSchemaToJSONSchema(decl.Parameters)
 }
 
 // genaiSchemaToJSONSchema converts genai's Vertex/Gemini-flavored Schema
