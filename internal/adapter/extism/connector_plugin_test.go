@@ -152,3 +152,43 @@ func TestSQLConnectorPlugin_RunWrite_Succeeds(t *testing.T) {
 }
 
 var errWriteNotAllowedForTest = errors.New("connector: this connection was not granted allow_write")
+
+// TestSQLConnectorPlugin_DifferentConnectionRefsAcrossRunsOnSameRuntime is
+// the regression test for "调用完 pg 数据库连接器，再调用报 unknown or
+// expired connection_ref": a shared Runtime (as main.go constructs exactly
+// one of, for the whole server's lifetime) compiles a plugin's wasm once
+// per wasmKey and reuses that CompiledPlugin across every run — but
+// Extism's Manifest.Config (how the plugin reads connection_ref) is baked
+// in at compile time with no supported per-call override, and
+// connectorRegistry.Bind mints a brand-new connection_ref on every single
+// run. Before the fix, the second Call below would still see the first
+// run's connection_ref (the one actually compiled into the cached
+// module), not its own — exactly what surfaced as a stale/expired
+// connection_ref on a run that never opened it.
+func TestSQLConnectorPlugin_DifferentConnectionRefsAcrossRunsOnSameRuntime(t *testing.T) {
+	services := &fakeConnectorServices{}
+	rt := extism.NewRuntime(services)
+	defer func() { _ = rt.Close(context.Background()) }()
+
+	wasm := loadWasm(t, "sql_connector.wasm")
+	wasmKey := "acme.sql-connector@0.1.0" // same wasmKey both calls — same simulated installation
+
+	firstOpts := extism.Options{Config: map[string]string{"connection_ref": "run-1-conn"}}
+	if _, err := rt.Call(context.Background(), wasmKey, wasm, firstOpts, "list_tables", nil); err != nil {
+		t.Fatalf("first run's Call: %v", err)
+	}
+	if services.gotConnRef != "run-1-conn" {
+		t.Fatalf("first run: connRef seen by host = %q, want %q", services.gotConnRef, "run-1-conn")
+	}
+
+	// A second run against the same plugin@version — connectorRegistry.Bind
+	// always mints a fresh UUID, so this is never the same connection_ref
+	// as the first run, even for the same installation.
+	secondOpts := extism.Options{Config: map[string]string{"connection_ref": "run-2-conn"}}
+	if _, err := rt.Call(context.Background(), wasmKey, wasm, secondOpts, "list_tables", nil); err != nil {
+		t.Fatalf("second run's Call: %v", err)
+	}
+	if services.gotConnRef != "run-2-conn" {
+		t.Fatalf("second run: connRef seen by host = %q, want %q (must not be the first run's stale connection_ref)", services.gotConnRef, "run-2-conn")
+	}
+}

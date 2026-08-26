@@ -88,18 +88,45 @@ func NewRuntime(services HostServices) *Runtime {
 	return &Runtime{cache: map[string]*extism.CompiledPlugin{}, services: services}
 }
 
-// compile returns the cached CompiledPlugin for wasmKey, compiling it on
-// first use. wasmKey is expected to be "{plugin_id}@{version}" — the
-// resolved version is part of the key because two installations pinned to
-// different versions of the same plugin_id must never share one compiled
-// module.
-func (r *Runtime) compile(ctx context.Context, wasmKey string, wasmBytes []byte, opts Options) (*extism.CompiledPlugin, error) {
+// compile returns the CompiledPlugin for wasmKey, either the shared cached
+// one or a fresh, uncached one — see the ephemeral return value's doc.
+// wasmKey is expected to be "{plugin_id}@{version}" — the resolved version
+// is part of the key because two installations pinned to different
+// versions of the same plugin_id must never share one compiled module.
+func (r *Runtime) compile(ctx context.Context, wasmKey string, wasmBytes []byte, opts Options) (cp *extism.CompiledPlugin, ephemeral bool, err error) {
+	// opts.Config carries per-call data baked into Extism's Manifest.Config
+	// at CompiledPlugin construction time — most importantly a connectors
+	// binding's connection_ref (spec-20 §4.3), which bindConnector mints
+	// fresh on every single run and never reuses. This SDK version has no
+	// supported way to override a CompiledPlugin's Config per Instance()
+	// call, so a plugin call carrying Config can never be served from (or
+	// added to) the shared, wasmKey-only cache: doing so would silently
+	// hand a later run whatever connection_ref (or other Config) the
+	// *first* caller happened to compile with — a connection the run that
+	// opened it has since released, surfacing as "unknown or expired
+	// connection_ref". Compiling fresh here costs the wasm parse/validate
+	// step on every such call instead of amortizing it, but a connector
+	// call is an interactive tool invocation, not a hot loop, so that
+	// trade is the right one against silently serving stale credentials.
+	if len(opts.Config) > 0 {
+		cp, err = r.compileUncached(ctx, wasmKey, wasmBytes, opts)
+		return cp, true, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if cp, ok := r.cache[wasmKey]; ok {
-		return cp, nil
+		return cp, false, nil
 	}
+	cp, err = r.compileUncached(ctx, wasmKey, wasmBytes, opts)
+	if err != nil {
+		return nil, false, err
+	}
+	r.cache[wasmKey] = cp
+	return cp, false, nil
+}
 
+func (r *Runtime) compileUncached(ctx context.Context, wasmKey string, wasmBytes []byte, opts Options) (*extism.CompiledPlugin, error) {
 	opts = opts.normalize()
 	manifest := extism.Manifest{
 		Wasm:         []extism.Wasm{extism.WasmData{Data: wasmBytes}},
@@ -112,18 +139,23 @@ func (r *Runtime) compile(ctx context.Context, wasmKey string, wasmBytes []byte,
 	if err != nil {
 		return nil, fmt.Errorf("extism: compile plugin %q: %w", wasmKey, err)
 	}
-	r.cache[wasmKey] = cp
 	return cp, nil
 }
 
-// Call runs one plugin function to completion: compile-once (cached),
-// instantiate, call, close the instance — every call gets its own fresh
-// instance so one plugin's state from a previous call never leaks into
-// the next.
+// Call runs one plugin function to completion: compile-once (cached, unless
+// opts.Config makes this call's CompiledPlugin ephemeral — see compile's
+// doc), instantiate, call, close the instance — every call gets its own
+// fresh instance so one plugin's state from a previous call never leaks
+// into the next. An ephemeral CompiledPlugin is closed here too, once this
+// call is done with it — it was never added to r.cache for Runtime.Close
+// to find later.
 func (r *Runtime) Call(ctx context.Context, wasmKey string, wasmBytes []byte, opts Options, funcName string, input []byte) ([]byte, error) {
-	cp, err := r.compile(ctx, wasmKey, wasmBytes, opts)
+	cp, ephemeral, err := r.compile(ctx, wasmKey, wasmBytes, opts)
 	if err != nil {
 		return nil, err
+	}
+	if ephemeral {
+		defer func() { _ = cp.Close(ctx) }()
 	}
 	ctx = withCallerIdentity(ctx, opts.PluginID, opts.OwnerID)
 
@@ -153,7 +185,7 @@ func (r *Runtime) Call(ctx context.Context, wasmKey string, wasmBytes []byte, op
 // automated gate (spec-20 §5.3): a manifest can *claim* an entry point
 // exists; only resolving it against the compiled module proves it.
 func (r *Runtime) ValidateEntries(ctx context.Context, wasmKey string, wasmBytes []byte, funcNames []string) error {
-	cp, err := r.compile(ctx, wasmKey, wasmBytes, Options{})
+	cp, _, err := r.compile(ctx, wasmKey, wasmBytes, Options{})
 	if err != nil {
 		return err
 	}
