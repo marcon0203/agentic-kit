@@ -15,7 +15,8 @@ import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import { useFeatures } from '@/lib/features/useFeatures'
 import { useRunEvents } from '@/lib/runs/useRunEvents'
-import { buildTimeline } from '@/lib/runs/timeline'
+import { buildTimeline, type TimelineEntry } from '@/lib/runs/timeline'
+import { PluginRenderCard } from '@/components/run/PluginRenderCard'
 import { validateAgentDefinition } from '@/lib/validation/validateAgent'
 import {
   BUILTIN_TOOLS,
@@ -534,10 +535,19 @@ function FallbackMultiSelect({
   )
 }
 
+type RenderEntry = Extract<TimelineEntry, { kind: 'render' }>
+
 interface Exchange {
   question: string
   answer: string
   failed: boolean
+  // 一次试运行里触发的插件渲染器（spec-20 §4.2 的 node.render，比如图表
+  // 渲染）——这个面板原来只读 timeline.bubbles 拼文本，node.render 事件
+  // 被整个丢在地上：装了图表渲染器、也在 capabilities.tools[] 里引用了，
+  // 模型也确实输出了 ```chart 代码块，运行完了却什么都看不到，问题不在
+  // 触发条件，是这个面板压根没画这类事件。RunPage.tsx（正式运行详情页）
+  // 一直是有画的，试运行这边漏了。
+  renders: RenderEntry[]
 }
 
 /**
@@ -562,6 +572,7 @@ function TestPanel({ form, problems }: { form: FormState; problems: string[] }) 
     .map((b) => b.text)
     .filter(Boolean)
     .join('\n')
+  const liveRenders = timeline.entries.filter((e): e is RenderEntry => e.kind === 'render')
 
   // 一次运行结束就把它归档进 history，让面板回到可以再发一条的状态。
   useEffect(() => {
@@ -570,11 +581,16 @@ function TestPanel({ form, problems }: { form: FormState; problems: string[] }) 
     const failed = timeline.runStatus === 'failed'
     setHistory((h) => [
       ...h,
-      { question: pending, answer: liveText || timeline.runError || (failed ? '运行失败' : '（没有输出）'), failed },
+      {
+        question: pending,
+        answer: liveText || timeline.runError || (failed ? '运行失败' : '（没有输出）'),
+        failed,
+        renders: liveRenders,
+      },
     ])
     setPending(null)
     setRunId(undefined)
-  }, [timeline.runStatus, timeline.runError, runId, pending, liveText])
+  }, [timeline.runStatus, timeline.runError, runId, pending, liveText, liveRenders])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -634,6 +650,9 @@ function TestPanel({ form, problems }: { form: FormState; problems: string[] }) 
             >
               {ex.answer}
             </p>
+            {ex.renders.map((r) => (
+              <PluginRenderCard key={r.key} entry={r} />
+            ))}
           </div>
         ))}
 
@@ -648,6 +667,9 @@ function TestPanel({ form, problems }: { form: FormState; problems: string[] }) 
             >
               {liveText || '运行中…'}
             </p>
+            {liveRenders.map((r) => (
+              <PluginRenderCard key={r.key} entry={r} />
+            ))}
           </div>
         )}
 
