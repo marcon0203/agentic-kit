@@ -96,8 +96,8 @@ func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpe
 	}
 
 	// Not a tools[] entry — try renderers[] (spec-20 §4.2's auto_render
-	// registration; connectors/hooks resolve through their own dedicated
-	// call sites, P3/P4, not through capabilities.tools[]).
+	// registration; connectors resolve through tools[]'s own
+	// connector_resource_id binding above, P3, not a separate ref kind).
 	if entry, fencedLangs, ok := findRendererEntry(manifest, name); ok {
 		return adk.ToolSpec{
 			Ref: "plugin:" + pluginID + "/" + name, Kind: adk.KindPluginRenderer,
@@ -108,6 +108,37 @@ func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpe
 				adk.PluginRendererConfigKeyOSSPrefix:   ver.OssPrefix,
 				adk.PluginRendererConfigKeyEntry:       entry,
 				adk.PluginRendererConfigKeyFencedLangs: fencedLangs,
+			},
+			OwnerID: a.ownerID,
+		}, true, nil
+	}
+
+	// Not a renderers[] entry either — try hooks[] (spec-20 §4.4's
+	// compile-time takeover of capabilities.hooks' five fields). name here
+	// is the hook point (before_tool_call, ...), matched against the
+	// manifest's hooks[] entries by their own `point` field, not a `name`
+	// field — hooks[] has no name, one plugin declares at most one entry
+	// per point.
+	if entry, ok := findHookEntry(manifest, name); ok {
+		funcName, err := adk.ParsePluginEntry(entry)
+		if err != nil {
+			return adk.ToolSpec{}, false, err
+		}
+		wasmBytes, err := a.pluginWasm.Fetch(a.ctx, ver.OssPrefix)
+		if err != nil {
+			return adk.ToolSpec{}, false, err
+		}
+		return adk.ToolSpec{
+			Ref: "plugin:" + pluginID + "/" + name, Kind: adk.KindPluginHook,
+			Config: map[string]any{
+				adk.PluginHookConfigKeyPluginID:    pluginID,
+				adk.PluginHookConfigKeyVersion:     inst.Version,
+				adk.PluginHookConfigKeyPoint:       name,
+				adk.PluginHookConfigKeyEntry:       entry,
+				adk.PluginHookConfigKeyOSSPrefix:   ver.OssPrefix,
+				adk.PluginHookConfigKeyFuncName:    funcName,
+				adk.PluginHookConfigKeyWasmBytes:   wasmBytes,
+				adk.PluginHookConfigKeyPermissions: manifestPermissions(manifest),
 			},
 			OwnerID: a.ownerID,
 		}, true, nil
@@ -256,6 +287,41 @@ func findExtensionEntry(manifest map[string]any, point, name string) (entry, des
 func requiresNetwork(manifest map[string]any) []string {
 	requires, _ := manifest["requires"].(map[string]any)
 	raw, _ := requires["network"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// findHookEntry looks up a hooks[] item by its `point` field (schemas/
+// plugin.schema.json: {point, entry} — no `name`, unlike tools/renderers)
+// and returns its entry string.
+func findHookEntry(manifest map[string]any, point string) (entry string, ok bool) {
+	extensions, _ := manifest["extensions"].(map[string]any)
+	items, _ := extensions["hooks"].([]any)
+	for _, item := range items {
+		m, mok := item.(map[string]any)
+		if !mok {
+			continue
+		}
+		if p, _ := m["point"].(string); p != point {
+			continue
+		}
+		entry, _ = m["entry"].(string)
+		return entry, entry != ""
+	}
+	return "", false
+}
+
+// manifestPermissions reads manifest.requires.permissions — what
+// HookRegistration.CanWrite checks a hook's declared write:* permission
+// against (spec-20 §4.4).
+func manifestPermissions(manifest map[string]any) []string {
+	requires, _ := manifest["requires"].(map[string]any)
+	raw, _ := requires["permissions"].([]any)
 	out := make([]string, 0, len(raw))
 	for _, v := range raw {
 		if s, ok := v.(string); ok {

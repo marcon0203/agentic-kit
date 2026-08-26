@@ -135,6 +135,12 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 		compiledAgent, err := adk.CompileAgent(ctx, agentDef, adk.AgentCompileOptions{
 			Gateway: gateway, Credentials: creds, Authorizer: authorizer,
 			KnowledgeBaseSearcher: e.kbSearcher, SkillContentFetcher: e.skills, PluginRuntime: e.plugins,
+			// Hooks is left nil here deliberately: applyHookCallbacks
+			// already wires every capabilities.hooks{} registration
+			// straight into the compiled llmagent's own callback chain
+			// (spec-20 §4.4) — nothing outside CompileAgent needs to see
+			// the list, unlike render rules, which the run engine matches
+			// against node output after the fact.
 			Renderers: &nodeRenderers,
 		})
 		if len(nodeRenderers) > 0 {

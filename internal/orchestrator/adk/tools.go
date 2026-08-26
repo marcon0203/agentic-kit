@@ -78,6 +78,12 @@ const (
 	// collects it into a RendererRegistration for auto_render matching
 	// instead.
 	KindPluginRenderer ResourceKind = "plugin_renderer"
+	// KindPluginHook is a "plugin:{plugin_id}/{point}" ref resolving to a
+	// hooks[] entry (spec-20 §4.4) — point is one of
+	// capabilities.hooks' five field names. Like KindPluginRenderer it
+	// never becomes a callable ADK tool; compileTools collects it into a
+	// HookRegistration instead.
+	KindPluginHook ResourceKind = "plugin_hook"
 )
 
 // A "tool"-kind resource's config carries two discriminator fields

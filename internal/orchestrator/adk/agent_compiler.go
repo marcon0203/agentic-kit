@@ -46,6 +46,14 @@ type AgentCompileOptions struct {
 	// node.render events against the node's actual output; CompileAgent
 	// itself never emits one.
 	Renderers *[]RendererRegistration
+	// Hooks, if non-nil, receives every plugin hook this Agent's
+	// capabilities.hooks{} resolved during compilation (spec-20 §4.4).
+	// CompileAgent returns an error if two different plugins claim the
+	// same hook point — there is no "first wins" arbitration for hooks
+	// the way there is for renderers, because a hook can rewrite output
+	// and running two in an undefined order is a correctness bug, not a
+	// display quirk.
+	Hooks *[]HookRegistration
 }
 
 // CompileAgent turns one validated Agent DSL document (schemas/agent.schema.json)
@@ -76,9 +84,17 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		return nil, fmt.Errorf("adk: agent %q: %w", ref, err)
 	}
 
+	var nodeHooks []HookRegistration
+	if err := compileHooks(ctx, def, opts.Authorizer, &nodeHooks); err != nil {
+		return nil, fmt.Errorf("adk: agent %q: %w", ref, err)
+	}
+	if opts.Hooks != nil {
+		*opts.Hooks = append(*opts.Hooks, nodeHooks...)
+	}
+
 	llm := NewGatewayLLM(opts.Gateway, primary, fallbacks, opts.Credentials)
 
-	a, err := llmagent.New(llmagent.Config{
+	cfg := llmagent.Config{
 		Name:        ref,
 		Description: role,
 		Instruction: persona,
@@ -86,7 +102,10 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		Tools:       tools,
 		Toolsets:    toolsets,
 		OutputKey:   ref,
-	})
+	}
+	applyHookCallbacks(&cfg, nodeHooks, opts.PluginRuntime)
+
+	a, err := llmagent.New(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("adk: agent %q: compile llmagent: %w", ref, err)
 	}
@@ -216,6 +235,49 @@ func compileTools(ctx context.Context, def map[string]any, authorizer ResourceAu
 		tools = append(tools, t)
 	}
 	return tools, toolsets, nil
+}
+
+// compileHooks resolves capabilities.hooks{} (spec-20 §4.4) — each of the
+// five known fields is a list of "plugin:{id}/{point}" refs, authorized
+// through the same Authorizer as tools/skills. A ref that isn't a plugin
+// hook (or fails to authorize) is silently skipped, same convention as
+// compileTools; but two different plugins claiming the same point is a
+// hard compile error — unlike renderers, there is no arbitration rule for
+// hooks to fall back on.
+func compileHooks(ctx context.Context, def map[string]any, authorizer ResourceAuthorizer, out *[]HookRegistration) error {
+	caps, _ := def["capabilities"].(map[string]any)
+	hooks, _ := caps["hooks"].(map[string]any)
+	if hooks == nil || authorizer == nil {
+		return nil
+	}
+
+	claimed := map[string]string{} // point -> owning plugin ID, for the duplicate-claim check
+	for _, point := range HookPoints {
+		for _, ref := range toStringList(hooks[point]) {
+			spec, ok, err := authorizer.Authorize(ctx, ref)
+			if err != nil {
+				return fmt.Errorf("authorize hook %q: %w", ref, err)
+			}
+			if !ok || spec.Kind != KindPluginHook {
+				continue
+			}
+			reg, ok := HookRegistrationFromSpec(spec)
+			if !ok {
+				continue
+			}
+			if reg.Point != point {
+				return fmt.Errorf("hook %q declares point %q, not %q", ref, reg.Point, point)
+			}
+			if owner, exists := claimed[point]; exists && owner != reg.PluginID {
+				return fmt.Errorf("hook point %q claimed by both %q and %q", point, owner, reg.PluginID)
+			}
+			claimed[point] = reg.PluginID
+			if out != nil {
+				*out = append(*out, reg)
+			}
+		}
+	}
+	return nil
 }
 
 func toStringList(v any) []string {
