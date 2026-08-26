@@ -90,25 +90,8 @@ const wasmFileName = "plugin.wasm"
 // visibility needs no review); entering the market queue is a separate,
 // deliberate SetVisibility(Public) call.
 func (s *Service) Upload(ctx context.Context, publisherID int64, cmd UploadCommand) (Plugin, error) {
-	if s.objectStore == nil {
-		return Plugin{}, domain.Invalid(domain.CodeValidationFailed, "plugin upload is not configured on this deployment (OSS)")
-	}
 	if len(cmd.Package) > MaxPackageBytes {
 		return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, fmt.Sprintf("package exceeds the %d byte limit", MaxPackageBytes))
-	}
-
-	fieldErrs, err := s.validator.Validate(cmd.Manifest)
-	if err != nil {
-		return Plugin{}, domain.Internal(err)
-	}
-	if len(fieldErrs) > 0 {
-		return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, "manifest failed schema validation").WithDetails(fieldErrs...)
-	}
-	if manifestID, _ := cmd.Manifest["id"].(string); manifestID != cmd.PluginID {
-		return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, "manifest id does not match upload id")
-	}
-	if manifestVersion, _ := cmd.Manifest["version"].(string); manifestVersion != cmd.Version {
-		return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, "manifest version does not match upload version")
 	}
 
 	pubKey, err := s.keys.Get(ctx, publisherID)
@@ -123,33 +106,9 @@ func (s *Service) Upload(ctx context.Context, publisherID int64, cmd UploadComma
 		return Plugin{}, domain.Invalid(domain.CodePluginSignatureInvalid, "package signature does not verify against the registered key")
 	}
 
-	// Automated gate (spec-20 §5.3): a manifest can *claim* its
-	// tools/connectors/hooks entries exist — only actually resolving them
-	// against the compiled module proves it, catching a broken package at
-	// upload time instead of the first time an agent tries to call it.
-	wasmBytes := cmd.Files[wasmFileName]
-	funcNames, err := wasmEntryFuncNames(cmd.Manifest)
+	prefix, err := s.validateAndStore(ctx, cmd.PluginID, cmd.Version, cmd.Manifest, cmd.Files)
 	if err != nil {
-		return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, err.Error())
-	}
-	if len(funcNames) > 0 {
-		if len(wasmBytes) == 0 {
-			return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, "manifest declares tools/connectors/hooks entries but no plugin.wasm was provided")
-		}
-		if s.wasm != nil {
-			wasmKey := cmd.PluginID + "@" + cmd.Version
-			if err := s.wasm.ValidateEntries(ctx, wasmKey, wasmBytes, funcNames); err != nil {
-				return Plugin{}, domain.Invalid(domain.CodePluginManifestInvalid, "wasm module failed automated validation: "+err.Error())
-			}
-		}
-	}
-
-	prefix := pluginOSSPrefix(cmd.PluginID, cmd.Version)
-	for path, content := range cmd.Files {
-		key := prefix + "/" + path
-		if err := s.objectStore.Put(ctx, key, bytes.NewReader(content), contentTypeFor(path)); err != nil {
-			return Plugin{}, domain.Internal(fmt.Errorf("upload %q: %w", path, err))
-		}
+		return Plugin{}, err
 	}
 
 	owner := publisherID
@@ -165,6 +124,111 @@ func (s *Service) Upload(ctx context.Context, publisherID int64, cmd UploadComma
 		return Plugin{}, domain.Internal(err)
 	}
 	return created, nil
+}
+
+// SeedBuiltinCommand is one platform-owned plugin version — shipped with
+// the deployment itself, not uploaded by any user. Unlike UploadCommand
+// there is no Package/Signature to verify: a built-in plugin's supply
+// chain is "it's in this binary's own source tree," which is a stronger
+// guarantee than any publisher signature could add, not a weaker one.
+type SeedBuiltinCommand struct {
+	PluginID string
+	Version  string
+	Manifest map[string]any
+	Files    map[string][]byte
+}
+
+// SeedBuiltin creates (or, if the version already exists, simply confirms)
+// a platform built-in plugin version: PublisherID nil ("平台内置", spec-20
+// §5.1's plugins.publisher_id doc comment), visibility public and review
+// passed immediately — a built-in never sits in the moderation queue,
+// because there is no third party to moderate. Meant to be called once at
+// server startup for every plugin the deployment ships with; calling it
+// again for a version that already exists is a deliberate no-op, not an
+// error, so startup never fails just because it ran before.
+func (s *Service) SeedBuiltin(ctx context.Context, cmd SeedBuiltinCommand) (Plugin, error) {
+	if existing, err := s.repo.GetVersion(ctx, cmd.PluginID, cmd.Version); err == nil {
+		return existing, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return Plugin{}, domain.Internal(err)
+	}
+
+	prefix, err := s.validateAndStore(ctx, cmd.PluginID, cmd.Version, cmd.Manifest, cmd.Files)
+	if err != nil {
+		return Plugin{}, err
+	}
+
+	created, err := s.repo.CreateVersion(ctx, Plugin{
+		PluginID: cmd.PluginID, Version: cmd.Version, Manifest: cmd.Manifest,
+		OSSPrefix: prefix, PublisherID: nil, Signature: "",
+		Visibility: VisibilityPublic, ReviewStatus: ReviewPassed, Status: StatusEnabled,
+	})
+	if err != nil {
+		if errors.Is(err, ErrVersionDuplicate) {
+			// Lost a race with another instance seeding the same version
+			// concurrently at startup — the outcome is identical either
+			// way, so this is still a no-op, not an error.
+			return s.repo.GetVersion(ctx, cmd.PluginID, cmd.Version)
+		}
+		return Plugin{}, domain.Internal(err)
+	}
+	return created, nil
+}
+
+// validateAndStore is Upload and SeedBuiltin's shared middle: manifest
+// schema validation, the id/version-matches-manifest check, the automated
+// wasm-entry gate (spec-20 §5.3), and writing every file to OSS. What
+// differs between the two callers — signature verification, and what
+// publisher_id/visibility/review_status the resulting row gets — happens
+// before and after this, not inside it.
+func (s *Service) validateAndStore(ctx context.Context, pluginID, version string, manifest map[string]any, files map[string][]byte) (ossPrefix string, err error) {
+	if s.objectStore == nil {
+		return "", domain.Invalid(domain.CodeValidationFailed, "plugin upload is not configured on this deployment (OSS)")
+	}
+
+	fieldErrs, err := s.validator.Validate(manifest)
+	if err != nil {
+		return "", domain.Internal(err)
+	}
+	if len(fieldErrs) > 0 {
+		return "", domain.Invalid(domain.CodePluginManifestInvalid, "manifest failed schema validation").WithDetails(fieldErrs...)
+	}
+	if manifestID, _ := manifest["id"].(string); manifestID != pluginID {
+		return "", domain.Invalid(domain.CodePluginManifestInvalid, "manifest id does not match upload id")
+	}
+	if manifestVersion, _ := manifest["version"].(string); manifestVersion != version {
+		return "", domain.Invalid(domain.CodePluginManifestInvalid, "manifest version does not match upload version")
+	}
+
+	// Automated gate (spec-20 §5.3): a manifest can *claim* its
+	// tools/connectors/hooks entries exist — only actually resolving them
+	// against the compiled module proves it, catching a broken package at
+	// upload time instead of the first time an agent tries to call it.
+	wasmBytes := files[wasmFileName]
+	funcNames, err := wasmEntryFuncNames(manifest)
+	if err != nil {
+		return "", domain.Invalid(domain.CodePluginManifestInvalid, err.Error())
+	}
+	if len(funcNames) > 0 {
+		if len(wasmBytes) == 0 {
+			return "", domain.Invalid(domain.CodePluginManifestInvalid, "manifest declares tools/connectors/hooks entries but no plugin.wasm was provided")
+		}
+		if s.wasm != nil {
+			wasmKey := pluginID + "@" + version
+			if err := s.wasm.ValidateEntries(ctx, wasmKey, wasmBytes, funcNames); err != nil {
+				return "", domain.Invalid(domain.CodePluginManifestInvalid, "wasm module failed automated validation: "+err.Error())
+			}
+		}
+	}
+
+	prefix := pluginOSSPrefix(pluginID, version)
+	for path, content := range files {
+		key := prefix + "/" + path
+		if err := s.objectStore.Put(ctx, key, bytes.NewReader(content), contentTypeFor(path)); err != nil {
+			return "", domain.Internal(fmt.Errorf("upload %q: %w", path, err))
+		}
+	}
+	return prefix, nil
 }
 
 // GetVersion returns one specific version.

@@ -461,6 +461,64 @@ func TestReview_ApprovePutsVersionInMarket(t *testing.T) {
 	}
 }
 
+func builtinManifest(pluginID, version string) map[string]any {
+	return map[string]any{
+		"manifest_version": float64(1), "id": pluginID, "version": version,
+		"display_name": "Built-in", "requires": map[string]any{"host_api": ">=1.0 <2.0"},
+	}
+}
+
+func TestSeedBuiltin_CreatesPublicPassedVersionWithNilPublisher(t *testing.T) {
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
+	ctx := context.Background()
+
+	created, err := svc.SeedBuiltin(ctx, plugin.SeedBuiltinCommand{
+		PluginID: "acme.builtin", Version: "1.0.0", Manifest: builtinManifest("acme.builtin", "1.0.0"),
+	})
+	if err != nil {
+		t.Fatalf("SeedBuiltin: %v", err)
+	}
+	if created.PublisherID != nil {
+		t.Fatalf("expected a nil PublisherID for a built-in plugin, got %v", *created.PublisherID)
+	}
+	if created.Visibility != plugin.VisibilityPublic || created.ReviewStatus != plugin.ReviewPassed {
+		t.Fatalf("expected a built-in to be immediately public+passed, got visibility=%q review_status=%q", created.Visibility, created.ReviewStatus)
+	}
+
+	market, err := svc.ListMarket(ctx)
+	if err != nil || len(market) != 1 {
+		t.Fatalf("expected the built-in to already be in the market listing, got %v (err=%v)", market, err)
+	}
+}
+
+func TestSeedBuiltin_SecondCallIsNoop(t *testing.T) {
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
+	ctx := context.Background()
+	cmd := plugin.SeedBuiltinCommand{PluginID: "acme.builtin", Version: "1.0.0", Manifest: builtinManifest("acme.builtin", "1.0.0")}
+
+	first, err := svc.SeedBuiltin(ctx, cmd)
+	if err != nil {
+		t.Fatalf("first SeedBuiltin: %v", err)
+	}
+	second, err := svc.SeedBuiltin(ctx, cmd)
+	if err != nil {
+		t.Fatalf("second SeedBuiltin: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected re-seeding the same version to be a no-op, got a different row (%d vs %d)", first.ID, second.ID)
+	}
+}
+
+func TestSeedBuiltin_RequiresObjectStore(t *testing.T) {
+	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil) // no WithObjectStore
+	_, err := svc.SeedBuiltin(context.Background(), plugin.SeedBuiltinCommand{
+		PluginID: "acme.builtin", Version: "1.0.0", Manifest: builtinManifest("acme.builtin", "1.0.0"),
+	})
+	if err == nil {
+		t.Fatal("expected an error when no object store is configured")
+	}
+}
+
 func TestUninstall_NotInstalledReturnsNotFound(t *testing.T) {
 	svc := plugin.NewService(newFakeRepo(), newFakeKeys(), passValidator{}, &fakeAdmins{}, fakeCipher{}, nil).WithObjectStore(&fakeObjectStore{})
 	err := svc.Uninstall(context.Background(), 1, "acme.charts")

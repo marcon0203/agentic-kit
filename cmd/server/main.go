@@ -18,6 +18,7 @@ import (
 
 	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
 	esstore "github.com/marcon0203/agentic-kit/internal/adapter/elasticsearch"
+	"github.com/marcon0203/agentic-kit/internal/builtinplugins"
 	"github.com/marcon0203/agentic-kit/internal/adapter/extism"
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
 	"github.com/marcon0203/agentic-kit/internal/adapter/milvus"
@@ -176,6 +177,17 @@ func run() error {
 		adaptercrypto.NewCipher(aesKey),
 		pluginRuntime,
 	).WithObjectStore(pluginObjectStore)
+
+	// Built-in plugins (spec-20 §5.1's "publisher_id NULL = 平台内置") ship
+	// inside this binary and need no upload/signature step — seeding is a
+	// no-op past the first successful run, safe to call on every startup.
+	// A deployment with OSS disabled simply can't seed them yet (same
+	// "plugin upload is not configured" the upload endpoint reports) —
+	// logged, not fatal, since every other OSS-optional feature degrades
+	// the same way rather than blocking startup.
+	if err := builtinplugins.SeedAll(ctx, pluginService); err != nil {
+		logger.Warn("builtin_plugin_seed_failed", "error", err)
+	}
 
 	providerKeys := postgres.NewProviderKeyStore(queries, aesKey)
 
