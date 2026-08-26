@@ -9,6 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ResourceMultiSelect } from '@/components/agents/ResourceMultiSelect'
+import { PluginToolMultiSelect } from '@/components/agents/PluginToolMultiSelect'
 import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import { useFeatures } from '@/lib/features/useFeatures'
@@ -284,6 +285,9 @@ export function AgentStudioPage() {
                   selected={form.tools}
                   onChange={(refs) => set('tools', refs)}
                 />
+              </Field>
+              <Field label="插件" htmlFor="studio-plugin-tools" helper="已安装插件暴露的工具，装了插件却没在这里看到，先去组件广场的「插件」Tab 确认已安装。">
+                <PluginToolMultiSelect selected={form.tools} onChange={(refs) => set('tools', refs)} />
               </Field>
               <Field label="Skill" htmlFor="studio-skills" helper="一段打包好的固定做法，调用时把步骤交给模型照做。">
                 <ResourceMultiSelect types={['skill']} selected={form.skills} onChange={(refs) => set('skills', refs)} />

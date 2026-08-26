@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dialog,
@@ -409,8 +410,14 @@ function ComponentCard({ resource, onToggle }: { resource: Resource; onToggle: (
   )
 }
 
-function pluginManifest(p: Plugin): { description?: string; requires?: { permissions?: string[] } } {
-  return (p.manifest ?? {}) as { description?: string; requires?: { permissions?: string[] } }
+type PluginManifest = {
+  description?: string
+  requires?: { permissions?: string[] }
+  extensions?: { connector_hint?: { dialect: string; default_port?: number } }
+}
+
+function pluginManifest(p: Plugin): PluginManifest {
+  return (p.manifest ?? {}) as PluginManifest
 }
 
 function PluginCard({ plugin, installed, onInstall }: { plugin: Plugin; installed: boolean; onInstall: () => void }) {
@@ -453,6 +460,35 @@ function PluginCard({ plugin, installed, onInstall }: { plugin: Plugin; installe
  * WASM 沙箱里，能碰到什么完全由这份权限声明决定，装之前应该让用户知道
  * 自己在同意什么，而不是装完才发现。
  */
+const EMPTY_CONNECTOR_FORM = { host: '', port: '', database: '', username: '', password: '', allowWrite: false }
+
+/**
+ * sanitizeRefPrefix turns a plugin_id (dots allowed, e.g.
+ * "agentic-kit.postgres-connector") into something that satisfies the
+ * resource center's ref pattern (^[a-z][a-z0-9_-]*$, no dots) — a random
+ * suffix is appended so installing the same connector plugin twice (two
+ * different databases) never collides on ref uniqueness.
+ */
+function connectorResourceRef(pluginID: string): string {
+  const base = pluginID.toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+  return `${base}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * 安装前把 manifest.requires.permissions 摊开来给用户看——插件运行在
+ * WASM 沙箱里，能碰到什么完全由这份权限声明决定，装之前应该让用户知道
+ * 自己在同意什么，而不是装完才发现。
+ *
+ * 数据库连接器插件（manifest.extensions.connector_hint 声明了 dialect）
+ * 额外需要真实的连接信息——sql.query/execute/schema 这些 host function
+ * 靠的是宿主手里的一个真实连接，不是插件自己拼连接串（spec-20 §4.3）。
+ * 这里的做法是先把这些字段包成一个"组件"资源（component_type=connector，
+ * 和沙箱、HTTP 接口走同一张 tools 表，只是多几个字段），拿到它的资源 id，
+ * 再把这个 id 写进安装配置的 connector_resource_id——和运行时
+ * bindConnector 解析这个字段的方式（internal/adapter/orchestrator/
+ * plugin_authorizer.go）必须是同一套资源 id 编码，所以这里直接用
+ * POST /resources 返回的 id 原样传回去，不自己拼数字。
+ */
 function PluginInstallDialog({
   plugin,
   onClose,
@@ -464,24 +500,68 @@ function PluginInstallDialog({
 }) {
   const [installing, setInstalling] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [connectorForm, setConnectorForm] = useState(EMPTY_CONNECTOR_FORM)
 
   useEffect(() => {
     setError(null)
     setInstalling(false)
+    const hint = plugin ? pluginManifest(plugin).extensions?.connector_hint : undefined
+    setConnectorForm({ ...EMPTY_CONNECTOR_FORM, port: hint?.default_port ? String(hint.default_port) : '' })
   }, [plugin])
 
   if (!plugin) return null
-  const permissions = pluginManifest(plugin).requires?.permissions ?? []
+  const manifest = pluginManifest(plugin)
+  const permissions = manifest.requires?.permissions ?? []
+  const connectorHint = manifest.extensions?.connector_hint
+
+  const connectorFieldsFilled =
+    connectorForm.host.trim() !== '' &&
+    connectorForm.port.trim() !== '' &&
+    connectorForm.database.trim() !== '' &&
+    connectorForm.username.trim() !== '' &&
+    connectorForm.password.trim() !== ''
+  const canInstall = !connectorHint || connectorFieldsFilled
+
+  function setConnectorField<K extends keyof typeof EMPTY_CONNECTOR_FORM>(key: K, value: (typeof EMPTY_CONNECTOR_FORM)[K]) {
+    setConnectorForm((prev) => ({ ...prev, [key]: value }))
+  }
 
   async function install() {
     if (!plugin) return
     setInstalling(true)
     setError(null)
     try {
+      let installConfig: Record<string, unknown> | undefined
+      if (connectorHint) {
+        const resource = unwrap<{ id: string }>(
+          await apiClient.POST('/resources', {
+            body: {
+              type: 'tool',
+              ref: connectorResourceRef(plugin.plugin_id),
+              display_name: `${plugin.display_name || plugin.plugin_id} 连接`,
+              config: {
+                component_type: 'connector',
+                dialect: connectorHint.dialect,
+                host: connectorForm.host.trim(),
+                port: Number(connectorForm.port),
+                database: connectorForm.database.trim(),
+                username: connectorForm.username.trim(),
+                password: connectorForm.password,
+                allow_write: connectorForm.allowWrite,
+              },
+            },
+          }),
+        )
+        installConfig = { connector_resource_id: resource.id }
+      }
+
       unwrap(
         await apiClient.POST('/plugins/{id}/install', {
           params: { path: { id: plugin.plugin_id } },
-          body: { granted: permissions },
+          body: {
+            granted: permissions,
+            ...(installConfig ? { config: installConfig as Record<string, never> } : {}),
+          },
         }),
       )
       onInstalled()
@@ -502,19 +582,41 @@ function PluginInstallDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-space-2">
-          <p className="text-body-sm text-ink-700">
-            {permissions.length > 0 ? '安装后这个插件将拥有以下权限：' : '这个插件没有声明任何额外权限。'}
-          </p>
-          {permissions.length > 0 && (
-            <ul className="flex flex-col gap-space-1 rounded-md bg-surface-muted p-space-3">
-              {permissions.map((perm) => (
-                <li key={perm} className="text-body-sm font-mono text-ink-900">
-                  {perm}
-                </li>
-              ))}
-            </ul>
+        <div className="flex flex-col gap-space-4">
+          <div className="flex flex-col gap-space-2">
+            <p className="text-body-sm text-ink-700">
+              {permissions.length > 0 ? '安装后这个插件将拥有以下权限：' : '这个插件没有声明任何额外权限。'}
+            </p>
+            {permissions.length > 0 && (
+              <ul className="flex flex-col gap-space-1 rounded-md bg-surface-muted p-space-3">
+                {permissions.map((perm) => (
+                  <li key={perm} className="text-body-sm font-mono text-ink-900">
+                    {perm}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {connectorHint && (
+            <div className="flex flex-col gap-space-3">
+              <p className="text-body-sm text-ink-700">
+                这是一个 {connectorHint.dialect} 连接器，需要真实的数据库连接信息——宿主会用它建立连接，插件本身永远拿不到。
+              </p>
+              <div className="grid grid-cols-2 gap-space-3">
+                <ConnectorField label="主机地址" value={connectorForm.host} onChange={(v) => setConnectorField('host', v)} placeholder="db.internal" />
+                <ConnectorField label="端口" value={connectorForm.port} onChange={(v) => setConnectorField('port', v)} placeholder={String(connectorHint.default_port ?? '')} />
+                <ConnectorField label="数据库名" value={connectorForm.database} onChange={(v) => setConnectorField('database', v)} />
+                <ConnectorField label="用户名" value={connectorForm.username} onChange={(v) => setConnectorField('username', v)} />
+                <ConnectorField label="密码" value={connectorForm.password} onChange={(v) => setConnectorField('password', v)} type="password" />
+              </div>
+              <label className="flex items-center gap-space-2 text-body-sm text-ink-900">
+                <Checkbox checked={connectorForm.allowWrite} onCheckedChange={(checked) => setConnectorField('allowWrite', checked === true)} />
+                允许写入（UPDATE/INSERT/DELETE）——不勾选时这个连接只能读
+              </label>
+            </div>
           )}
+
           {error && (
             <p role="alert" className="text-body-sm text-rust">
               {error}
@@ -526,12 +628,33 @@ function PluginInstallDialog({
           <Button variant="outline" onClick={onClose} disabled={installing}>
             取消
           </Button>
-          <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={install} disabled={installing}>
+          <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={install} disabled={installing || !canInstall}>
             {installing ? '安装中…' : '确认安装'}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function ConnectorField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = 'text',
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  type?: string
+}) {
+  return (
+    <label className="flex flex-col gap-space-1">
+      <span className="text-caption text-ink-500">{label}</span>
+      <Input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-9" />
+    </label>
   )
 }
 

@@ -1,8 +1,11 @@
 package orchestrator
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -160,13 +163,20 @@ func (a *resourceAuthorizer) bindConnector(rawInstConfig []byte) (connRef string
 		return "", false, nil
 	}
 	var instConfig struct {
-		ConnectorResourceID int64 `json:"connector_resource_id"`
+		ConnectorResourceID string `json:"connector_resource_id"`
 	}
-	if err := json.Unmarshal(rawInstConfig, &instConfig); err != nil || instConfig.ConnectorResourceID == 0 {
+	if err := json.Unmarshal(rawInstConfig, &instConfig); err != nil || instConfig.ConnectorResourceID == "" {
+		return "", false, nil
+	}
+	resourceID, err := decodeToolResourceID(instConfig.ConnectorResourceID)
+	if err != nil {
+		// A malformed id (a stale/hand-edited install config, say) is the
+		// same as "this installation doesn't use a connector" — not a run
+		// failure, since nothing about the run itself is wrong.
 		return "", false, nil
 	}
 
-	row, err := a.q.GetToolByIDForOwner(a.ctx, store.GetToolByIDForOwnerParams{ID: instConfig.ConnectorResourceID, OwnerUserID: a.ownerID})
+	row, err := a.q.GetToolByIDForOwner(a.ctx, store.GetToolByIDForOwnerParams{ID: resourceID, OwnerUserID: a.ownerID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
@@ -201,6 +211,31 @@ func (a *resourceAuthorizer) bindConnector(rawInstConfig []byte) (connRef string
 	a.boundRefs = append(a.boundRefs, connRef)
 	a.boundMu.Unlock()
 	return connRef, true, nil
+}
+
+// decodeToolResourceID reverses internal/api's encodeResourceID for a
+// "tool"-kind resource — the frontend never sees a resource's raw numeric
+// row id, only this base64("tool:<id>") string (the same one POST
+// /resources returns as a resource's own `id` field), so a
+// connector_resource_id set via PATCH /plugins/{id}/install's config
+// arrives in this encoded form too. Duplicated here rather than exported
+// from internal/api because it's a two-line encoding detail, not a
+// dependency worth taking on the transport package from the orchestrator
+// adapter.
+func decodeToolResourceID(external string) (int64, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(external)
+	if err != nil {
+		return 0, fmt.Errorf("resource id: not base64")
+	}
+	kind, idStr, ok := strings.Cut(string(decoded), ":")
+	if !ok || kind != "tool" {
+		return 0, fmt.Errorf("resource id: not a tool resource")
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("resource id: bad numeric part")
+	}
+	return id, nil
 }
 
 func stringField(m map[string]any, key string) string {

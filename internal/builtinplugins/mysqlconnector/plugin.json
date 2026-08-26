@@ -38,6 +38,10 @@
         },
         "entry": "plugin.wasm#run_write"
       }
-    ]
+    ],
+    "connector_hint": {
+      "dialect": "mysql",
+      "default_port": 3306
+    }
   }
 }

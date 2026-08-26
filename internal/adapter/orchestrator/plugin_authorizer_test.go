@@ -1,6 +1,9 @@
 package orchestrator
 
-import "testing"
+import (
+	"encoding/base64"
+	"testing"
+)
 
 func TestParsePluginRef(t *testing.T) {
 	pluginID, name, ok := parsePluginRef("plugin:acme.charts/render_chart")
@@ -112,6 +115,43 @@ func TestBindConnector_EmptyConfigIsNoop(t *testing.T) {
 	connRef, ok, err := a.bindConnector(nil)
 	if err != nil || ok || connRef != "" {
 		t.Fatalf("expected a silent no-op for an empty installation config, got (%q, %v, %v)", connRef, ok, err)
+	}
+}
+
+func TestBindConnector_MalformedResourceIDIsNoop(t *testing.T) {
+	a := &resourceAuthorizer{connectors: NewConnectorRegistry(nil)}
+	// Not valid base64("tool:<id>") — e.g. a stale/hand-edited install
+	// config — must not be treated as a run failure.
+	connRef, ok, err := a.bindConnector([]byte(`{"connector_resource_id":"not-a-real-id"}`))
+	if err != nil || ok || connRef != "" {
+		t.Fatalf("expected a silent no-op for a malformed connector_resource_id, got (%q, %v, %v)", connRef, ok, err)
+	}
+}
+
+func TestDecodeToolResourceID(t *testing.T) {
+	// Mirrors internal/api's encodeResourceID(resource.KindTool, 42) —
+	// duplicated here rather than imported, see decodeToolResourceID's doc
+	// comment for why.
+	encoded := base64.RawURLEncoding.EncodeToString([]byte("tool:42"))
+	id, err := decodeToolResourceID(encoded)
+	if err != nil {
+		t.Fatalf("decodeToolResourceID: %v", err)
+	}
+	if id != 42 {
+		t.Fatalf("id = %d, want 42", id)
+	}
+}
+
+func TestDecodeToolResourceID_RejectsWrongKind(t *testing.T) {
+	encoded := base64.RawURLEncoding.EncodeToString([]byte("skill:42"))
+	if _, err := decodeToolResourceID(encoded); err == nil {
+		t.Fatal("expected an error for a non-tool resource id")
+	}
+}
+
+func TestDecodeToolResourceID_RejectsNonBase64(t *testing.T) {
+	if _, err := decodeToolResourceID("not base64!!"); err == nil {
+		t.Fatal("expected an error for a non-base64 string")
 	}
 }
 

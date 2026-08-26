@@ -38,6 +38,10 @@
         },
         "entry": "plugin.wasm#run_write"
       }
-    ]
+    ],
+    "connector_hint": {
+      "dialect": "postgres",
+      "default_port": 5432
+    }
   }
 }
