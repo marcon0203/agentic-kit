@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Search, Puzzle, Check } from 'lucide-react'
+import { Search, Puzzle, Check } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Dialog,
   DialogContent,
@@ -18,6 +17,8 @@ import {
 } from '@/components/ui/dialog'
 import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel } from '@/components/common/EmptyState'
+import { Section } from '@/components/common/Page'
+import { PAGE_SIZES, Pagination } from '@/components/common/Pagination'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 import {
@@ -37,8 +38,6 @@ type Plugin = components['schemas']['Plugin']
 type Tab = 'plugin' | 'custom'
 type StatusFilter = 'all' | 'enabled' | 'disabled'
 
-const PAGE_SIZES = [12, 24, 48]
-
 /**
  * 组件广场——卡片墙 + 两行筛选 + 分页，取代原来那个和其它资源类型共用的
  * 单行列表。组件是五种资源里形态最多的一种（HTTP 接口 / OpenAPI 导入的一
@@ -57,9 +56,9 @@ export function ComponentPlazaPage() {
   const queryClient = useQueryClient()
 
   const [searchParams, setSearchParams] = useSearchParams()
-  const tab: Tab = searchParams.get('tab') === 'plugin' ? 'plugin' : 'custom'
+  const tab: Tab = searchParams.get('tab') === 'custom' ? 'custom' : 'plugin'
   function setTab(t: Tab) {
-    setSearchParams(t === 'custom' ? {} : { tab: t })
+    setSearchParams(t === 'plugin' ? {} : { tab: t })
   }
   const [draft, setDraft] = useState('')
   const [search, setSearch] = useState('')
@@ -145,11 +144,12 @@ export function ComponentPlazaPage() {
   }
 
   return (
-    <div className="flex flex-col gap-space-5">
-      <div className="flex flex-wrap items-center justify-between gap-space-3">
+    <Section
+      title="组件广场"
+      center={
         <div
           role="tablist"
-          className="flex w-fit items-center gap-space-1 rounded-full border border-border bg-surface-muted p-1"
+          className="flex w-fit items-center gap-space-1 rounded-sm border border-border bg-surface-muted p-1"
         >
           {(['plugin', 'custom'] as const).map((t) => (
             <button
@@ -159,19 +159,21 @@ export function ComponentPlazaPage() {
               aria-selected={tab === t}
               onClick={() => setTab(t)}
               className={cn(
-                'text-body-sm rounded-full px-space-4 py-1.5 transition-colors',
+                'text-body-sm rounded-sm px-space-4 py-1.5 transition-colors',
                 tab === t ? 'bg-surface text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-900',
               )}
             >
-              {t === 'plugin' ? '插件' : '自定义'}
+              {t === 'plugin' ? '广场' : '自定义'}
             </button>
           ))}
         </div>
-
+      }
+      aside={
         <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/apps/tool/new')}>
           新建组件
         </Button>
-      </div>
+      }
+    >
 
       {tab === 'plugin' ? (
         <>
@@ -321,7 +323,7 @@ export function ComponentPlazaPage() {
           )}
         </>
       )}
-    </div>
+    </Section>
   )
 }
 
@@ -675,98 +677,5 @@ function CardGridSkeleton() {
         </div>
       ))}
     </div>
-  )
-}
-
-/**
- * 页码窗口：7 页以内全列出来，再多就首尾各留一个、当前页左右各留一个，中
- * 间用省略号补上——否则一个几十页的列表会把整行页码撑到换行。
- */
-function pageWindow(page: number, pageCount: number): (number | '…')[] {
-  if (pageCount <= 7) return Array.from({ length: pageCount }, (_, i) => i + 1)
-
-  const out: (number | '…')[] = [1]
-  const start = Math.max(2, page - 1)
-  const end = Math.min(pageCount - 1, page + 1)
-  if (start > 2) out.push('…')
-  for (let i = start; i <= end; i++) out.push(i)
-  if (end < pageCount - 1) out.push('…')
-  out.push(pageCount)
-  return out
-}
-
-function Pagination({
-  page,
-  pageCount,
-  pageSize,
-  onPageChange,
-  onPageSizeChange,
-}: {
-  page: number
-  pageCount: number
-  pageSize: number
-  onPageChange: (page: number) => void
-  onPageSizeChange: (size: number) => void
-}) {
-  return (
-    <nav aria-label="分页" className="flex items-center justify-end gap-space-2">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="size-8 p-0 text-ink-500"
-        disabled={page <= 1}
-        aria-label="上一页"
-        onClick={() => onPageChange(page - 1)}
-      >
-        <ChevronLeft className="size-4" aria-hidden />
-      </Button>
-
-      {pageWindow(page, pageCount).map((entry, i) =>
-        entry === '…' ? (
-          <span key={`gap-${i}`} className="text-body-sm px-1 text-ink-500">
-            …
-          </span>
-        ) : (
-          <button
-            key={entry}
-            type="button"
-            aria-current={entry === page ? 'page' : undefined}
-            onClick={() => onPageChange(entry)}
-            className={cn(
-              'text-body-sm size-8 rounded-md border transition-colors',
-              entry === page
-                ? 'border-primary bg-blueprint-tint text-blueprint'
-                : 'border-transparent text-ink-700 hover:bg-surface-muted',
-            )}
-          >
-            {entry}
-          </button>
-        ),
-      )}
-
-      <Button
-        variant="ghost"
-        size="sm"
-        className="size-8 p-0 text-ink-500"
-        disabled={page >= pageCount}
-        aria-label="下一页"
-        onClick={() => onPageChange(page + 1)}
-      >
-        <ChevronRight className="size-4" aria-hidden />
-      </Button>
-
-      <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
-        <SelectTrigger className="h-8 w-[110px]" aria-label="每页条数">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {PAGE_SIZES.map((size) => (
-            <SelectItem key={size} value={String(size)}>
-              {size} 条/页
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </nav>
   )
 }

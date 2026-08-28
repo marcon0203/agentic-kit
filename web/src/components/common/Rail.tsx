@@ -133,7 +133,7 @@ export function EmptyRail({
   return (
     <div
       className={cn(
-        'flex flex-col items-center gap-space-4 rounded-lg border border-border bg-surface px-space-6 py-space-10 text-center',
+        'flex flex-col items-center gap-space-4 px-space-6 py-space-10 text-center',
         className,
       )}
     >

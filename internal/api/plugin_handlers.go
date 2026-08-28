@@ -274,10 +274,11 @@ func (h *PluginHandlers) ListInstalled(w http.ResponseWriter, r *http.Request) {
 }
 
 type installedToolDTO struct {
-	Ref         string `json:"ref"`
-	PluginID    string `json:"plugin_id"`
-	ToolName    string `json:"tool_name"`
-	Description string `json:"description,omitempty"`
+	Ref                string `json:"ref"`
+	PluginID           string `json:"plugin_id"`
+	PluginDisplayName  string `json:"plugin_display_name,omitempty"`
+	ToolName           string `json:"tool_name"`
+	Description        string `json:"description,omitempty"`
 }
 
 // ListInstalledTools handles GET /plugins/installed/tools — every
@@ -298,7 +299,7 @@ func (h *PluginHandlers) ListInstalledTools(w http.ResponseWriter, r *http.Reque
 	}
 	out := make([]installedToolDTO, 0, len(items))
 	for _, t := range items {
-		out = append(out, installedToolDTO{Ref: t.Ref, PluginID: t.PluginID, ToolName: t.ToolName, Description: t.Description})
+		out = append(out, installedToolDTO{Ref: t.Ref, PluginID: t.PluginID, PluginDisplayName: t.PluginDisplayName, ToolName: t.ToolName, Description: t.Description})
 	}
 	writeJSON(w, r, http.StatusOK, map[string]any{"items": out})
 }

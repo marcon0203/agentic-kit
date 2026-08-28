@@ -61,6 +61,14 @@ func toDomainAgents(rows []store.Agent) ([]agent.Agent, error) {
 	return out, nil
 }
 
+func (r *AgentRepository) GetByID(ctx context.Context, ownerID, id int64) (agent.Agent, error) {
+	row, err := r.q.GetAgentByID(ctx, store.GetAgentByIDParams{ID: id, OwnerUserID: ownerID})
+	if err != nil {
+		return agent.Agent{}, err
+	}
+	return toDomainAgent(row)
+}
+
 func (r *AgentRepository) ListLatestByOwner(ctx context.Context, ownerID int64, q domain.PageQuery) ([]agent.Agent, error) {
 	rows, err := r.q.ListAgentsForOwnerLatestPage(ctx, store.ListAgentsForOwnerLatestPageParams{
 		OwnerUserID: ownerID, AgentRef: q.After, Limit: int32(q.Limit),

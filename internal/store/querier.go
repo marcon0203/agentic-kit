@@ -48,6 +48,7 @@ type Querier interface {
 	CreateRole(ctx context.Context, arg CreateRoleParams) (Role, error)
 	CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill, error)
 	CreateSkillFile(ctx context.Context, arg CreateSkillFileParams) error
+	CreateSkillSource(ctx context.Context, arg CreateSkillSourceParams) (SkillSource, error)
 	// ── Subscriptions ────────────────────────────────────────────────────
 	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (Subscription, error)
 	CreateTool(ctx context.Context, arg CreateToolParams) (Tool, error)
@@ -63,6 +64,8 @@ type Querier interface {
 	DeletePluginInstallation(ctx context.Context, arg DeletePluginInstallationParams) (int64, error)
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
+	DeleteSkillSource(ctx context.Context, id int64) (int64, error)
+	DeleteStaleMarketSkills(ctx context.Context, arg DeleteStaleMarketSkillsParams) (int64, error)
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
 	DeleteUserRoles(ctx context.Context, userID int64) error
 	// Knowledge bases surface to an Agent as an entry in capabilities.tools
@@ -81,6 +84,8 @@ type Querier interface {
 	// version of the agent being gone would break the dependent Bundle).
 	FindPublishedBundlesReferencingAgentRef(ctx context.Context, arg FindPublishedBundlesReferencingAgentRefParams) ([]FindPublishedBundlesReferencingAgentRefRow, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
+	// 按 version id 取一行（编辑页 / PATCH / DELETE 的入口），不经过 agent_ref。
+	GetAgentByID(ctx context.Context, arg GetAgentByIDParams) (Agent, error)
 	// Constraints summary is extracted field-by-field via JSONB path operators
 	// so the full `definition` blob never has to leave Postgres — the same
 	// "DAO 层强制隔离" principle as the display-only list queries above, just
@@ -132,6 +137,7 @@ type Querier interface {
 	GetMCPServerLatestStatusByRef(ctx context.Context, arg GetMCPServerLatestStatusByRefParams) (int16, error)
 	GetMCPServerListingDisplayByListingID(ctx context.Context, id int64) (GetMCPServerListingDisplayByListingIDRow, error)
 	GetMCPServerListingForOwnerByRef(ctx context.Context, arg GetMCPServerListingForOwnerByRefParams) (MarketplaceListing, error)
+	GetMarketSkill(ctx context.Context, arg GetMarketSkillParams) (GetMarketSkillRow, error)
 	GetMemoryByIDForOwner(ctx context.Context, arg GetMemoryByIDForOwnerParams) (Memory, error)
 	GetModelProviderCredentials(ctx context.Context, arg GetModelProviderCredentialsParams) ([]byte, error)
 	// The run engine's "which memory store backs this owner's runs" lookup —
@@ -158,6 +164,8 @@ type Querier interface {
 	// DSL (unlike Bundle.agents[].version), so satisfaction only requires SOME
 	// published version of the ref to exist — the most recently published one.
 	GetSkillListingForOwnerByRef(ctx context.Context, arg GetSkillListingForOwnerByRefParams) (MarketplaceListing, error)
+	GetSkillSource(ctx context.Context, id int64) (SkillSource, error)
+	GetSkillSourceByURL(ctx context.Context, baseUrl string) (SkillSource, error)
 	GetSubscriptionByIDForSubscriber(ctx context.Context, arg GetSubscriptionByIDForSubscriberParams) (Subscription, error)
 	GetSubscriptionByListingAndSubscriber(ctx context.Context, arg GetSubscriptionByListingAndSubscriberParams) (Subscription, error)
 	// Enforces "一个 ref 只保留一个生效订阅" (spec-08 已决事项): a subscriber can
@@ -223,6 +231,8 @@ type Querier interface {
 	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)
 	// 组件广场"插件" Tab 用的市场列表：只列公开且审核通过的，每个 plugin_id 一行（最新版本）。
 	ListMarketPlugins(ctx context.Context) ([]Plugin, error)
+	// Skill 管理 → 市场视图：所有启用源的缓存条目，附源信息供卡片和详情回链。
+	ListMarketSkills(ctx context.Context) ([]ListMarketSkillsRow, error)
 	ListMemoriesForOwnerPage(ctx context.Context, arg ListMemoriesForOwnerPageParams) ([]Memory, error)
 	ListModelProvidersForOwner(ctx context.Context, ownerUserID int64) ([]ListModelProvidersForOwnerRow, error)
 	// Backs the timeout-scanning job (spec-11): a pending gate with a
@@ -244,6 +254,8 @@ type Querier interface {
 	ListRoles(ctx context.Context) ([]Role, error)
 	ListRolesForUser(ctx context.Context, userID int64) ([]Role, error)
 	ListSkillFilesForSkill(ctx context.Context, arg ListSkillFilesForSkillParams) ([]SkillFile, error)
+	// 左联 market_skills 只为拿每个源的条目数，设置页直接展示。
+	ListSkillSources(ctx context.Context) ([]ListSkillSourcesRow, error)
 	ListSkillsForOwnerPage(ctx context.Context, arg ListSkillsForOwnerPageParams) ([]Skill, error)
 	ListSubscriptionsForUserPage(ctx context.Context, arg ListSubscriptionsForUserPageParams) ([]Subscription, error)
 	ListToolsForOwnerPage(ctx context.Context, arg ListToolsForOwnerPageParams) ([]Tool, error)
@@ -255,6 +267,8 @@ type Querier interface {
 	MarkKnowledgeBaseImmutable(ctx context.Context, id int64) error
 	MarkMCPServerImmutable(ctx context.Context, id int64) error
 	MarkSkillImmutable(ctx context.Context, id int64) error
+	MarkSkillSourceSyncError(ctx context.Context, arg MarkSkillSourceSyncErrorParams) (SkillSource, error)
+	MarkSkillSourceSynced(ctx context.Context, id int64) (SkillSource, error)
 	MarkToolImmutable(ctx context.Context, id int64) error
 	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
 	ResolveHumanGate(ctx context.Context, arg ResolveHumanGateParams) (HumanGate, error)
@@ -292,6 +306,9 @@ type Querier interface {
 	UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill, error)
 	UpdateSubscriptionListing(ctx context.Context, arg UpdateSubscriptionListingParams) (Subscription, error)
 	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)
+	// 同步落库：同一 (source, slug) 覆盖刷新，上次同步后被上游下架的条目由
+	// Sync 清理（见 DeleteStaleMarketSkills）。
+	UpsertMarketSkill(ctx context.Context, arg UpsertMarketSkillParams) (MarketSkill, error)
 	UpsertPluginKV(ctx context.Context, arg UpsertPluginKVParams) (PluginKv, error)
 	UpsertPublisherKey(ctx context.Context, arg UpsertPublisherKeyParams) (PluginPublisherKey, error)
 	UserHasPermission(ctx context.Context, arg UserHasPermissionParams) (bool, error)

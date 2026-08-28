@@ -29,6 +29,10 @@ type Repository interface {
 	// service can tell whether a further page exists.
 	ListLatestByOwner(ctx context.Context, ownerID int64, q domain.PageQuery) ([]Agent, error)
 
+	// GetByID returns one version by its numeric id — the entry point for
+	// edit/PATCH/Delete, which route by id rather than the DSL's agent key.
+	GetByID(ctx context.Context, ownerID, id int64) (Agent, error)
+
 	// ListVersions returns every version of one ref, newest first. An empty
 	// slice means the ref does not exist.
 	ListVersions(ctx context.Context, ownerID int64, ref string) ([]Agent, error)

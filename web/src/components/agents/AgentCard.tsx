@@ -10,7 +10,7 @@ type AgentDefinition = components['schemas']['AgentDefinition']
 
 interface AgentCardProps {
   agent: Agent
-  onEdit: (ref: string) => void
+  onEdit: (id: string) => void
   onCopy: (agent: Agent) => void
 }
 
@@ -54,7 +54,7 @@ export function AgentCard({ agent, onEdit, onCopy }: AgentCardProps) {
         </Button>
         <Button
           size="sm"
-          onClick={() => onEdit(agent.agent_ref)}
+          onClick={() => onEdit(agent.id)}
         >
           <Pencil className="mr-1 size-3.5" aria-hidden />
           编辑

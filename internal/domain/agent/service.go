@@ -38,15 +38,15 @@ func (s *Service) List(ctx context.Context, ownerID int64, q domain.PageQuery) (
 }
 
 // ListVersions returns every version of one ref, newest first.
-func (s *Service) ListVersions(ctx context.Context, ownerID int64, ref string) ([]Agent, error) {
-	rows, err := s.repo.ListVersions(ctx, ownerID, ref)
+// ListVersions returns every version of the agent that owns version `id`,
+// newest first. The service resolves the agent_ref from the version row
+// so callers route by numeric id, not the DSL's agent key.
+func (s *Service) ListVersions(ctx context.Context, ownerID, id int64) ([]Agent, error) {
+	current, err := s.repo.GetByID(ctx, ownerID, id)
 	if err != nil {
-		return nil, domain.Internal(err)
-	}
-	if len(rows) == 0 {
 		return nil, domain.NotFound(domain.CodeResourceNotFound, "agent not found")
 	}
-	return rows, nil
+	return s.repo.ListVersions(ctx, ownerID, current.Ref)
 }
 
 // Create validates a definition and persists it as a new Agent version.
@@ -94,12 +94,14 @@ func (s *Service) Create(ctx context.Context, ownerID int64, def Definition) (Ag
 // Update edits an Agent by creating a new version from its latest existing
 // version. The path ref must match definition.agent; the version is bumped
 // automatically so callers don't have to know the existing version number.
-func (s *Service) Update(ctx context.Context, ownerID int64, ref string, def Definition) (Agent, error) {
+// Update edits the latest version of the agent identified by `id` (a version
+// row's numeric id) by creating a new auto-bumped version. The agent_ref
+// is inherited from the existing row — definition.agent is NOT validated
+// against the path, so renaming the DSL key mid-edit no longer routes the
+// save to the wrong agent.
+func (s *Service) Update(ctx context.Context, ownerID, id int64, def Definition) (Agent, error) {
 	if def == nil {
 		return Agent{}, domain.Invalid(domain.CodeValidationFailed, "definition is required")
-	}
-	if def.Ref() != ref {
-		return Agent{}, domain.Invalid(domain.CodeValidationFailed, "definition.agent must match path ref")
 	}
 
 	schemaErrs, err := s.validator.Validate(def)
@@ -118,12 +120,14 @@ func (s *Service) Update(ctx context.Context, ownerID int64, ref string, def Def
 		return Agent{}, domain.Invalid(domain.CodeResourceDisabled, "Agent 引用了不存在或已禁用的资源").WithDetails(refErrs...)
 	}
 
-	versions, err := s.repo.ListVersions(ctx, ownerID, ref)
+	current, err := s.repo.GetByID(ctx, ownerID, id)
+	if err != nil {
+		return Agent{}, domain.NotFound(domain.CodeResourceNotFound, "agent not found")
+	}
+
+	versions, err := s.repo.ListVersions(ctx, ownerID, current.Ref)
 	if err != nil {
 		return Agent{}, domain.Internal(err)
-	}
-	if len(versions) == 0 {
-		return Agent{}, domain.NotFound(domain.CodeResourceNotFound, "agent not found")
 	}
 	latest := versions[0]
 
@@ -131,7 +135,7 @@ func (s *Service) Update(ctx context.Context, ownerID int64, ref string, def Def
 
 	created, err := s.repo.Create(ctx, Agent{
 		OwnerID:    ownerID,
-		Ref:        def.Ref(),
+		Ref:        current.Ref,
 		Version:    def.Version(),
 		Definition: def,
 	})
@@ -160,16 +164,16 @@ func bumpVersion(v string) string {
 	return strings.Join(parts, ".")
 }
 
-// Delete removes every version of a ref.
-//
-// Two occupancy rules, checked before the delete because each needs to
-// explain itself differently: a subscribed-and-active version can never be
-// deleted (70005 — snapshot isolation means a subscriber's version must
-// keep working), and a version still referenced by one of the owner's
-// Bundles is refused with the referencing Bundles listed (40004). The DB's
-// immutable trigger is the last line of defence if either check races a
-// concurrent subscribe.
-func (s *Service) Delete(ctx context.Context, ownerID int64, ref string) error {
+// Delete removes every version of the agent identified by `id` (a version
+// row's numeric id). The agent_ref is resolved from that row so the
+// occupancy checks and the actual delete all operate on the same agent.
+func (s *Service) Delete(ctx context.Context, ownerID, id int64) error {
+	current, err := s.repo.GetByID(ctx, ownerID, id)
+	if err != nil {
+		return domain.NotFound(domain.CodeResourceNotFound, "agent not found")
+	}
+	ref := current.Ref
+
 	subscribed, err := s.repo.CountActiveSubscribedVersions(ctx, ownerID, ref)
 	if err != nil {
 		return domain.Internal(err)

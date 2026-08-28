@@ -9,42 +9,11 @@ import { cn } from '@/lib/utils'
  * nothing. That template said the same thing on six different pages, which
  * meant it said nothing on any of them.
  *
- * These pieces replace it. A page states what it is and what you can do
- * with it on one line, then goes straight to the work. Figures appear only
+ * These pieces replace it: pages go straight to the work, named by the nav
+ * that led there instead of repeating it as a masthead. Figures appear only
  * where a figure is the point, and they sit inline on a rule rather than
  * floating in cards of their own.
  */
-
-/**
- * The page masthead: eyebrow, title, and one sentence saying what this
- * centre is for, with primary actions on the right of the same line.
- */
-export function PageHeader({
-  eyebrow,
-  title,
-  description,
-  actions,
-  className,
-}: {
-  eyebrow: string
-  title: string
-  description?: string
-  actions?: ReactNode
-  className?: string
-}) {
-  return (
-    <header
-      className={cn('flex flex-wrap items-end justify-between gap-space-5 pb-space-5', className)}
-    >
-      <div className="flex min-w-0 max-w-[62ch] flex-col gap-space-2">
-        <span className="text-eyebrow text-ink-500">{eyebrow}</span>
-        <h1 className="text-display-lg text-ink-900">{title}</h1>
-        {description && <p className="text-body-md text-ink-700">{description}</p>}
-      </div>
-      {actions ? <div className="flex shrink-0 items-center gap-space-3">{actions}</div> : null}
-    </header>
-  )
-}
 
 /**
  * A labelled band of the page. The rule under the label is the only
@@ -53,23 +22,29 @@ export function PageHeader({
  */
 export function Section({
   title,
+  center,
   aside,
   children,
   className,
 }: {
   title: string
+  /** 标题和右侧操作之间的插槽（如页内视图切换），默认没有。 */
+  center?: ReactNode
   aside?: ReactNode
   children: ReactNode
   className?: string
 }) {
   return (
     <section className={cn('flex flex-col gap-space-4', className)}>
-      {/* items-center, not items-baseline: an aside is often a button, and
-          sitting a 36px control on the text baseline drops it through the
-          rule below. */}
-      <div className="flex min-h-9 items-center justify-between gap-space-4 border-b border-border pb-space-3">
-        <h2 className="text-display-sm text-ink-900">{title}</h2>
-        {aside}
+      {/* 三列 1fr/auto/1fr 网格：两侧轨道等宽，center 插槽因此在整行里严格
+          居中，不受标题或右侧按钮宽度影响。aside 显式落在第 3 列——没有
+          center 时自动布局会把它错放进中间列。items-center 而非 baseline：
+          an aside is often a button, and sitting a 36px control on the text
+          baseline drops it through the rule below. */}
+      <div className="grid min-h-9 grid-cols-[1fr_auto_1fr] items-center gap-space-4 border-b border-border pb-space-3">
+        <h2 className="text-display-sm min-w-0 justify-self-start text-ink-900">{title}</h2>
+        {center}
+        {aside ? <div className="col-start-3 flex min-w-0 justify-self-end">{aside}</div> : null}
       </div>
       {children}
     </section>

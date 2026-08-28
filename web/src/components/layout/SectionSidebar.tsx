@@ -35,7 +35,7 @@ export function SectionSidebar({
   return (
     <nav
       aria-label="模块导航"
-      className="flex shrink-0 flex-row gap-space-5 overflow-x-auto border-b border-border pb-space-3 sm:w-48 sm:flex-col sm:border-b-0 sm:border-r sm:pb-0 sm:pr-space-4"
+      className="flex shrink-0 flex-row gap-space-5 overflow-x-auto sm:w-48 sm:flex-col"
     >
       {resolvedGroups.map((group, i) => (
         <div key={group.label ?? i} className="flex shrink-0 flex-row gap-space-1 sm:flex-col">

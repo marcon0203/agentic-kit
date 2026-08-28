@@ -7,6 +7,10 @@ INSERT INTO agents (owner_user_id, agent_ref, version, definition, display_meta)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
+-- name: GetAgentByID :one
+-- 按 version id 取一行（编辑页 / PATCH / DELETE 的入口），不经过 agent_ref。
+SELECT * FROM agents WHERE id = $1 AND owner_user_id = $2;
+
 -- name: GetAgentForOwner :one
 SELECT * FROM agents
 WHERE owner_user_id = $1 AND agent_ref = $2 AND version = $3;

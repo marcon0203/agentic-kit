@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/marcon0203/agentic-kit/internal/domain"
 	"github.com/marcon0203/agentic-kit/internal/domain/agent"
 )
@@ -101,13 +99,18 @@ func (h *AgentHandlers) Create(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusCreated, toAgentDTO(created))
 }
 
-// Update handles PATCH /agents/{ref} — edits the latest version by creating a
-// new version with an auto-bumped version number. To callers this looks like
-// an in-place update while the backend preserves immutable versions.
+// Update handles PATCH /agents/{id} — edits the latest version by creating a
+// new version with an auto-bumped version number. Routes by numeric id, not
+// the DSL's agent key, so definition.agent no longer has to match the path.
 func (h *AgentHandlers) Update(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
 		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
+		return
+	}
+
+	id, ok := parseIDParam(w, r, "id")
+	if !ok {
 		return
 	}
 
@@ -117,7 +120,7 @@ func (h *AgentHandlers) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.svc.Update(r.Context(), userID, chi.URLParam(r, "ref"), agent.Definition(req.Definition))
+	updated, err := h.svc.Update(r.Context(), userID, id, agent.Definition(req.Definition))
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return
@@ -125,7 +128,7 @@ func (h *AgentHandlers) Update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, toAgentDTO(updated))
 }
 
-// ListVersions handles GET /agents/{ref}/versions.
+// ListVersions handles GET /agents/{id}/versions.
 func (h *AgentHandlers) ListVersions(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
@@ -133,7 +136,12 @@ func (h *AgentHandlers) ListVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	versions, err := h.svc.ListVersions(r.Context(), userID, chi.URLParam(r, "ref"))
+	id, ok := parseIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+
+	versions, err := h.svc.ListVersions(r.Context(), userID, id)
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return
@@ -141,7 +149,7 @@ func (h *AgentHandlers) ListVersions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, toAgentDTOs(versions))
 }
 
-// Delete handles DELETE /agents/{ref}.
+// Delete handles DELETE /agents/{id}.
 func (h *AgentHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {
@@ -149,7 +157,12 @@ func (h *AgentHandlers) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.Delete(r.Context(), userID, chi.URLParam(r, "ref")); err != nil {
+	id, ok := parseIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+
+	if err := h.svc.Delete(r.Context(), userID, id); err != nil {
 		writeDomainErr(w, r, err)
 		return
 	}

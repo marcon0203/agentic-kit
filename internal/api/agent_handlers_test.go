@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -76,6 +78,25 @@ func (s *stubAgentRepo) CountActiveSubscribedVersions(_ context.Context, _ int64
 
 func (s *stubAgentRepo) FindReferencingBundles(_ context.Context, _ int64, ref string) ([]agent.BundleRef, error) {
 	return s.referencing[ref], nil
+}
+
+func (s *stubAgentRepo) GetByID(_ context.Context, _ int64, id int64) (agent.Agent, error) {
+	for _, versions := range s.agents {
+		for _, v := range versions {
+			if v.ID == id {
+				return v, nil
+			}
+		}
+	}
+	return agent.Agent{}, errors.New("not found")
+}
+
+func (s *stubAgentRepo) seed(ref, version string) int64 {
+	a := agent.Agent{ID: s.nextID, Ref: ref, Version: version, Status: agent.StatusEnabled,
+		Definition: agent.Definition(validAgentDefinition(ref, version))}
+	s.nextID++
+	s.agents[ref] = append([]agent.Agent{a}, s.agents[ref]...)
+	return a.ID
 }
 
 // stubCatalog reports every ref as present and enabled — capability
@@ -166,21 +187,20 @@ func TestCreateAgent_DuplicateVersionMapsToConflict409(t *testing.T) {
 }
 
 // domain.KindNotFound -> 404.
-func TestListAgentVersions_UnknownRefMapsToNotFound404(t *testing.T) {
+func TestListAgentVersions_UnknownIDMapsToNotFound404(t *testing.T) {
 	h, _ := newAgentHandlersForTest(t)
-	w := doResourceRequest(t, h.ListVersions, http.MethodGet, "/api/v1/agents/nope/versions", 1, nil, map[string]string{"ref": "nope"})
+	w := doResourceRequest(t, h.ListVersions, http.MethodGet, "/api/v1/agents/999/versions", 1, nil, map[string]string{"id": "999"})
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404: %s", w.Code, w.Body.String())
 	}
 }
 
 func TestListAgentVersions_SerializesNewestFirst(t *testing.T) {
-	h, _ := newAgentHandlersForTest(t)
-	for _, v := range []string{"1.0", "2.0"} {
-		doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/agents", 1, createAgentRequest{Definition: validAgentDefinition("pm", v)}, nil)
-	}
+	h, repo := newAgentHandlersForTest(t)
+	firstID := repo.seed("pm", "1.0")
+	repo.seed("pm", "2.0")
 
-	w := doResourceRequest(t, h.ListVersions, http.MethodGet, "/api/v1/agents/pm/versions", 1, nil, map[string]string{"ref": "pm"})
+	w := doResourceRequest(t, h.ListVersions, http.MethodGet, "/api/v1/agents/"+strconv.FormatInt(firstID, 10)+"/versions", 1, nil, map[string]string{"id": strconv.FormatInt(firstID, 10)})
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
@@ -204,8 +224,9 @@ func TestListAgentVersions_SerializesNewestFirst(t *testing.T) {
 func TestDeleteAgent_OccupiedMapsToConflict409(t *testing.T) {
 	h, repo := newAgentHandlersForTest(t)
 	repo.subscribed["subscribed-agent"] = 1
+	id := repo.seed("subscribed-agent", "1.0")
 
-	w := doAgentDelete(t, h.Delete, "subscribed-agent")
+	w := doAgentDelete(t, h.Delete, id)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
 	}
@@ -215,21 +236,22 @@ func TestDeleteAgent_OccupiedMapsToConflict409(t *testing.T) {
 }
 
 func TestDeleteAgent_SucceedsWith204(t *testing.T) {
-	h, _ := newAgentHandlersForTest(t)
-	doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/agents", 1, createAgentRequest{Definition: validAgentDefinition("free-agent", "1.0")}, nil)
+	h, repo := newAgentHandlersForTest(t)
+	id := repo.seed("free-agent", "1.0")
 
-	w := doAgentDelete(t, h.Delete, "free-agent")
+	w := doAgentDelete(t, h.Delete, id)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204: %s", w.Code, w.Body.String())
 	}
 }
 
-func doAgentDelete(t *testing.T, handler http.HandlerFunc, ref string) *httptest.ResponseRecorder {
+func doAgentDelete(t *testing.T, handler http.HandlerFunc, id int64) *httptest.ResponseRecorder {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodDelete, "/api/v1/agents/"+ref, &bytes.Buffer{})
+	idStr := strconv.FormatInt(id, 10)
+	r := httptest.NewRequest(http.MethodDelete, "/api/v1/agents/"+idStr, &bytes.Buffer{})
 	r = r.WithContext(WithUserID(r.Context(), 1))
 	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("ref", ref)
+	rctx.URLParams.Add("id", idStr)
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)

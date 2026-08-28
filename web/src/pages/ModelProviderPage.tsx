@@ -14,7 +14,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ListSkeleton, ErrorPanel } from '@/components/common/EmptyState'
-import { PageHeader } from '@/components/common/Page'
 import { SectionSidebar, type SectionSidebarItem } from '@/components/layout/SectionSidebar'
 import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
@@ -100,22 +99,11 @@ export function ModelProviderPage() {
   }, [catalogQuery.data, tab, modality, providerFilter])
 
   return (
-    <div className="flex flex-col gap-space-6">
-      <PageHeader
-        eyebrow="MODEL PROVIDERS"
-        title="模型广场"
-        description="按类型或供应商挑一个模型作为起点；真正能不能用取决于右边接入的 Provider 凭证——密钥先拿去真实验证一次再保存。"
-        actions={
-          <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setConnecting('anthropic')}>
-            新增模型
-          </Button>
-        }
-      />
-
-      <div className="flex flex-col gap-space-6 sm:flex-row">
+    <div className="flex flex-1 flex-col gap-space-6">
+      <div className="flex flex-1 flex-col gap-space-6 sm:flex-row">
         <SectionSidebar items={MODALITIES} active={modality} onChange={setModality} />
 
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 rounded-lg border border-border bg-surface p-space-6">
           <div className="mb-space-5 flex flex-wrap items-center justify-between gap-space-3">
             <div role="tablist" className="flex w-fit items-center gap-space-1 rounded-full border border-border bg-surface-muted p-1">
               {(['featured', 'all'] as const).map((t) => (
@@ -135,21 +123,26 @@ export function ModelProviderPage() {
               ))}
             </div>
 
-            {providerOptions.length > 0 && (
-              <Select value={providerFilter} onValueChange={setProviderFilter}>
-                <SelectTrigger className="h-9 w-[180px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部供应商</SelectItem>
-                  {providerOptions.map(([key, label]) => (
-                    <SelectItem key={key} value={key}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            <div className="flex items-center gap-space-3">
+              {providerOptions.length > 0 && (
+                <Select value={providerFilter} onValueChange={setProviderFilter}>
+                  <SelectTrigger className="h-9 w-[180px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部供应商</SelectItem>
+                    {providerOptions.map(([key, label]) => (
+                      <SelectItem key={key} value={key}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setConnecting('anthropic')}>
+                新增模型
+              </Button>
+            </div>
           </div>
 
           {(catalogQuery.isLoading || providersQuery.isLoading) && <ListSkeleton rows={4} />}

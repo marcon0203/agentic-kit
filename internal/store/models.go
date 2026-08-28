@@ -135,6 +135,23 @@ type KnowledgeBasis struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type MarketSkill struct {
+	ID        int64              `json:"id"`
+	SourceID  int64              `json:"source_id"`
+	Slug      string             `json:"slug"`
+	Name      string             `json:"name"`
+	Summary   pgtype.Text        `json:"summary"`
+	Version   pgtype.Text        `json:"version"`
+	License   pgtype.Text        `json:"license"`
+	Changelog pgtype.Text        `json:"changelog"`
+	Topics    []string           `json:"topics"`
+	Stars     int64              `json:"stars"`
+	Downloads int64              `json:"downloads"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	Raw       []byte             `json:"raw"`
+	SyncedAt  pgtype.Timestamptz `json:"synced_at"`
+}
+
 type MarketplaceListing struct {
 	ID              int64              `json:"id"`
 	AuthorUserID    int64              `json:"author_user_id"`
@@ -291,6 +308,16 @@ type SkillFile struct {
 	SizeBytes   int64              `json:"size_bytes"`
 	ContentType string             `json:"content_type"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type SkillSource struct {
+	ID            int64              `json:"id"`
+	Name          string             `json:"name"`
+	BaseUrl       string             `json:"base_url"`
+	Status        int16              `json:"status"`
+	LastSyncedAt  pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError pgtype.Text        `json:"last_sync_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type Subscription struct {

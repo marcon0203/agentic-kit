@@ -1024,9 +1024,9 @@ paths:
                       - field: 'model.provider'
                         reason: '必须是 anthropic / openai / google / custom 之一'
 
-  /agents/{ref}:
+  /agents/{id}:
     parameters:
-      - name: ref
+      - name: id
         in: path
         required: true
         schema: { type: string }
@@ -1098,13 +1098,13 @@ paths:
                       - field: 'referenced_by'
                         reason: 'Bundle web-app-builder v2.0 正在引用'
 
-  /agents/{ref}/versions:
+  /agents/{id}/versions:
     get:
       tags: [Agents]
       summary: 某个 Agent 的全部版本
       operationId: listAgentVersions
       parameters:
-        - name: ref
+        - name: id
           in: path
           required: true
           schema: { type: string }
@@ -2727,6 +2727,207 @@ paths:
               schema: { $ref: '#/components/schemas/Envelope' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  # ────────────────────────── Skill 源 ──────────────────────────
+  # 系统配置 → Skill 源：管理员登记公开 Skill 市场（如 https://clawhub.ai/），
+  # 同步后的公开 Skill 出现在 Skill 管理 → 市场视图（GET /skill-market）。
+  /skill-sources:
+    get:
+      tags: [SkillSources]
+      summary: 源列表，管理员
+      operationId: listSkillSources
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/SkillSource' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [SkillSources]
+      summary: 登记一个源，管理员
+      operationId: createSkillSource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, base_url]
+              properties:
+                name: { type: string, maxLength: 64 }
+                base_url: { type: string, format: uri }
+      responses:
+        '201':
+          description: 登记成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SkillSource' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: 源地址已登记
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /skill-sources/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [SkillSources]
+      summary: 删除源（连同缓存条目），管理员
+      operationId: deleteSkillSource
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /skill-sources/{id}/sync:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [SkillSources]
+      summary: 手动同步一个源，管理员
+      description: |
+        拉取上游全量列表并整体替换本地缓存；失败写进 last_sync_error 返回。
+      operationId: syncSkillSource
+      responses:
+        '200':
+          description: 同步完成
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/SkillSource' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502':
+          description: 上游不可达（last_sync_error 里带原因）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /skill-market:
+    get:
+      tags: [SkillSources]
+      summary: 所有启用源的公开 Skill（缓存快照）
+      operationId: listSkillMarket
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/MarketSkill' }
+                          has_more: { type: boolean }
+
+  /skill-market/{source_id}/{slug}:
+    parameters:
+      - name: source_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: slug
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [SkillSources]
+      summary: 公开 Skill 详情（回源补用法/作者/版本历史）
+      description: |
+        缓存快照打底，尽力回源补全：usage（SKILL.md 原文）、owner、
+        upstream_url、versions。上游临时不可达时这些字段缺省，不报错。
+      operationId: getSkillMarketDetail
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MarketSkillDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /skill-market/{source_id}/{slug}/install:
+    parameters:
+      - name: source_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: slug
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [SkillSources]
+      summary: 把市场 Skill 安装到当前账号
+      description: |
+        回源下载该 Skill 的 zip 安装包，走与 zip 上传相同的校验与存储管线，
+        落成本账号的一个 Skill 资源；config.installed_from 记录安装来源，
+        "我的 Skill" 列表据此显示"市场安装"标记。重复安装返回 409。
+      operationId: installSkillMarketSkill
+      responses:
+        '201':
+          description: 安装成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Resource' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 已安装过（或 ref 已被占用）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '502':
+          description: 上游下载失败
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -3434,5 +3635,86 @@ components:
       properties:
         ref: { type: string, example: 'plugin:agentic-kit.postgres-connector/run_query' }
         plugin_id: { type: string }
+        plugin_display_name:
+          type: string
+          description: manifest.display_name（中文展示名）
         tool_name: { type: string }
         description: { type: string }
+
+    # ── Skill 源 ────────────────────────────────────────────────────
+    SkillSource:
+      type: object
+      required: [id, name, base_url, status, skill_count]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        base_url:
+          type: string
+          description: 站点根地址，不带路径与尾斜杠
+        status: { $ref: '#/components/schemas/Status' }
+        last_synced_at:
+          type: [string, 'null']
+          format: date-time
+          description: 上次同步时间；null = 从未同步
+        last_sync_error:
+          type: [string, 'null']
+          description: 非空 = 上次同步失败，直接展示给管理员
+        skill_count:
+          type: integer
+          format: int64
+          description: 当前缓存条目数
+
+    MarketSkill:
+      type: object
+      required: [source_id, source_name, source_base_url, slug, name, topics, stars, downloads]
+      properties:
+        source_id: { type: string }
+        source_name: { type: string }
+        source_base_url: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        summary: { type: string }
+        version: { type: string }
+        license: { type: string }
+        topics:
+          type: array
+          items: { type: string }
+        stars: { type: integer, format: int64 }
+        downloads: { type: integer, format: int64 }
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+
+    MarketSkillOwner:
+      type: object
+      required: [handle]
+      properties:
+        handle: { type: string, example: 'mattpocock' }
+        display_name: { type: string }
+        avatar: { type: string, format: uri }
+
+    MarketSkillVersion:
+      type: object
+      required: [version]
+      properties:
+        version: { type: string }
+        changelog: { type: string }
+        created_at: { type: string }
+
+    MarketSkillDetail:
+      type: object
+      required: [source_id, source_name, source_base_url, slug, name, topics, stars, downloads, versions]
+      allOf:
+        - $ref: '#/components/schemas/MarketSkill'
+        - type: object
+          properties:
+            usage:
+              type: string
+              description: 上游 SKILL.md 原文（Markdown），详情页直接渲染
+            owner: { $ref: '#/components/schemas/MarketSkillOwner' }
+            upstream_url:
+              type: string
+              description: 上网页面地址，供外链"去源站查看"
+            versions:
+              type: array
+              items: { $ref: '#/components/schemas/MarketSkillVersion' }

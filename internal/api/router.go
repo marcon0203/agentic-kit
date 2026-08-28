@@ -41,6 +41,7 @@ type RouterConfig struct {
 	ModelProviders    *ModelProviderHandlers
 	ModelCatalog      *ModelCatalogHandlers
 	ModelCatalogAdmin *ModelCatalogAdminHandlers
+	SkillSources      *SkillSourceHandlers
 	Usage             *UsageHandlers
 	Runs              *RunHandlers
 	Operations        *OperationHandlers
@@ -132,9 +133,9 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 			if cfg.Agents != nil {
 				r.Get("/agents", cfg.Agents.List)
 				r.Post("/agents", cfg.Agents.Create)
-				r.Patch("/agents/{ref}", cfg.Agents.Update)
-				r.Get("/agents/{ref}/versions", cfg.Agents.ListVersions)
-				r.Delete("/agents/{ref}", cfg.Agents.Delete)
+				r.Patch("/agents/{id}", cfg.Agents.Update)
+				r.Get("/agents/{id}/versions", cfg.Agents.ListVersions)
+				r.Delete("/agents/{id}", cfg.Agents.Delete)
 			}
 			if cfg.Bundles != nil {
 				r.Get("/bundles", cfg.Bundles.List)
@@ -163,6 +164,15 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 			}
 			if cfg.ModelCatalog != nil {
 				r.Get("/model-catalog", cfg.ModelCatalog.List)
+			}
+			if cfg.SkillSources != nil {
+				r.Get("/skill-sources", cfg.SkillSources.List)
+				r.Post("/skill-sources", cfg.SkillSources.Create)
+				r.Post("/skill-sources/{id}/sync", cfg.SkillSources.Sync)
+				r.Delete("/skill-sources/{id}", cfg.SkillSources.Delete)
+				r.Get("/skill-market", cfg.SkillSources.ListMarket)
+				r.Get("/skill-market/{source_id}/{slug}", cfg.SkillSources.MarketDetail)
+				r.Post("/skill-market/{source_id}/{slug}/install", cfg.SkillSources.MarketInstall)
 			}
 			if cfg.ModelCatalogAdmin != nil {
 				r.Get("/model-catalog/providers", cfg.ModelCatalogAdmin.ListProviders)

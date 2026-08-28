@@ -494,12 +494,12 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agents/{ref}": {
+    "/agents/{id}": {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -524,7 +524,7 @@ export interface paths {
         patch: operations["updateAgent"];
         trace?: never;
     };
-    "/agents/{ref}/versions": {
+    "/agents/{id}/versions": {
         parameters: {
             query?: never;
             header?: never;
@@ -1343,6 +1343,131 @@ export interface paths {
         patch: operations["updateUserRoles"];
         trace?: never;
     };
+    "/skill-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 源列表，管理员 */
+        get: operations["listSkillSources"];
+        put?: never;
+        /** 登记一个源，管理员 */
+        post: operations["createSkillSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除源（连同缓存条目），管理员 */
+        delete: operations["deleteSkillSource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-sources/{id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动同步一个源，管理员
+         * @description 拉取上游全量列表并整体替换本地缓存；失败写进 last_sync_error 返回。
+         */
+        post: operations["syncSkillSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-market": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 所有启用源的公开 Skill（缓存快照） */
+        get: operations["listSkillMarket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-market/{source_id}/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * 公开 Skill 详情（回源补用法/作者/版本历史）
+         * @description 缓存快照打底，尽力回源补全：usage（SKILL.md 原文）、owner、
+         *     upstream_url、versions。上游临时不可达时这些字段缺省，不报错。
+         */
+        get: operations["getSkillMarketDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-market/{source_id}/{slug}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 把市场 Skill 安装到当前账号
+         * @description 回源下载该 Skill 的 zip 安装包，走与 zip 上传相同的校验与存储管线，
+         *     落成本账号的一个 Skill 资源；config.installed_from 记录安装来源，
+         *     "我的 Skill" 列表据此显示"市场安装"标记。重复安装返回 409。
+         */
+        post: operations["installSkillMarketSkill"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1859,8 +1984,66 @@ export interface components {
             /** @example plugin:agentic-kit.postgres-connector/run_query */
             ref: string;
             plugin_id: string;
+            /** @description manifest.display_name（中文展示名） */
+            plugin_display_name?: string;
             tool_name: string;
             description?: string;
+        };
+        SkillSource: {
+            id: string;
+            name: string;
+            /** @description 站点根地址，不带路径与尾斜杠 */
+            base_url: string;
+            status: components["schemas"]["Status"];
+            /**
+             * Format: date-time
+             * @description 上次同步时间；null = 从未同步
+             */
+            last_synced_at?: string | null;
+            /** @description 非空 = 上次同步失败，直接展示给管理员 */
+            last_sync_error?: string | null;
+            /**
+             * Format: int64
+             * @description 当前缓存条目数
+             */
+            skill_count: number;
+        };
+        MarketSkill: {
+            source_id: string;
+            source_name: string;
+            source_base_url: string;
+            slug: string;
+            name: string;
+            summary?: string;
+            version?: string;
+            license?: string;
+            topics: string[];
+            /** Format: int64 */
+            stars: number;
+            /** Format: int64 */
+            downloads: number;
+            /** Format: date-time */
+            updated_at?: string | null;
+        };
+        MarketSkillOwner: {
+            /** @example mattpocock */
+            handle: string;
+            display_name?: string;
+            /** Format: uri */
+            avatar?: string;
+        };
+        MarketSkillVersion: {
+            version: string;
+            changelog?: string;
+            created_at?: string;
+        };
+        MarketSkillDetail: WithRequired<components["schemas"]["MarketSkill"], "source_id" | "source_name" | "source_base_url" | "slug" | "name" | "topics" | "stars" | "downloads"> & {
+            /** @description 上游 SKILL.md 原文（Markdown），详情页直接渲染 */
+            usage?: string;
+            owner?: components["schemas"]["MarketSkillOwner"];
+            /** @description 上网页面地址，供外链"去源站查看" */
+            upstream_url?: string;
+            versions: components["schemas"]["MarketSkillVersion"][];
         };
     };
     responses: {
@@ -2899,7 +3082,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -2931,7 +3114,7 @@ export interface operations {
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
-                ref: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -2979,7 +3162,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -4750,4 +4933,226 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    listSkillSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["SkillSource"][];
+                        };
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createSkillSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** Format: uri */
+                    base_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 登记成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SkillSource"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            /** @description 源地址已登记 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    deleteSkillSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    syncSkillSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 同步完成 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["SkillSource"];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 上游不可达（last_sync_error 里带原因） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    listSkillMarket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["MarketSkill"][];
+                            has_more: boolean;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    getSkillMarketDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MarketSkillDetail"];
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    installSkillMarketSkill: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source_id: string;
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 安装成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Resource"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description 已安装过（或 ref 已被占用） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            /** @description 上游下载失败 */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
 }
+type WithRequired<T, K extends keyof T> = T & {
+    [P in K]-?: T[P];
+};

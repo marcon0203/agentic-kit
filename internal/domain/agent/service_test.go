@@ -74,6 +74,26 @@ func (f *fakeRepo) FindReferencingBundles(_ context.Context, _ int64, ref string
 	return f.referencing[ref], nil
 }
 
+func (f *fakeRepo) GetByID(_ context.Context, _ int64, id int64) (agent.Agent, error) {
+	for _, versions := range f.agents {
+		for _, v := range versions {
+			if v.ID == id {
+				return v, nil
+			}
+		}
+	}
+	return agent.Agent{}, errors.New("not found")
+}
+
+// seed stashes an agent directly in the repo (bypassing validation) and
+// returns its id — the numeric handle Update/Delete/ListVersions now take.
+func (f *fakeRepo) seed(ref, version string) int64 {
+	a := agent.Agent{ID: f.nextID, Ref: ref, Version: version, Status: agent.StatusEnabled}
+	f.nextID++
+	f.agents[ref] = append([]agent.Agent{a}, f.agents[ref]...)
+	return a.ID
+}
+
 type fakeCatalog struct {
 	tools  map[string]agent.RefStatus
 	skills map[string]agent.RefStatus
@@ -209,9 +229,10 @@ func TestCreate_DuplicateVersionIsConflict(t *testing.T) {
 func TestDelete_BlockedBySubscribedVersion(t *testing.T) {
 	repo := newFakeRepo()
 	repo.subscribed["subscribed-agent"] = 1
+	id := repo.seed("subscribed-agent", "1.0")
 	svc := newService(repo, newFakeCatalog(), fakeValidator{})
 
-	err := svc.Delete(context.Background(), 1, "subscribed-agent")
+	err := svc.Delete(context.Background(), 1, id)
 
 	assertDomainErr(t, err, domain.KindConflict, domain.CodeSubscribedVersionLocked)
 }
@@ -219,9 +240,10 @@ func TestDelete_BlockedBySubscribedVersion(t *testing.T) {
 func TestDelete_BlockedByReferencingBundleNamesTheBundle(t *testing.T) {
 	repo := newFakeRepo()
 	repo.referencing["used-agent"] = []agent.BundleRef{{Ref: "web-app-builder", Version: "2.0"}}
+	id := repo.seed("used-agent", "1.0")
 	svc := newService(repo, newFakeCatalog(), fakeValidator{})
 
-	err := svc.Delete(context.Background(), 1, "used-agent")
+	err := svc.Delete(context.Background(), 1, id)
 
 	de := assertDomainErr(t, err, domain.KindConflict, domain.CodeAgentVersionNotFound)
 	if len(de.Details) != 1 || de.Details[0].Reason != "Bundle web-app-builder v2.0 正在引用" {
@@ -234,9 +256,10 @@ func TestDelete_BlockedByReferencingBundleNamesTheBundle(t *testing.T) {
 func TestDelete_StorageLockWinsTheRace(t *testing.T) {
 	repo := newFakeRepo()
 	repo.deleteErr = agent.ErrVersionLocked
+	id := repo.seed("free-agent", "1.0")
 	svc := newService(repo, newFakeCatalog(), fakeValidator{})
 
-	err := svc.Delete(context.Background(), 1, "free-agent")
+	err := svc.Delete(context.Background(), 1, id)
 
 	assertDomainErr(t, err, domain.KindConflict, domain.CodeSubscribedVersionLocked)
 }
@@ -244,11 +267,12 @@ func TestDelete_StorageLockWinsTheRace(t *testing.T) {
 func TestDelete_SucceedsWhenUnoccupied(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newService(repo, newFakeCatalog(), fakeValidator{})
-	if _, err := svc.Create(context.Background(), 1, def("free-agent", "1.0")); err != nil {
+	created, err := svc.Create(context.Background(), 1, def("free-agent", "1.0"))
+	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if err := svc.Delete(context.Background(), 1, "free-agent"); err != nil {
+	if err := svc.Delete(context.Background(), 1, created.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	if _, still := repo.agents["free-agent"]; still {
@@ -256,24 +280,30 @@ func TestDelete_SucceedsWhenUnoccupied(t *testing.T) {
 	}
 }
 
-func TestListVersions_UnknownRefIsNotFound(t *testing.T) {
+func TestListVersions_UnknownIDIsNotFound(t *testing.T) {
 	svc := newService(newFakeRepo(), newFakeCatalog(), fakeValidator{})
 
-	_, err := svc.ListVersions(context.Background(), 1, "nope")
+	_, err := svc.ListVersions(context.Background(), 1, 999)
 
 	assertDomainErr(t, err, domain.KindNotFound, domain.CodeResourceNotFound)
 }
 
 func TestListVersions_ReturnsNewestFirst(t *testing.T) {
-	svc := newService(newFakeRepo(), newFakeCatalog(), fakeValidator{})
+	repo := newFakeRepo()
+	svc := newService(repo, newFakeCatalog(), fakeValidator{})
 	ctx := context.Background()
+	var firstID int64
 	for _, v := range []string{"1.0", "2.0"} {
-		if _, err := svc.Create(ctx, 1, def("pm", v)); err != nil {
+		created, err := svc.Create(ctx, 1, def("pm", v))
+		if err != nil {
 			t.Fatalf("seed %s: %v", v, err)
+		}
+		if v == "1.0" {
+			firstID = created.ID
 		}
 	}
 
-	versions, err := svc.ListVersions(ctx, 1, "pm")
+	versions, err := svc.ListVersions(ctx, 1, firstID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

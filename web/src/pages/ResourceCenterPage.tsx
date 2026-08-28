@@ -4,9 +4,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Ref } from '@/components/common/Page'
+import { Ref, Section, FilterChips, FilterChip } from '@/components/common/Page'
 import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
+import { AppCard } from '@/components/marketplace/AppCard'
+import { MarketSkillCard } from '@/components/resources/MarketSkillCard'
+import { PAGE_SIZES, Pagination } from '@/components/common/Pagination'
 import { RegisterResourceDialog } from '@/components/resources/RegisterResourceDialog'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
@@ -15,6 +18,9 @@ import type { components } from '@/lib/api/schema'
 
 type ResourceType = components['schemas']['ResourceType']
 type Resource = components['schemas']['Resource']
+type ListingResourceType = components['schemas']['ListingResourceType']
+type ListingSummary = components['schemas']['ListingSummary']
+type MarketSkill = components['schemas']['MarketSkill']
 
 /* Each kind gets its own empty-state copy. "还没有资源" is the same sentence
    four times over and helps nobody; what a person needs to know is what this
@@ -86,9 +92,21 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
   const [search, setSearch] = useState('')
   const [registerOpen, setRegisterOpen] = useState(false)
   const [toggleError, setToggleError] = useState<string | null>(null)
+  // Skill / MCP 有市场分发（bundle/agent/skill/mcp 可发布），页面给
+  // 市场/自定义 两个视图；其余资源类型只有自定义列表，不显示切换。
+  const hasMarket = type === 'skill' || type === 'mcp'
+  const [view, setView] = useState<'market' | 'custom'>(hasMarket ? 'market' : 'custom')
+  // 市场是纯前端分页：一次拉全量缓存，按页切片展示。搜索/标签也在前端
+  // 过滤——缓存本来就全在本机，不值得为此打后端。
+  const [marketPage, setMarketPage] = useState(1)
+  const [marketPageSize, setMarketPageSize] = useState(PAGE_SIZES[0])
+  const [marketSearch, setMarketSearch] = useState('')
+  const [marketTopic, setMarketTopic] = useState('all')
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { knowledgeBaseEnabled, skillUploadEnabled, isLoading: featuresLoading } = useFeatures()
+
+  const showCustom = !hasMarket || view === 'custom'
 
   // MCP Server has its own multi-field page (URL, header list, a 检测
   // button that needs room to show probed results), and Skill only
@@ -116,6 +134,26 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
         await apiClient.GET('/resources', { params: { query: { type } } }),
       ),
     enabled: type !== 'knowledge_base' || knowledgeBaseEnabled,
+  })
+
+  // Skill 的市场视图吃外部源（系统配置 → Skill 源 同步下来的公开 Skill）；
+  // MCP 仍然看本平台应用广场的发布列表。两个查询按类型互斥启用。
+  const isSkill = type === 'skill'
+  const skillMarketQuery = useQuery({
+    queryKey: ['skill-market'],
+    queryFn: async () =>
+      unwrap<{ items: MarketSkill[]; has_more: boolean }>(await apiClient.GET('/skill-market', {})),
+    enabled: isSkill && view === 'market',
+  })
+  const platformMarketQuery = useQuery({
+    queryKey: ['marketplace-listings', type],
+    queryFn: async () =>
+      unwrap<{ items: ListingSummary[]; has_more: boolean }>(
+        await apiClient.GET('/marketplace/listings', {
+          params: { query: { resource_type: type as ListingResourceType } },
+        }),
+      ),
+    enabled: type === 'mcp' && view === 'market',
   })
 
   if (type === 'knowledge_base' && !featuresLoading && !knowledgeBaseEnabled) {
@@ -155,116 +193,353 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
     ? items.filter((r) => r.ref.includes(search) || (r.display_name ?? '').includes(search))
     : items
 
+  // 市场搜索/标签过滤 + 高频标签清单（全部标签动辄上百个，只列出现频率
+  // 最高的 12 个，长尾靠搜索框兜底）。条目只有千级，直接算不 memo。
+  const marketItems = skillMarketQuery.data?.items ?? []
+  const keyword = marketSearch.trim().toLowerCase()
+  const marketFiltered = marketItems
+    .filter((s) => marketTopic === 'all' || s.topics.includes(marketTopic))
+    .filter(
+      (s) =>
+        !keyword ||
+        s.name.toLowerCase().includes(keyword) ||
+        s.slug.toLowerCase().includes(keyword) ||
+        (s.summary ?? '').toLowerCase().includes(keyword),
+    )
+  const topicCounts = new Map<string, number>()
+  for (const s of marketItems) for (const t of s.topics) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1)
+  const marketTopics = Array.from(topicCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([t]) => t)
+
   return (
-    <div className="flex flex-col gap-space-6">
-      <div className="flex items-center justify-end gap-space-3">
-        {skillUploadBlocked && (
-          <span className="text-caption text-ink-500">未配置对象存储（OSS_*），Skill 上传暂不可用</span>
-        )}
-        <Button
-          className="bg-gradient-cta text-white hover:opacity-90"
-          onClick={openRegister}
-          disabled={skillUploadBlocked}
-        >
-          {kind.blank.cta}
-        </Button>
-      </div>
-
-      {items.length > 0 && (
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="按 ref 或名称筛选"
-          className="max-w-xs"
-        />
-      )}
-
-      {toggleError && (
-        <p role="alert" className="text-body-sm text-rust">
-          {toggleError}
-        </p>
-      )}
-
-      {query.isLoading && <ListSkeleton />}
-
-      {query.isError && <ErrorPanel message="资源列表没能加载出来" onRetry={() => query.refetch()} />}
-
-      {query.isSuccess && items.length === 0 && (
-        <EmptyRail
-          title={skillUploadBlocked ? 'Skill 上传暂不可用' : kind.blank.title}
-          description={
-            skillUploadBlocked
-              ? '这台服务器没有配置对象存储（OSS_*），Skill 上传依赖它来存放 zip 包的内容——找管理员在部署配置里补上。'
-              : kind.blank.description
-          }
-          action={
-            !skillUploadBlocked && (
-              <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={openRegister}>
-                {kind.blank.cta}
-              </Button>
-            )
-          }
-        />
-      )}
-
-      {query.isSuccess && items.length > 0 && filtered.length === 0 && (
-        <EmptyRail
-          title={`没有 ref 或名称包含「${search}」的${kind.label}`}
-          description="筛选只匹配 ref 和显示名称，不搜索配置内容。"
-          action={
-            <Button variant="outline" size="sm" onClick={() => setSearch('')}>
-              清除筛选
-            </Button>
-          }
-        />
-      )}
-
-      {filtered.length > 0 && (
-        <ul className="overflow-hidden rounded-lg border border-border bg-surface">
-          {filtered.map((r) => (
-            <li
-              key={r.id}
-              className="flex items-center gap-space-4 border-b border-border px-space-5 py-space-3 last:border-0"
-            >
-              <span
-                aria-hidden
+    <Section
+      title={type === 'skill' ? 'Skill 管理' : type === 'mcp' ? 'MCP 管理' : `我的${kind.label}`}
+      center={
+        hasMarket ? (
+          <div
+            role="tablist"
+            className="flex w-fit items-center gap-space-1 rounded-sm border border-border bg-surface-muted p-1"
+          >
+            {(['market', 'custom'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={view === v}
+                onClick={() => {
+                setView(v)
+                setMarketPage(1)
+              }}
                 className={cn(
-                  'size-2 shrink-0 rounded-full',
-                  r.status === 1 ? 'bg-moss' : 'bg-border-strong',
-                )}
-              />
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="flex items-center gap-space-3">
-                  <Ref>{r.ref}</Ref>
-                  {r.display_name && (
-                    <span className="text-body-sm truncate text-ink-700">{r.display_name}</span>
-                  )}
-                </span>
-                {r.health && r.health !== 'unknown' && (
-                  <span
-                    className={cn(
-                      'text-caption',
-                      r.health === 'healthy' ? 'text-moss' : 'text-rust',
-                    )}
-                  >
-                    {r.health === 'healthy' ? '上次探测：连接正常' : '上次探测：连不上，检查地址与凭证'}
-                  </span>
-                )}
-              </span>
-              <span
-                className={cn(
-                  'text-caption w-12 shrink-0 text-right',
-                  r.status === 1 ? 'text-moss' : 'text-ink-500',
+                  'text-body-sm rounded-sm px-space-4 py-1.5 transition-colors',
+                  view === v ? 'bg-surface text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-900',
                 )}
               >
-                {r.status === 1 ? '已启用' : '已停用'}
-              </span>
-              <Button variant="outline" size="sm" onClick={() => toggleStatus(r)}>
-                {r.status === 1 ? '停用' : '启用'}
-              </Button>
-            </li>
-          ))}
-        </ul>
+                {v === 'market' ? '市场' : isSkill ? '我的 Skill' : '自定义'}
+              </button>
+            ))}
+          </div>
+        ) : undefined
+      }
+      aside={
+        showCustom ? (
+          <div className="flex items-center gap-space-3">
+            {skillUploadBlocked && (
+              <span className="text-caption text-ink-500">未配置对象存储（OSS_*），Skill 上传暂不可用</span>
+            )}
+            <Button
+              className="bg-gradient-cta text-white hover:opacity-90"
+              onClick={openRegister}
+              disabled={skillUploadBlocked}
+            >
+              {kind.blank.cta}
+            </Button>
+          </div>
+        ) : undefined
+      }
+    >
+      {hasMarket && view === 'market' ? (
+        isSkill ? (
+          <>
+            {skillMarketQuery.isLoading && <ListSkeleton />}
+
+            {skillMarketQuery.isError && (
+              <ErrorPanel message="Skill 市场没能加载出来" onRetry={() => skillMarketQuery.refetch()} />
+            )}
+
+            {skillMarketQuery.isSuccess && (skillMarketQuery.data?.items.length ?? 0) === 0 && (
+              <EmptyRail
+                title="市场里还没有公开 Skill"
+                description="让管理员在 系统设置 → Skill 源 登记并同步一个公开市场（例如 https://clawhub.ai），它的公开 Skill 会出现在这里，可以查看用法、作者和更新记录。"
+              />
+            )}
+
+            {skillMarketQuery.isSuccess && marketItems.length > 0 && (
+              <>
+                <div className="flex flex-col gap-space-3">
+                  <Input
+                    value={marketSearch}
+                    onChange={(e) => {
+                      setMarketSearch(e.target.value)
+                      setMarketPage(1)
+                    }}
+                    placeholder="搜索名称、slug 或简介"
+                    className="max-w-xs"
+                  />
+                  {marketTopics.length > 0 && (
+                    <FilterChips>
+                      <FilterChip
+                        active={marketTopic === 'all'}
+                        onClick={() => {
+                          setMarketTopic('all')
+                          setMarketPage(1)
+                        }}
+                      >
+                        全部标签
+                      </FilterChip>
+                      {marketTopics.map((t) => (
+                        <FilterChip
+                          key={t}
+                          active={marketTopic === t}
+                          onClick={() => {
+                            setMarketTopic(t)
+                            setMarketPage(1)
+                          }}
+                        >
+                          {t}
+                        </FilterChip>
+                      ))}
+                    </FilterChips>
+                  )}
+                </div>
+
+                {marketFiltered.length > 0 ? (
+                  <>
+                    <div className="grid grid-cols-1 gap-space-4 md:grid-cols-2 xl:grid-cols-3">
+                      {marketFiltered
+                        .slice((marketPage - 1) * marketPageSize, marketPage * marketPageSize)
+                        .map((s) => (
+                          <MarketSkillCard key={`${s.source_id}/${s.slug}`} skill={s} />
+                        ))}
+                    </div>
+                    {marketFiltered.length > marketPageSize && (
+                      <Pagination
+                        page={marketPage}
+                        pageCount={Math.max(1, Math.ceil(marketFiltered.length / marketPageSize))}
+                        pageSize={marketPageSize}
+                        onPageChange={setMarketPage}
+                        onPageSizeChange={(size) => {
+                          setMarketPageSize(size)
+                          setMarketPage(1)
+                        }}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <EmptyRail
+                    title="没有匹配的公开 Skill"
+                    description="换个关键词，或点「全部标签」重置筛选。"
+                    action={
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setMarketSearch('')
+                          setMarketTopic('all')
+                          setMarketPage(1)
+                        }}
+                      >
+                        清除筛选
+                      </Button>
+                    }
+                  />
+                )}
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            {platformMarketQuery.isLoading && <ListSkeleton />}
+
+            {platformMarketQuery.isError && (
+              <ErrorPanel message={`${kind.label}市场没能加载出来`} onRetry={() => platformMarketQuery.refetch()} />
+            )}
+
+            {platformMarketQuery.isSuccess && (platformMarketQuery.data?.items.length ?? 0) === 0 && (
+              <EmptyRail
+                title={`市场里还没有${kind.label}`}
+                description={`发布到广场的${kind.label}会出现在这里；订阅后即可挂到 Agent 的能力里使用，作者的内部定义不会带出来。`}
+              />
+            )}
+
+            {platformMarketQuery.isSuccess && (platformMarketQuery.data?.items.length ?? 0) > 0 && (
+              <div className="grid grid-cols-1 gap-space-4 md:grid-cols-2 xl:grid-cols-3">
+                {(platformMarketQuery.data?.items ?? []).map((listing) => (
+                  <AppCard key={listing.listing_ref} listing={listing} />
+                ))}
+              </div>
+            )}
+          </>
+        )
+      ) : (
+        <>
+          {items.length > 0 && (
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="按 ref 或名称筛选"
+              className="max-w-xs"
+            />
+          )}
+
+          {toggleError && (
+            <p role="alert" className="text-body-sm text-rust">
+              {toggleError}
+            </p>
+          )}
+
+          {query.isLoading && <ListSkeleton />}
+
+          {query.isError && <ErrorPanel message="资源列表没能加载出来" onRetry={() => query.refetch()} />}
+
+          {query.isSuccess && items.length === 0 && (
+            <EmptyRail
+              title={skillUploadBlocked ? 'Skill 上传暂不可用' : kind.blank.title}
+              description={
+                skillUploadBlocked
+                  ? '这台服务器没有配置对象存储（OSS_*），Skill 上传依赖它来存放 zip 包的内容——找管理员在部署配置里补上。'
+                  : kind.blank.description
+              }
+              action={
+                !skillUploadBlocked && (
+                  <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={openRegister}>
+                    {kind.blank.cta}
+                  </Button>
+                )
+              }
+            />
+          )}
+
+          {query.isSuccess && items.length > 0 && filtered.length === 0 && (
+            <EmptyRail
+              title={`没有 ref 或名称包含「${search}」的${kind.label}`}
+              description="筛选只匹配 ref 和显示名称，不搜索配置内容。"
+              action={
+                <Button variant="outline" size="sm" onClick={() => setSearch('')}>
+                  清除筛选
+                </Button>
+              }
+            />
+          )}
+
+          {filtered.length > 0 &&
+            (type === 'skill' ? (
+              <div className="grid grid-cols-1 gap-space-4 md:grid-cols-2 xl:grid-cols-3">
+                {filtered.map((r) => {
+                  const from = (r.config as Record<string, unknown> | undefined)?.installed_from
+                  return (
+                    <div
+                      key={r.id}
+                      className="flex min-h-[8rem] flex-col gap-space-3 rounded-lg border border-border bg-surface p-space-4"
+                    >
+                      <span className="flex flex-wrap items-center gap-space-2">
+                        <Ref>{r.ref}</Ref>
+                        {r.display_name && (
+                          <span className="text-body-sm truncate text-ink-900">{r.display_name}</span>
+                        )}
+                        <span
+                          className={cn(
+                            'text-caption shrink-0 rounded-full px-space-2 py-0.5',
+                            from ? 'bg-blueprint-tint text-blueprint' : 'bg-surface-muted text-ink-500',
+                          )}
+                        >
+                          {from ? '市场安装' : '自定义'}
+                        </span>
+                      </span>
+                      {r.health && r.health !== 'unknown' && (
+                        <span
+                          className={cn(
+                            'text-caption',
+                            r.health === 'healthy' ? 'text-moss' : 'text-rust',
+                          )}
+                        >
+                          {r.health === 'healthy' ? '上次探测：连接正常' : '上次探测：连不上，检查地址与凭证'}
+                        </span>
+                      )}
+                      <div className="mt-auto flex items-center justify-between">
+                        <span
+                          aria-hidden
+                          className={cn(
+                            'text-caption inline-flex items-center gap-space-1.5',
+                            r.status === 1 ? 'text-moss' : 'text-ink-500',
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'size-2 rounded-full',
+                              r.status === 1 ? 'bg-moss' : 'bg-border-strong',
+                            )}
+                          />
+                          {r.status === 1 ? '已启用' : '已停用'}
+                        </span>
+                        <Button variant="outline" size="sm" onClick={() => toggleStatus(r)}>
+                          {r.status === 1 ? '停用' : '启用'}
+                        </Button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+                {filtered.map((r) => (
+                  <li
+                    key={r.id}
+                    className="flex items-center gap-space-4 border-b border-border px-space-5 py-space-3 last:border-0"
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'size-2 shrink-0 rounded-full',
+                        r.status === 1 ? 'bg-moss' : 'bg-border-strong',
+                      )}
+                    />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="flex items-center gap-space-3">
+                        <Ref>{r.ref}</Ref>
+                        {r.display_name && (
+                          <span className="text-body-sm truncate text-ink-700">{r.display_name}</span>
+                        )}
+                      </span>
+                      {r.health && r.health !== 'unknown' && (
+                        <span
+                          className={cn(
+                            'text-caption',
+                            r.health === 'healthy' ? 'text-moss' : 'text-rust',
+                          )}
+                        >
+                          {r.health === 'healthy' ? '上次探测：连接正常' : '上次探测：连不上，检查地址与凭证'}
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className={cn(
+                        'text-caption w-12 shrink-0 text-right',
+                        r.status === 1 ? 'text-moss' : 'text-ink-500',
+                      )}
+                    >
+                      {r.status === 1 ? '已启用' : '已停用'}
+                    </span>
+                    <Button variant="outline" size="sm" onClick={() => toggleStatus(r)}>
+                      {r.status === 1 ? '停用' : '启用'}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            ))}
+        </>
       )}
 
       <RegisterResourceDialog
@@ -273,6 +548,6 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
         onOpenChange={setRegisterOpen}
         onCreated={() => queryClient.invalidateQueries({ queryKey: ['resources', type] })}
       />
-    </div>
+    </Section>
   )
 }

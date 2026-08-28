@@ -24,10 +24,17 @@ import { ListingDetailPage } from '@/pages/ListingDetailPage'
 import { BundleEditorPage } from '@/pages/BundleEditorPage'
 import { McpServerEditorPage } from '@/pages/McpServerEditorPage'
 import { SkillUploadPage } from '@/pages/SkillUploadPage'
+import { SkillSourcesPage } from '@/pages/SkillSourcesPage'
+import { SkillMarketDetailPage } from '@/pages/SkillMarketDetailPage'
 import { ComponentWizardPage } from '@/pages/ComponentWizardPage'
 import { ComponentPlazaPage } from '@/pages/ComponentPlazaPage'
 import { AgentStudioPage } from '@/pages/AgentStudioPage'
-import { OperationsPage } from '@/pages/OperationsPage'
+import { OpsLayout, RequireAdmin } from '@/pages/OpsLayout'
+import { RunMonitorTab } from '@/pages/operations/RunMonitorTab'
+import { CostAnalysisTab } from '@/pages/operations/CostAnalysisTab'
+import { AuditLogTab } from '@/pages/operations/AuditLogTab'
+import { ModerationTab } from '@/pages/operations/ModerationTab'
+import { PluginModerationTab } from '@/pages/operations/PluginModerationTab'
 
 /**
  * 应用广场（发布市场）已经并入应用中心（/apps/<section>），旧的
@@ -72,7 +79,7 @@ export default function App() {
             }
           />
           <Route
-            path="/agents/:ref/edit"
+            path="/agents/:id/edit"
             element={
               <ProtectedRoute>
                 <AgentStudioPage />
@@ -108,6 +115,7 @@ export default function App() {
               <Route path="tool/new" element={<ComponentWizardPage />} />
               <Route path="skill" element={<ResourceKindPage type="skill" />} />
               <Route path="skill/new" element={<SkillUploadPage />} />
+              <Route path="skill/market/:sourceId/:slug" element={<SkillMarketDetailPage />} />
               <Route path="mcp" element={<ResourceKindPage type="mcp" />} />
               <Route path="mcp/new" element={<McpServerEditorPage />} />
               <Route path="knowledge_base" element={<ResourceKindPage type="knowledge_base" />} />
@@ -144,10 +152,31 @@ export default function App() {
               path="/ops"
               element={
                 <ProtectedRoute>
-                  <OperationsPage />
+                  <OpsLayout />
                 </ProtectedRoute>
               }
-            />
+            >
+              <Route index element={<Navigate to="monitor" replace />} />
+              <Route path="monitor" element={<RunMonitorTab />} />
+              <Route path="cost" element={<CostAnalysisTab />} />
+              <Route path="audit" element={<AuditLogTab />} />
+              <Route
+                path="moderation"
+                element={
+                  <RequireAdmin>
+                    <ModerationTab />
+                  </RequireAdmin>
+                }
+              />
+              <Route
+                path="plugin-moderation"
+                element={
+                  <RequireAdmin>
+                    <PluginModerationTab />
+                  </RequireAdmin>
+                }
+              />
+            </Route>
             <Route
               path="/settings"
               element={
@@ -158,6 +187,7 @@ export default function App() {
             >
               <Route index element={<Navigate to="providers" replace />} />
               <Route path="providers" element={<ModelCatalogAdminPage />} />
+              <Route path="skill-sources" element={<SkillSourcesPage />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="roles" element={<RolesPage />} />
             </Route>

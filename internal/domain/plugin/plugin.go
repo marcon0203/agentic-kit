@@ -114,10 +114,11 @@ func (c Config) Redact() Config {
 // user add "plugin:{plugin_id}/{tool_name}" to an Agent the same way they
 // pick any other resource ref (spec-20 §5.1: "不新增字段").
 type InstalledTool struct {
-	Ref         string // "plugin:{plugin_id}/{tool_name}"
-	PluginID    string
-	ToolName    string
-	Description string
+	Ref                string // "plugin:{plugin_id}/{tool_name}"
+	PluginID           string
+	PluginDisplayName  string // manifest.display_name，中文展示名
+	ToolName           string
+	Description        string
 }
 
 // Installation is one account's install of one plugin, pinned to a version.

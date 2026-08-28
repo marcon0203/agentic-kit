@@ -129,6 +129,33 @@ func (q *Queries) FindBundlesReferencingAgentRef(ctx context.Context, arg FindBu
 	return items, nil
 }
 
+const getAgentByID = `-- name: GetAgentByID :one
+SELECT id, owner_user_id, agent_ref, version, definition, display_meta, status, immutable, created_at FROM agents WHERE id = $1 AND owner_user_id = $2
+`
+
+type GetAgentByIDParams struct {
+	ID          int64 `json:"id"`
+	OwnerUserID int64 `json:"owner_user_id"`
+}
+
+// 按 version id 取一行（编辑页 / PATCH / DELETE 的入口），不经过 agent_ref。
+func (q *Queries) GetAgentByID(ctx context.Context, arg GetAgentByIDParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, getAgentByID, arg.ID, arg.OwnerUserID)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.OwnerUserID,
+		&i.AgentRef,
+		&i.Version,
+		&i.Definition,
+		&i.DisplayMeta,
+		&i.Status,
+		&i.Immutable,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAgentDisplayForSubscriber = `-- name: GetAgentDisplayForSubscriber :one
 SELECT id, owner_user_id, agent_ref, version, display_meta, status, created_at
 FROM agents

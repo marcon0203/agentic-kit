@@ -91,7 +91,7 @@ export function AgentDefinitionPage() {
             <AgentCard
               key={a.id}
               agent={a}
-              onEdit={(ref) => navigate(`/agents/${ref}/edit`)}
+              onEdit={(id) => navigate(`/agents/${id}/edit`)}
               onCopy={handleCopy}
             />
           ))}

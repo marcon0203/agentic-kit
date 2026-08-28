@@ -51,6 +51,10 @@ type UploadSkillCommand struct {
 	Ref         string
 	DisplayName string
 	Files       map[string][]byte
+	// Meta 是调用方要求一并落进 config 的标记字段（Skill 市场安装用它记录
+	// installed_from）。与 entry/oss_prefix/total_size 合并，键冲突时以
+	// 平台自己的三个键为准。
+	Meta map[string]any
 }
 
 // contentTypeFor guesses a content type from a file's extension, falling
@@ -114,15 +118,22 @@ func (s *Service) UploadSkill(ctx context.Context, ownerID int64, cmd UploadSkil
 		}
 	}
 
+	config := Config{
+		"entry":      SkillEntryFile,
+		"oss_prefix": prefix,
+		"total_size": total,
+	}
+	for k, v := range cmd.Meta {
+		if _, exists := config[k]; !exists {
+			config[k] = v
+		}
+	}
+
 	created, err := s.repo.Create(ctx, Resource{
 		OwnerID: ownerID, Kind: KindSkill, Ref: cmd.Ref, Version: "1.0",
 		DisplayName: cmd.DisplayName,
-		Config: Config{
-			"entry":      SkillEntryFile,
-			"oss_prefix": prefix,
-			"total_size": total,
-		},
-		Status: StatusEnabled,
+		Config:      config,
+		Status:      StatusEnabled,
 	})
 	if err != nil {
 		if err == ErrDuplicate {

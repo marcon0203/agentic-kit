@@ -1,0 +1,236 @@
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Globe, RefreshCw, Trash2 } from 'lucide-react'
+import { toast } from 'sonner'
+
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Ref, Section } from '@/components/common/Page'
+import { EmptyRail } from '@/components/common/Rail'
+import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { apiClient, unwrap, ApiError } from '@/lib/api/client'
+import type { components } from '@/lib/api/schema'
+
+type SkillSource = components['schemas']['SkillSource']
+
+function formatSyncedAt(iso: string | null): string {
+  if (!iso) return '从未同步'
+  const d = new Date(iso)
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+}
+
+/**
+ * 系统配置 → Skill 源：管理员登记公开 Skill 市场（如 https://clawhub.ai/），
+  手动同步后其公开 Skill 进入 Skill 管理 → 市场视图。同步失败不静默——
+  last_sync_error 原样展示在这里。
+ */
+export function SkillSourcesPage() {
+  const queryClient = useQueryClient()
+  const [addOpen, setAddOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [baseUrl, setBaseUrl] = useState('')
+  const [syncingId, setSyncingId] = useState<number | null>(null)
+  const [deleting, setDeleting] = useState<SkillSource | null>(null)
+
+  const query = useQuery({
+    queryKey: ['skill-sources'],
+    queryFn: async () => unwrap<{ items: SkillSource[] }>(await apiClient.GET('/skill-sources', {})),
+  })
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['skill-sources'] })
+
+  const createMutation = useMutation({
+    mutationFn: async () =>
+      unwrap<SkillSource>(
+        await apiClient.POST('/skill-sources', { body: { name: name.trim(), base_url: baseUrl.trim() } }),
+      ),
+    onSuccess: (src) => {
+      toast.success(`已登记 ${src.name}，点"同步"拉取它的公开 Skill`)
+      setAddOpen(false)
+      setName('')
+      setBaseUrl('')
+      invalidate()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : '登记没能完成，请再试一次'),
+  })
+
+  const syncMutation = useMutation({
+    mutationFn: async (id: number) =>
+      unwrap<SkillSource>(await apiClient.POST('/skill-sources/{id}/sync', { params: { path: { id: String(id) } } })),
+    onMutate: (id) => setSyncingId(id),
+    onSettled: () => setSyncingId(null),
+    onSuccess: (src) => {
+      if (src.last_sync_error) {
+        toast.error(`同步失败：${src.last_sync_error}`)
+      } else {
+        toast.success(`同步完成，缓存了 ${src.skill_count} 个 Skill`)
+      }
+      invalidate()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : '同步没能完成，请再试一次'),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiClient.DELETE('/skill-sources/{id}', { params: { path: { id: String(id) } } })
+    },
+    onSuccess: () => {
+      toast.success('已删除该源及其缓存')
+      setDeleting(null)
+      invalidate()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : '删除没能完成，请再试一次'),
+  })
+
+  const items = query.data?.items ?? []
+
+  return (
+    <Section
+      title="Skill 源"
+      aside={
+        <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setAddOpen(true)}>
+          添加源
+        </Button>
+      }
+    >
+      {query.isLoading && <ListSkeleton rows={3} />}
+      {query.isError && <ErrorPanel message="源列表没能加载出来" onRetry={() => query.refetch()} />}
+
+      {query.isSuccess && items.length === 0 && (
+        <EmptyRail
+          title="登记第一个 Skill 源"
+          description="填一个公开 Skill 市场的站点根地址（例如 https://clawhub.ai），同步后它的公开 Skill 会出现在 Skill 管理的市场视图里，可以查看用法、作者和更新记录。"
+          action={
+            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setAddOpen(true)}>
+              添加源
+            </Button>
+          }
+        />
+      )}
+
+      {items.length > 0 && (
+        <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+          {items.map((s) => (
+            <li
+              key={s.id}
+              className="flex flex-wrap items-center gap-space-4 border-b border-border px-space-5 py-space-4 last:border-0"
+            >
+              <span
+                aria-hidden
+                className="text-ink-500 flex size-9 shrink-0 items-center justify-center rounded-md bg-surface-muted"
+              >
+                <Globe className="size-4" />
+              </span>
+              <div className="flex min-w-0 flex-1 flex-col gap-space-1">
+                <span className="flex flex-wrap items-center gap-space-3">
+                  <span className="text-body-md font-medium text-ink-900">{s.name}</span>
+                  <a
+                    href={s.base_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-body-sm truncate text-blueprint hover:underline"
+                  >
+                    {s.base_url}
+                  </a>
+                </span>
+                <span className="text-caption flex flex-wrap items-center gap-space-3 text-ink-500">
+                  <span className="tabular">{s.skill_count} 个 Skill</span>
+                  <span>{formatSyncedAt(s.last_synced_at ?? null)}</span>
+                </span>
+                {s.last_sync_error && (
+                  <span role="alert" className="text-caption text-rust">
+                    上次同步失败：{s.last_sync_error}
+                  </span>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-space-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={syncMutation.isPending && syncingId === Number(s.id)}
+                  onClick={() => syncMutation.mutate(Number(s.id))}
+                >
+                  <RefreshCw className={syncMutation.isPending && syncingId === Number(s.id) ? 'animate-spin' : ''} aria-hidden />
+                  同步
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setDeleting(s)}>
+                  <Trash2 aria-hidden />
+                  删除
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>添加 Skill 源</DialogTitle>
+            <DialogDescription>
+              公开 Skill 市场的站点根地址，不带路径。登记后点"同步"拉取它的公开 Skill。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-space-4">
+            <label className="flex flex-col gap-space-2">
+              <span className="text-label-md text-ink-900">名称</span>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Clawhub" />
+            </label>
+            <label className="flex flex-col gap-space-2">
+              <span className="text-label-md text-ink-900">地址</span>
+              <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://clawhub.ai" />
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>
+              取消
+            </Button>
+            <Button
+              className="bg-gradient-cta text-white hover:opacity-90"
+              disabled={createMutation.isPending || !name.trim() || !baseUrl.trim()}
+              onClick={() => createMutation.mutate()}
+            >
+              登记
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除 Skill 源</DialogTitle>
+            <DialogDescription>
+              {deleting && (
+                <>
+                  确认删除 <Ref>{deleting.name}</Ref>
+                  ？它缓存的 {deleting.skill_count} 个公开 Skill 也会一并从市场视图里消失。
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleting(null)}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteMutation.isPending}
+              onClick={() => deleting && deleteMutation.mutate(Number(deleting.id))}
+            >
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Section>
+  )
+}

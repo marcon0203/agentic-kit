@@ -541,15 +541,18 @@ func (s *Service) ListInstalledTools(ctx context.Context, ownerID int64) ([]Inst
 		if err != nil {
 			continue
 		}
+		displayName, _ := ver.Manifest["display_name"].(string)
 		for _, t := range manifestTools(ver.Manifest) {
 			out = append(out, InstalledTool{
 				Ref: "plugin:" + inst.PluginID + "/" + t.name, PluginID: inst.PluginID,
+				PluginDisplayName: displayName,
 				ToolName: t.name, Description: t.description,
 			})
 		}
 		for _, r := range manifestRenderers(ver.Manifest) {
 			out = append(out, InstalledTool{
 				Ref: "plugin:" + inst.PluginID + "/" + r.name, PluginID: inst.PluginID,
+				PluginDisplayName: displayName,
 				ToolName: r.name, Description: r.description,
 			})
 		}

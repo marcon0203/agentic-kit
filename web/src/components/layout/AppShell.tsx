@@ -1,7 +1,15 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, Cpu, Home, Settings, Store } from 'lucide-react'
+import { BarChart3, ChevronDown, Cpu, Home, LogOut, Settings, Store } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useAuthStore } from '@/lib/auth/store'
 
 /**
@@ -42,17 +50,21 @@ export function AppShell() {
       </a>
 
       <header className="sticky top-0 z-40 border-b border-border bg-surface-page/92 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-container-app items-stretch gap-space-6 px-space-6">
-          <NavLink to="/" className="flex shrink-0 items-center gap-space-2">
-            <span aria-hidden className="size-2 rounded-full bg-signal" />
-            <span className="text-display-sm hidden tracking-tight text-ink-900 sm:inline">
-              Agentic Kit
-            </span>
-          </NavLink>
+        {/* 通栏：不受 max-w-container-app 约束，logo 贴最左、用户信息贴最右，
+            菜单在两侧等宽弹性区之间居中；min-w-fit 保证窄屏时两边不被压没。 */}
+        <div className="flex h-14 items-stretch px-space-6">
+          <div className="flex min-w-fit flex-1 items-center">
+            <NavLink to="/" className="flex shrink-0 items-center gap-space-2">
+              <span aria-hidden className="size-2 rounded-full bg-signal" />
+              <span className="text-display-sm hidden tracking-tight text-ink-900 sm:inline">
+                Agentic Kit
+              </span>
+            </NavLink>
+          </div>
 
           <nav
             aria-label="主导航"
-            className="flex min-w-0 flex-1 items-stretch gap-space-5 overflow-x-auto"
+            className="flex min-w-0 items-stretch gap-space-5 overflow-x-auto"
           >
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon
@@ -65,22 +77,35 @@ export function AppShell() {
             })}
           </nav>
 
-          <div className="flex shrink-0 items-center gap-space-3">
+          <div className="flex min-w-fit flex-1 items-center justify-end gap-space-3">
             {user ? (
-              <>
-                <span
-                  aria-hidden
-                  className="text-caption flex size-7 items-center justify-center rounded-full bg-surface-muted font-medium text-ink-700"
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className={cn(
+                    'flex items-center gap-space-2 rounded-lg py-1.5 pr-space-2 pl-1.5 transition-colors',
+                    'hover:bg-surface-muted outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px]',
+                  )}
                 >
-                  {user.display_name.slice(0, 1).toUpperCase()}
-                </span>
-                <span className="text-body-sm hidden text-ink-700 sm:inline">
-                  {user.display_name}
-                </span>
-                <Button variant="ghost" size="sm" onClick={() => clearSession()}>
-                  退出登录
-                </Button>
-              </>
+                  <span
+                    aria-hidden
+                    className="text-caption flex size-7 items-center justify-center rounded-full bg-surface-muted font-medium text-ink-700"
+                  >
+                    {user.display_name.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="text-body-sm hidden text-ink-700 sm:inline">
+                    {user.display_name}
+                  </span>
+                  <ChevronDown className="size-4 text-ink-500" aria-hidden />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-[10rem]">
+                  <DropdownMenuLabel>{user.display_name}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => clearSession()}>
+                    <LogOut aria-hidden />
+                    退出登录
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : (
               <Button size="sm" onClick={() => openModal('manual')}>
                 登录
@@ -90,7 +115,9 @@ export function AppShell() {
         </div>
       </header>
 
-      <main id="main" className="w-full flex-1 px-space-6 py-space-8">
+      {/* flex 列 + 子页面根节点 flex-1：把 main 的高度传下去，二级布局
+          （如应用中心侧栏）才能拉伸到整个内容区高度，右边的分隔线才贯穿。 */}
+      <main id="main" className="flex w-full flex-1 flex-col px-space-6 pt-space-6 pb-space-8">
         <Outlet />
       </main>
 

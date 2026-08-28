@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, Loader2, Send } from 'lucide-react'
+import { ArrowLeft, Copy, Loader2, Send } from 'lucide-react'
 
 import { ErrorPanel } from '@/components/common/EmptyState'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { TabRail, TabRailItem } from '@/components/common/Page'
 import { AgentWizardLayout } from '@/components/agents/AgentWizardLayout'
 import { AgentWizardStepper } from '@/components/agents/AgentWizardStepper'
 import { AgentWizardActions } from '@/components/agents/AgentWizardActions'
@@ -69,20 +70,23 @@ function stepForField(field: string): number {
  */
 export function AgentStudioPage() {
   const navigate = useNavigate()
-  const { ref } = useParams<{ ref?: string }>()
+  const { id } = useParams<{ id?: string }>()
   const queryClient = useQueryClient()
-  const isEdit = Boolean(ref)
+  const isEdit = Boolean(id)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [currentStep, setCurrentStep] = useState(0)
   const [furthestStep, setFurthestStep] = useState(0)
+  const [view, setView] = useState<'edit' | 'dsl' | 'versions'>('edit')
   const [savedAt, setSavedAt] = useState<Date | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  const dslJson = useMemo(() => JSON.stringify(formStateToDefinition(form), null, 2), [form])
+
   const versionsQuery = useQuery({
-    queryKey: ['agent-versions', ref],
-    queryFn: async () => unwrap<components['schemas']['Agent'][]>(await apiClient.GET('/agents/{ref}/versions', {
-      params: { path: { ref: ref! } },
+    queryKey: ['agent-versions', id],
+    queryFn: async () => unwrap<components['schemas']['Agent'][]>(await apiClient.GET('/agents/{id}/versions', {
+      params: { path: { id: id! } },
     })),
     enabled: isEdit,
   })
@@ -171,13 +175,13 @@ export function AgentStudioPage() {
     try {
       if (isEdit) {
         unwrap(
-          await apiClient.PATCH('/agents/{ref}', {
-            params: { path: { ref: ref! } },
+          await apiClient.PATCH('/agents/{id}', {
+            params: { path: { id: id! } },
             body: { definition },
           }),
         )
         queryClient.invalidateQueries({ queryKey: ['agents'] })
-        queryClient.invalidateQueries({ queryKey: ['agent-versions', ref] })
+        queryClient.invalidateQueries({ queryKey: ['agent-versions', id] })
         toast.success('已保存')
         navigate('/apps/agents')
       } else {
@@ -276,6 +280,96 @@ export function AgentStudioPage() {
     </Card>
   )
 
+  const mainNode = (
+    <div className="flex flex-col gap-space-4">
+      <TabRail>
+        <TabRailItem active={view === 'edit'} onClick={() => setView('edit')}>
+          编排
+        </TabRailItem>
+        <TabRailItem active={view === 'dsl'} onClick={() => setView('dsl')}>
+          查看 DSL
+        </TabRailItem>
+        {isEdit && (
+          <TabRailItem active={view === 'versions'} onClick={() => setView('versions')}>
+            版本管理
+            {versionsQuery.data && versionsQuery.data.length > 0 ? (
+              <span className="text-caption tabular text-ink-500">{versionsQuery.data.length}</span>
+            ) : null}
+          </TabRailItem>
+        )}
+      </TabRail>
+      {view === 'edit' ? (
+        cardNode
+      ) : view === 'dsl' ? (
+        <div className="flex flex-col gap-space-3">
+          <div className="flex items-center justify-end">
+            <Button variant="ghost" size="sm" onClick={() => navigator.clipboard?.writeText(dslJson)}>
+              <Copy className="size-3.5" aria-hidden />
+              复制
+            </Button>
+          </div>
+          <pre className="text-body-sm max-h-[60vh] overflow-auto rounded-lg border border-border bg-surface p-space-4 whitespace-pre-wrap text-ink-900">
+            {dslJson}
+          </pre>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-space-3">
+          {versionsQuery.isLoading && <p className="text-body-sm text-ink-500">加载版本列表…</p>}
+          {versionsQuery.isError && <ErrorPanel message="版本列表没能加载出来" onRetry={() => versionsQuery.refetch()} />}
+          {versionsQuery.isSuccess && (versionsQuery.data?.length ?? 0) === 0 && (
+            <p className="text-body-sm text-ink-500">还没有保存过任何版本。</p>
+          )}
+          {versionsQuery.data && versionsQuery.data.length > 0 && (
+            <ol className="overflow-hidden rounded-lg border border-border bg-surface">
+              {versionsQuery.data.map((ver, i) => (
+                <li
+                  key={ver.version}
+                  className="flex items-center gap-space-4 border-b border-border px-space-5 py-space-3 last:border-0"
+                >
+                  <span className="text-ref text-ink-900">v{ver.version}</span>
+                  {i === 0 && (
+                    <span className="text-caption rounded-full bg-blueprint-tint px-space-2 py-0.5 text-blueprint">
+                      当前版本
+                    </span>
+                  )}
+                  <span className="text-caption text-ink-500">
+                    {new Date(ver.created_at).toLocaleString('zh-CN', {
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  <span className="text-caption truncate text-ink-500">
+                    {ver.definition?.role || '—'}
+                  </span>
+                  {i !== 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-auto"
+                      onClick={() => {
+                        setForm(definitionToFormState(ver.definition as AgentDefinition, false))
+                        setCurrentStep(0)
+                        setFurthestStep(0)
+                        setView('edit')
+                      }}
+                    >
+                      载入此版本
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+          <p className="text-caption text-ink-500">
+            载入历史版本到编辑器后不会自动保存——改完记得点「保存」会创建一个新版本。
+          </p>
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="fixed inset-0 flex flex-col bg-surface-page">
       <header className="flex h-14 shrink-0 items-center gap-space-3 border-b border-border bg-surface px-space-4">
@@ -283,8 +377,13 @@ export function AgentStudioPage() {
           <ArrowLeft className="size-4" aria-hidden />
         </Button>
         <span className="text-label-md truncate text-ink-900">
-          {isEdit ? '编辑智能体' : form.role || form.agent || '新建智能体'}
+          {isEdit ? form.role || form.agent || '编辑智能体' : form.role || form.agent || '新建智能体'}
         </span>
+        {isEdit && versionsQuery.data?.[0]?.version && (
+          <span className="text-caption shrink-0 rounded-sm bg-blueprint-tint px-space-2 py-0.5 text-blueprint">
+            v{versionsQuery.data[0].version}
+          </span>
+        )}
         <span className="text-caption shrink-0 rounded-sm bg-surface-muted px-space-2 py-0.5 text-ink-500">
           {isEdit ? '编辑模式' : savedAt ? '已保存' : '未保存'}
         </span>
@@ -297,7 +396,7 @@ export function AgentStudioPage() {
 
       <AgentWizardLayout
         stepper={stepNode}
-        card={cardNode}
+        card={mainNode}
         testPanel={<TestPanel form={form} problems={problems.map((p) => `${p.field}：${p.reason}`)} />}
       />
     </div>

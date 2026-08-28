@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	adapterclawhub "github.com/marcon0203/agentic-kit/internal/adapter/clawhub"
 	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
 	esstore "github.com/marcon0203/agentic-kit/internal/adapter/elasticsearch"
 	"github.com/marcon0203/agentic-kit/internal/adapter/extism"
@@ -39,6 +40,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/knowledgebase"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcatalog"
+	"github.com/marcon0203/agentic-kit/internal/domain/skillsource"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 	"github.com/marcon0203/agentic-kit/internal/domain/operation"
 	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
@@ -318,6 +320,12 @@ func run() error {
 		ModelProviders:    api.NewModelProviderHandlers(modelCenter),
 		ModelCatalog:      api.NewModelCatalogHandlers(modelCatalog),
 		ModelCatalogAdmin: api.NewModelCatalogAdminHandlers(modelCatalog),
+		SkillSources: api.NewSkillSourceHandlers(skillsource.NewService(
+			postgres.NewSkillSourceRepository(queries, pool),
+			adminDirectory,
+			adapterclawhub.NewFetcher(),
+			resourceService,
+		)),
 		Usage:             api.NewUsageHandlers(modelCenter),
 		Runs:              api.NewRunHandlers(runService),
 		RBAC:              api.NewRBACHandlers(rbacService),
