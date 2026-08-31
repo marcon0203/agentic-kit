@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -152,6 +153,14 @@ func callPluginTool(ctx context.Context, runtime PluginRuntime, ref, wasmKey str
 	if err != nil {
 		return nil, fmt.Errorf("plugin tool %q: encode arguments: %w", ref, err)
 	}
+	// Diagnostic for "unknown or expired connection_ref" reports: this is
+	// the exact connection_ref (if any) this specific call is about to
+	// send the plugin, alongside the wasmKey it's compiled under — lets a
+	// report be matched against connector_registry.go's connector_bound/
+	// connector_released/connector_unknown_ref log lines to see whether a
+	// call ever had the right ref to begin with, or whether it had one but
+	// the connection was already gone by the time it ran.
+	slog.Info("plugin_tool_call", "ref", ref, "wasm_key", wasmKey, "func_name", funcName, "connection_ref", opts.Config["connection_ref"])
 	output, err := runtime.Call(ctx, wasmKey, wasmBytes, opts, funcName, input)
 	if err != nil {
 		return nil, fmt.Errorf("plugin tool %q: %w", ref, err)

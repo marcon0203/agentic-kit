@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/go-sql-driver/mysql"
@@ -126,7 +127,9 @@ func (r *connectorRegistry) Bind(ctx context.Context, cfg ConnectorConfig) (conn
 	connRef = uuid.NewString()
 	r.mu.Lock()
 	r.conns[connRef] = &registeredConn{db: db, allowWrite: cfg.AllowWrite, dialect: cfg.Dialect, database: cfg.Database}
+	live := len(r.conns)
 	r.mu.Unlock()
+	slog.Info("connector_bound", "connection_ref", connRef, "dialect", cfg.Dialect, "database", cfg.Database, "live_connections", live)
 	return connRef, nil
 }
 
@@ -136,8 +139,10 @@ func (r *connectorRegistry) Release(connRef string) {
 	r.mu.Lock()
 	c, ok := r.conns[connRef]
 	delete(r.conns, connRef)
+	live := len(r.conns)
 	r.mu.Unlock()
 	if ok {
+		slog.Info("connector_released", "connection_ref", connRef, "live_connections", live)
 		_ = c.db.Close()
 	}
 }
@@ -146,6 +151,18 @@ func (r *connectorRegistry) get(connRef string) (*registeredConn, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	c, ok := r.conns[connRef]
+	if !ok {
+		// Diagnostic for "unknown or expired connection_ref" reports: this
+		// logs every *other* live ref too (never the failing one's data,
+		// there's none to log) so a report can distinguish "this ref was
+		// never bound at all" from "it was bound and already released" —
+		// the live count alone doesn't tell them apart.
+		live := make([]string, 0, len(r.conns))
+		for ref := range r.conns {
+			live = append(live, ref)
+		}
+		slog.Warn("connector_unknown_ref", "requested_connection_ref", connRef, "live_connection_refs", live)
+	}
 	return c, ok
 }
 
