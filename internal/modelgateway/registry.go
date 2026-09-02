@@ -15,10 +15,6 @@ import (
 // 模板创建，描述符落在 catalog_providers.descriptor，进程启动时加载、增删
 // 改后重载（SetChannels）。平台开箱**不带任何渠道**——模型供应商是部署方
 // 的配置，不是平台的产品内容。
-//
-// 手写 client 的口子留着（NewClient/NewValidator 是函数字段，不绑死描述
-// 符）：某家厂商的线协议怪到声明式写出来比 Go 还难读时，可以在启动时往注册
-// 表里塞一个手写实现。这是设计内的出口，目前没有人用。
 type ProviderDefinition struct {
 	// Name is the wire value used everywhere a channel is named: Agent
 	// DSL's model.provider, the `provider` column on a stored credential,

@@ -19,6 +19,7 @@ import { Panel, Ref, Section } from '@/components/common/Page'
 import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
+import { ProviderIcon } from '@/components/models/ProviderIcon'
 import { cn } from '@/lib/utils'
 import { Can, useHasPermission } from '@/lib/rbac/usePermissions'
 import type { components } from '@/lib/api/schema'
@@ -128,8 +129,8 @@ export function ModelCatalogAdminPage() {
 
         {providersQuery.isSuccess && providers.length === 0 && (
           <EmptyRail
-            title="还没有配置任何模型提供商"
-            description="平台不预置模型供应商——它是你这个部署的配置。挑一个协议模板（DeepSeek、火山方舟、通义千问，或任意 OpenAI 兼容端点），填上你自己的接口地址就能用。"
+            title="还没有模型提供商"
+            description="选一个供应商，填上 API Key 和接口地址。"
             action={
               <Can permission="model_catalog.provider.create">
                 <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
@@ -154,25 +155,11 @@ export function ModelCatalogAdminPage() {
                     >
                       {expanded === p.id ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
                     </button>
-                    {p.icon ? (
-                      <img src={p.icon} alt="" className="size-8 shrink-0 rounded-sm object-cover" />
-                    ) : (
-                      <span
-                        aria-hidden
-                        className="text-caption flex size-8 shrink-0 items-center justify-center rounded-sm bg-surface-muted font-medium text-ink-500"
-                      >
-                        {p.display_name.slice(0, 1).toUpperCase()}
-                      </span>
-                    )}
+                    <ProviderIcon template={p.template} icon={p.icon} name={p.display_name} />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="flex items-center gap-space-2">
                         <span className="text-body-md text-ink-900">{p.display_name}</span>
                         <Ref tone="muted">{p.key}</Ref>
-                        {p.template && (
-                          <span className="text-caption rounded-full bg-surface-muted px-space-2 py-0.5 text-ink-500">
-                            {p.template}
-                          </span>
-                        )}
                       </span>
                       {p.base_url && <span className="text-caption truncate text-ink-500">{p.base_url}</span>}
                     </span>
@@ -441,14 +428,7 @@ function ProviderModels({ providerId, onError }: { providerId: string; onError: 
   )
 }
 
-/**
- * 新建模型提供商 = 从一个协议模板实例化一个可调用的渠道。
- *
- * 模板挡住的是"要懂厂商的线协议才能接一个模型"这道门槛：管理员只填 key、
- * 显示名和接口地址，后端把模板渲染成渠道描述符、完整校验并跑一遍回归用例，
- * 过不了就不落库。选了模板之后接口地址会自动带出模板的默认值，改不改都行
- * ——中转站和自建服务就是靠改它接进来的。
- */
+/** 新建模型提供商：选供应商、填 API Key 和接口地址。 */
 function CreateProviderDialog({
   open,
   onOpenChange,
@@ -461,6 +441,7 @@ function CreateProviderDialog({
   const [template, setTemplate] = useState('')
   const [key, setKey] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [apiKey, setApiKey] = useState('')
   const [icon, setIcon] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -471,12 +452,11 @@ function CreateProviderDialog({
     queryFn: async () =>
       unwrap<{ items: ChannelTemplate[] }>(await apiClient.GET('/model-channel-templates', {})),
     enabled: open,
-    staleTime: Infinity, // 模板随二进制发布，一次会话里不会变
+    staleTime: Infinity,
   })
   const templates = templatesQuery.data?.items ?? []
-  const selected = templates.find((t) => t.id === template)
 
-  // 选模板时把它的默认地址和显示名带出来，但不覆盖用户已经改过的内容。
+  // 选供应商时带出它的默认接口地址和名称，但不覆盖用户已经改过的内容。
   function pickTemplate(id: string) {
     const t = templates.find((x) => x.id === id)
     setTemplate(id)
@@ -491,6 +471,7 @@ function CreateProviderDialog({
     setTemplate('')
     setKey('')
     setDisplayName('')
+    setApiKey('')
     setIcon('')
     setBaseUrl('')
     setError(null)
@@ -509,11 +490,21 @@ function CreateProviderDialog({
     setPending(true)
     setError(null)
     try {
-      unwrap(
+      const created = unwrap<CatalogProvider>(
         await apiClient.POST('/model-catalog/providers', {
           body: { key, display_name: displayName, template, icon: icon || undefined, base_url: baseUrl || undefined },
         }),
       )
+      // 凭证走的是另一条接口（要加密存储），但对用户来说这是一次"新增"，
+      // 不该建完再点一次"配置凭证"。
+      if (apiKey) {
+        unwrap(
+          await apiClient.PUT('/model-catalog/providers/{id}/credential', {
+            params: { path: { id: created.id } },
+            body: { api_key: apiKey, base_url: baseUrl },
+          }),
+        )
+      }
       reset()
       onCreated()
     } catch (err) {
@@ -531,38 +522,29 @@ function CreateProviderDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>新增模型提供商</DialogTitle>
-          <DialogDescription>
-            挑一个协议模板，填上你自己的接口地址即可。建好之后就是一个可调用的渠道，
-            Agent 里用 <code className="text-ref">{'{key}/{模型名}'}</code> 引用它，不需要重启服务。
-          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-space-2">
           <label htmlFor="provider-template" className="text-label-md text-ink-700">
-            协议模板
+            供应商
           </label>
           <Select value={template} onValueChange={pickTemplate}>
             <SelectTrigger id="provider-template" className="h-12 w-full rounded-sm">
-              <SelectValue placeholder={templatesQuery.isLoading ? '加载中…' : '选择一个模板'} />
+              <SelectValue placeholder={templatesQuery.isLoading ? '加载中…' : '选择供应商'} />
             </SelectTrigger>
             <SelectContent>
               {templates.map((t) => (
                 <SelectItem key={t.id} value={t.id}>
-                  {t.label}
+                  <span className="flex items-center gap-space-2">
+                    <ProviderIcon template={t.id} name={t.label} className="size-5" />
+                    {t.label}
+                  </span>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          {selected?.description && (
-            <p className="text-caption text-ink-500">{selected.description}</p>
-          )}
-
-          <label htmlFor="provider-key" className="text-label-md text-ink-700">
-            Key（Agent 里引用它时用，小写字母开头，如 deepseek）
-          </label>
-          <Input id="provider-key" value={key} onChange={(e) => setKey(e.target.value)} className="h-12 rounded-sm" />
 
           <label htmlFor="provider-display-name" className="text-label-md text-ink-700">
-            显示名称
+            名称
           </label>
           <Input
             id="provider-display-name"
@@ -571,22 +553,19 @@ function CreateProviderDialog({
             className="h-12 rounded-sm"
           />
 
-          <label htmlFor="provider-icon" className="text-label-md text-ink-700">
-            图标（可选，200KB 以内）
+          <label htmlFor="provider-api-key" className="text-label-md text-ink-700">
+            API Key
           </label>
-          <div className="flex items-center gap-space-3">
-            {icon && <img src={icon} alt="" className="size-10 rounded-sm object-cover" />}
-            <input
-              id="provider-icon"
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleIconFile(e.target.files?.[0])}
-              className="text-body-sm text-ink-700"
-            />
-          </div>
+          <Input
+            id="provider-api-key"
+            type="password"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            className="h-12 rounded-sm"
+          />
 
           <label htmlFor="provider-base-url" className="text-label-md text-ink-700">
-            接口地址{selected && selected.base_url ? '（模板默认已带出，接中转站时改这里）' : ''}
+            接口地址
           </label>
           <Input
             id="provider-base-url"
@@ -595,6 +574,30 @@ function CreateProviderDialog({
             placeholder="https://api.example.com/v1"
             className="h-12 rounded-sm"
           />
+
+          {/* 标识由供应商自动带出，同一家接两个端点时才需要改。它是 Agent
+              DSL 里 model.provider 的取值，建好之后不能改，所以放在这里而不
+              是藏起来。 */}
+          <label htmlFor="provider-key" className="text-label-md text-ink-700">
+            标识
+          </label>
+          <Input id="provider-key" value={key} onChange={(e) => setKey(e.target.value)} className="h-12 rounded-sm" />
+
+          {/* 图标默认取自 @lobehub/icons-static-svg，按供应商匹配；这里是给
+              自建/中转端点用的可选覆盖。 */}
+          <label htmlFor="provider-icon" className="text-label-md text-ink-700">
+            图标（可选）
+          </label>
+          <div className="flex items-center gap-space-3">
+            <ProviderIcon template={template} icon={icon} name={displayName || key || '?'} className="size-10" />
+            <input
+              id="provider-icon"
+              type="file"
+              accept="image/*"
+              onChange={(e) => handleIconFile(e.target.files?.[0])}
+              className="text-body-sm text-ink-700"
+            />
+          </div>
 
           {error && (
             <p role="alert" className="text-caption text-rust">

@@ -73,3 +73,10 @@ func (r *Reloader) Reload(ctx context.Context) error {
 	slog.Info("model_channels_loaded", "count", len(descs), "providers", modelgateway.ProviderNames())
 	return nil
 }
+
+// Directory 实现 agent.ChannelDirectory：Agent 保存时用它校验
+// model.provider / model.fallback[] 引用的渠道都已登记。读的是同一个运行
+// 时注册表，所以管理员刚建好的渠道立刻就能被引用。
+type Directory struct{}
+
+func (Directory) ProviderNames() []string { return modelgateway.ProviderNames() }

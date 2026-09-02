@@ -117,6 +117,7 @@ func run() error {
 		postgres.NewAgentRepository(queries),
 		resourceCatalog,
 		adapterschema.NewValidator(agentValidator),
+		modelchannels.Directory{},
 	)
 
 	marketplaceService := marketplace.NewService(

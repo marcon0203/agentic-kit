@@ -18,10 +18,22 @@ type Service struct {
 	repo      Repository
 	catalog   ResourceCatalog
 	validator DefinitionValidator
+	channels  ChannelDirectory
 }
 
-func NewService(repo Repository, catalog ResourceCatalog, validator DefinitionValidator) *Service {
-	return &Service{repo: repo, catalog: catalog, validator: validator}
+func NewService(repo Repository, catalog ResourceCatalog, validator DefinitionValidator, channels ChannelDirectory) *Service {
+	return &Service{repo: repo, catalog: catalog, validator: validator, channels: channels}
+}
+
+// ChannelDirectory 报告当前登记了哪些模型渠道。
+//
+// Schema 只能管住 model.provider 的形状（小写标识），管不了"这个渠道存不
+// 存在"——渠道是管理员在 系统配置 → 模型提供商 里建出来的，运行时可变。没
+// 有这道校验的话，写错一个 provider 名要等到真的跑一次才会以
+// "no client configured" 的形式暴露出来，而那时候用户已经把 Agent 存下来
+// 并接进 Bundle 了。
+type ChannelDirectory interface {
+	ProviderNames() []string
 }
 
 // List returns one entry per agent_ref (its latest version), paginated.
@@ -68,6 +80,10 @@ func (s *Service) Create(ctx context.Context, ownerID int64, def Definition) (Ag
 		return Agent{}, domain.Invalid(domain.CodeAgentSchemaInvalid, "Agent 定义不符合 Schema").WithDetails(schemaErrs...)
 	}
 
+	if modelErrs := s.checkModelProviders(def); len(modelErrs) > 0 {
+		return Agent{}, domain.Invalid(domain.CodeAgentSchemaInvalid, "Agent 引用了没有登记的模型提供商").WithDetails(modelErrs...)
+	}
+
 	refErrs, err := s.checkCapabilities(ctx, ownerID, def)
 	if err != nil {
 		return Agent{}, domain.Internal(err)
@@ -110,6 +126,10 @@ func (s *Service) Update(ctx context.Context, ownerID, id int64, def Definition)
 	}
 	if len(schemaErrs) > 0 {
 		return Agent{}, domain.Invalid(domain.CodeAgentSchemaInvalid, "Agent 定义不符合 Schema").WithDetails(schemaErrs...)
+	}
+
+	if modelErrs := s.checkModelProviders(def); len(modelErrs) > 0 {
+		return Agent{}, domain.Invalid(domain.CodeAgentSchemaInvalid, "Agent 引用了没有登记的模型提供商").WithDetails(modelErrs...)
 	}
 
 	refErrs, err := s.checkCapabilities(ctx, ownerID, def)
@@ -237,4 +257,46 @@ func (s *Service) checkCapabilities(ctx context.Context, ownerID int64, def Defi
 		return nil, err
 	}
 	return errs, nil
+}
+
+// checkModelProviders 校验 model.provider 和 model.fallback[] 里的渠道都
+// 已经登记。
+//
+// 只查名字存不存在，不查凭据配没配：凭据是每个用户各自的事，一个管理员建
+// 好的渠道对还没配 key 的用户来说仍然是"存在的"。
+func (s *Service) checkModelProviders(def Definition) []domain.FieldError {
+	if s.channels == nil {
+		return nil
+	}
+	known := make(map[string]bool)
+	for _, name := range s.channels.ProviderNames() {
+		known[name] = true
+	}
+
+	// 一个渠道都没登记时不拦：这时候拦下来只会让新装的实例连一个 Agent 都
+	// 建不了，而用户看到的报错还指不到该去哪配。
+	if len(known) == 0 {
+		return nil
+	}
+
+	var errs []domain.FieldError
+	available := strings.Join(s.channels.ProviderNames(), ", ")
+	if p := def.ModelProvider(); p != "" && !known[p] {
+		errs = append(errs, domain.FieldError{
+			Field:  "model.provider",
+			Reason: fmt.Sprintf("没有登记名为 %q 的模型提供商，当前可用：%s", p, available),
+		})
+	}
+	for i, spec := range def.ModelFallbacks() {
+		provider, _, ok := strings.Cut(spec, "/")
+		if !ok || known[provider] {
+			// 形状不对由 schema 管；这里只管存在性。
+			continue
+		}
+		errs = append(errs, domain.FieldError{
+			Field:  fmt.Sprintf("model.fallback[%d]", i),
+			Reason: fmt.Sprintf("没有登记名为 %q 的模型提供商，当前可用：%s", provider, available),
+		})
+	}
+	return errs
 }

@@ -1,13 +1,9 @@
 package modelgateway
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"strings"
@@ -375,111 +371,4 @@ func (g *Gateway) Embed(ctx context.Context, spec ModelSpec, creds map[string]Cr
 		return nil, fmt.Errorf("modelgateway: no credentials configured for provider %q", spec.Provider)
 	}
 	return embedder.Embed(ctx, cred.APIKey, cred.BaseURL, spec.Name, texts)
-}
-
-// extractSystemPrompt 把 system 消息拼成一段。Google 的 systemInstruction
-// 是顶层字段，不在 contents 里，所以要先抽出来。
-func extractSystemPrompt(msgs []Message) string {
-	var parts []string
-	for _, m := range msgs {
-		if m.Role == "system" && m.Content != "" {
-			parts = append(parts, m.Content)
-		}
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func postJSON(ctx context.Context, client *http.Client, url string, headers map[string]string, body, out any) (status int, err error) {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return 0, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return resp.StatusCode, err
-	}
-	if err := json.Unmarshal(respBody, out); err != nil {
-		snippet := string(respBody)
-		if len(snippet) > 200 {
-			snippet = snippet[:200]
-		}
-		return resp.StatusCode, fmt.Errorf("non-JSON response body: %s", snippet)
-	}
-	return resp.StatusCode, nil
-}
-
-// postSSE is postJSON's streaming sibling for the two hand-rolled clients'
-// CompleteStream (Anthropic, Google) — both speak plain text/event-stream:
-// zero or more "event: <type>\ndata: <json>\n\n" frames (Anthropic always
-// sets event:; Google's alt=sse omits it, so an empty eventType is valid
-// too), terminated by the connection closing. onEvent is called once per
-// complete frame with its accumulated data payload; a frame with an empty
-// data buffer (a bare blank-line keepalive) is skipped.
-func postSSE(ctx context.Context, client *http.Client, url string, headers map[string]string, body any, onEvent func(eventType string, data []byte)) (status int, err error) {
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return 0, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return resp.StatusCode, fmt.Errorf("http %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	var eventType string
-	var dataBuf bytes.Buffer
-	for scanner.Scan() {
-		line := scanner.Text()
-		switch {
-		case strings.HasPrefix(line, "event:"):
-			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		case strings.HasPrefix(line, "data:"):
-			if dataBuf.Len() > 0 {
-				dataBuf.WriteByte('\n')
-			}
-			dataBuf.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
-		case line == "":
-			if dataBuf.Len() > 0 {
-				onEvent(eventType, dataBuf.Bytes())
-			}
-			eventType = ""
-			dataBuf.Reset()
-		}
-	}
-	if dataBuf.Len() > 0 {
-		onEvent(eventType, dataBuf.Bytes())
-	}
-	return resp.StatusCode, scanner.Err()
 }

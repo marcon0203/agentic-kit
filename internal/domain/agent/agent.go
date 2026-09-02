@@ -47,6 +47,25 @@ func (d Definition) Tools() []string { return d.strSlice("capabilities", "tools"
 // Skills is capabilities.skills[].
 func (d Definition) Skills() []string { return d.strSlice("capabilities", "skills") }
 
+// ModelProvider is model.provider — 这个 Agent 主模型走哪个渠道。
+func (d Definition) ModelProvider() string { return d.nestedStr("model", "provider") }
+
+// ModelFallbacks is model.fallback[] —— "provider/模型名" 形式的降级链。
+func (d Definition) ModelFallbacks() []string { return d.strSlice("model", "fallback") }
+
+func (d Definition) nestedStr(path ...string) string {
+	var cur any = map[string]any(d)
+	for _, key := range path {
+		asMap, ok := cur.(map[string]any)
+		if !ok {
+			return ""
+		}
+		cur = asMap[key]
+	}
+	s, _ := cur.(string)
+	return s
+}
+
 func (d Definition) str(key string) string {
 	s, _ := d[key].(string)
 	return s

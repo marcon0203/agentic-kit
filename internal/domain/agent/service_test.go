@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
@@ -119,7 +120,7 @@ type fakeValidator struct{ errs []domain.FieldError }
 func (f fakeValidator) Validate(map[string]any) ([]domain.FieldError, error) { return f.errs, nil }
 
 func newService(repo *fakeRepo, cat *fakeCatalog, v agent.DefinitionValidator) *agent.Service {
-	return agent.NewService(repo, cat, v)
+	return agent.NewService(repo, cat, v, fakeChannels{})
 }
 
 func def(ref, version string) agent.Definition {
@@ -354,3 +355,69 @@ func TestList_ReportsHasMoreAndNextCursor(t *testing.T) {
 		t.Fatalf("next cursor = %q, want the last item's ref %q", page.NextCursor, page.Items[1].Ref)
 	}
 }
+
+// Schema 只能管住 model.provider 的形状，管不了"这个渠道存不存在"——渠道
+// 是管理员运行时建出来的。没有这道校验，写错一个 provider 名要等到真的跑
+// 一次才会以 "no client configured" 暴露，而那时候 Agent 已经存下来、接进
+// Bundle 了。
+func modelDef(model map[string]any) agent.Definition {
+	d := def("a", "1.0")
+	d["model"] = model
+	return d
+}
+
+func TestCreate_RejectsUnregisteredModelProvider(t *testing.T) {
+	svc := newService(newFakeRepo(), newFakeCatalog(), fakeValidator{})
+
+	_, err := svc.Create(context.Background(), 1, modelDef(map[string]any{"provider": "not-registered", "name": "x"}))
+	derr := assertDomainErr(t, err, domain.KindInvalid, domain.CodeAgentSchemaInvalid)
+	if len(derr.Details) == 0 || derr.Details[0].Field != "model.provider" {
+		t.Fatalf("字段错误应指向 model.provider: %+v", derr.Details)
+	}
+	// 报错要说清楚有哪些可选，否则用户不知道该填什么。
+	if !strings.Contains(derr.Details[0].Reason, "deepseek") {
+		t.Errorf("报错里应列出当前可用的渠道: %s", derr.Details[0].Reason)
+	}
+}
+
+func TestCreate_RejectsUnregisteredFallbackProvider(t *testing.T) {
+	svc := newService(newFakeRepo(), newFakeCatalog(), fakeValidator{})
+
+	_, err := svc.Create(context.Background(), 1, modelDef(map[string]any{
+		"provider": "deepseek", "name": "deepseek-chat",
+		"fallback": []any{"volcengine/doubao", "gone/some-model"},
+	}))
+	derr := assertDomainErr(t, err, domain.KindInvalid, domain.CodeAgentSchemaInvalid)
+	if len(derr.Details) != 1 || derr.Details[0].Field != "model.fallback[1]" {
+		t.Fatalf("只有第二个降级项该报错: %+v", derr.Details)
+	}
+}
+
+func TestCreate_AcceptsRegisteredProviders(t *testing.T) {
+	svc := newService(newFakeRepo(), newFakeCatalog(), fakeValidator{})
+	_, err := svc.Create(context.Background(), 1, modelDef(map[string]any{
+		"provider": "deepseek", "name": "deepseek-chat",
+		"fallback": []any{"volcengine/doubao"},
+	}))
+	if err != nil {
+		t.Fatalf("已登记的渠道该能通过: %v", err)
+	}
+}
+
+// 一个渠道都没登记时不拦：拦下来只会让新装的实例连一个 Agent 都建不了，而
+// 报错还指不到该去哪配。
+func TestCreate_SkipsProviderCheckWhenNoChannelsRegistered(t *testing.T) {
+	svc := agent.NewService(newFakeRepo(), newFakeCatalog(), fakeValidator{}, emptyChannels{})
+	if _, err := svc.Create(context.Background(), 1, modelDef(map[string]any{"provider": "anything", "name": "x"})); err != nil {
+		t.Fatalf("没有任何渠道时不该拦: %v", err)
+	}
+}
+
+// fakeChannels 模拟已登记的模型渠道。
+type fakeChannels struct{}
+
+func (fakeChannels) ProviderNames() []string { return []string{"deepseek", "volcengine"} }
+
+type emptyChannels struct{}
+
+func (emptyChannels) ProviderNames() []string { return nil }

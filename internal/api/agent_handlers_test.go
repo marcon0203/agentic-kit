@@ -117,7 +117,7 @@ func newAgentHandlersForTest(t *testing.T) (*AgentHandlers, *stubAgentRepo) {
 		t.Fatalf("new validator: %v", err)
 	}
 	repo := newStubAgentRepo()
-	svc := agent.NewService(repo, stubCatalog{}, adapterschema.NewValidator(validator))
+	svc := agent.NewService(repo, stubCatalog{}, adapterschema.NewValidator(validator), stubChannels{})
 	return NewAgentHandlers(svc), repo
 }
 
@@ -257,3 +257,7 @@ func doAgentDelete(t *testing.T, handler http.HandlerFunc, id int64) *httptest.R
 	handler.ServeHTTP(w, r)
 	return w
 }
+
+type stubChannels struct{}
+
+func (stubChannels) ProviderNames() []string { return []string{"deepseek", "volcengine"} }
