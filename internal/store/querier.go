@@ -14,8 +14,12 @@ type Querier interface {
 	CountActiveSubscribedListingsForAgentRef(ctx context.Context, arg CountActiveSubscribedListingsForAgentRefParams) (int64, error)
 	CountActiveSubscribedListingsForBundleRef(ctx context.Context, arg CountActiveSubscribedListingsForBundleRefParams) (int64, error)
 	CountAdminUsers(ctx context.Context) (int64, error)
-	// 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。
-	CountMarketSkillsByReview(ctx context.Context) ([]CountMarketSkillsByReviewRow, error)
+	// 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。source_id 为空时
+	// 统计全部源；审核台是按源进的，那里必须传源 ID，否则顶部计数和下面的列表
+	// 对不上。
+	CountMarketSkillsByReview(ctx context.Context, sourceID pgtype.Int8) ([]CountMarketSkillsByReviewRow, error)
+	// 与 ListMarketSkillsForReview 同一套筛选条件下的总数，供前端算总页数。
+	CountMarketSkillsForReview(ctx context.Context, arg CountMarketSkillsForReviewParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAdminUser(ctx context.Context, arg CreateAdminUserParams) (User, error)
 	// Owner-view and subscriber-view queries are kept physically separate so the
@@ -237,8 +241,11 @@ type Querier interface {
 	// 卡片和详情回链。未过审的条目对普通用户根本不存在（审核台走
 	// ListMarketSkillsForReview）。
 	ListMarketSkills(ctx context.Context) ([]ListMarketSkillsRow, error)
-	// 审核台（系统配置 → Skill 源）：不筛源状态、不筛审核状态地列出全部同步
-	// 条目，让管理员看得到"同步进来了什么"。sqlc.narg 为空时该条件不生效。
+	// 审核台（系统配置 → Skill 源）：不筛源状态、不筛审核状态地列出同步条目，
+	// 让管理员看得到"同步进来了什么"。sqlc.narg 为空时该条件不生效。
+	//
+	// 分页在这里做而不是前端切片：一个公开源同步下来动辄成百上千条，全量返回
+	// 一次要拖着整张表过网络。搜索同理——只筛当前页等于没筛。
 	ListMarketSkillsForReview(ctx context.Context, arg ListMarketSkillsForReviewParams) ([]ListMarketSkillsForReviewRow, error)
 	ListMemoriesForOwnerPage(ctx context.Context, arg ListMemoriesForOwnerPageParams) ([]Memory, error)
 	ListModelProvidersForOwner(ctx context.Context, ownerUserID int64) ([]ListModelProvidersForOwnerRow, error)

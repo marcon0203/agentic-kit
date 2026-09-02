@@ -70,19 +70,42 @@ WHERE m.review_status = 'approved'
 ORDER BY m.updated_at DESC NULLS LAST;
 
 -- name: ListMarketSkillsForReview :many
--- 审核台（系统配置 → Skill 源）：不筛源状态、不筛审核状态地列出全部同步
--- 条目，让管理员看得到"同步进来了什么"。sqlc.narg 为空时该条件不生效。
+-- 审核台（系统配置 → Skill 源）：不筛源状态、不筛审核状态地列出同步条目，
+-- 让管理员看得到"同步进来了什么"。sqlc.narg 为空时该条件不生效。
+--
+-- 分页在这里做而不是前端切片：一个公开源同步下来动辄成百上千条，全量返回
+-- 一次要拖着整张表过网络。搜索同理——只筛当前页等于没筛。
 SELECT m.*, s.name AS source_name, s.base_url AS source_base_url
 FROM market_skills m
 JOIN skill_sources s ON s.id = m.source_id
 WHERE (sqlc.narg('review_status')::text IS NULL OR m.review_status = sqlc.narg('review_status')::text)
   AND (sqlc.narg('source_id')::bigint IS NULL OR m.source_id = sqlc.narg('source_id')::bigint)
-ORDER BY m.review_status = 'pending' DESC, m.synced_at DESC;
+  AND (sqlc.narg('search')::text IS NULL
+       OR m.slug ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR m.name ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR COALESCE(m.summary, '') ILIKE '%' || sqlc.narg('search')::text || '%')
+ORDER BY m.review_status = 'pending' DESC, m.synced_at DESC, m.slug
+LIMIT sqlc.arg('lim') OFFSET sqlc.arg('off');
+
+-- name: CountMarketSkillsForReview :one
+-- 与 ListMarketSkillsForReview 同一套筛选条件下的总数，供前端算总页数。
+SELECT COUNT(*)::bigint
+FROM market_skills m
+JOIN skill_sources s ON s.id = m.source_id
+WHERE (sqlc.narg('review_status')::text IS NULL OR m.review_status = sqlc.narg('review_status')::text)
+  AND (sqlc.narg('source_id')::bigint IS NULL OR m.source_id = sqlc.narg('source_id')::bigint)
+  AND (sqlc.narg('search')::text IS NULL
+       OR m.slug ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR m.name ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR COALESCE(m.summary, '') ILIKE '%' || sqlc.narg('search')::text || '%');
 
 -- name: CountMarketSkillsByReview :many
--- 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。
+-- 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。source_id 为空时
+-- 统计全部源；审核台是按源进的，那里必须传源 ID，否则顶部计数和下面的列表
+-- 对不上。
 SELECT review_status, COUNT(*)::bigint AS count
 FROM market_skills
+WHERE (sqlc.narg('source_id')::bigint IS NULL OR source_id = sqlc.narg('source_id')::bigint)
 GROUP BY review_status;
 
 -- name: SetMarketSkillReview :execrows

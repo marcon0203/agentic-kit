@@ -1376,7 +1376,7 @@ export interface paths {
         };
         /**
          * 审核台：同步进来的全部 Skill 条目，管理员
-         * @description 和 /skill-market 的区别：这里不过滤审核状态、也不过滤源是否停用， 管理员要看得到"同步进来了什么"才能审。counts 是三种状态的总数， 供页面顶部的筛选标签直接用。
+         * @description 和 /skill-market 的区别：这里不过滤审核状态、也不过滤源是否停用， 管理员要看得到"同步进来了什么"才能审。分页、搜索都在库里做——一个 公开源同步下来动辄成百上千条。counts 是三种状态的条目数（传了 source_id 就按该源统计），供页面顶部的筛选标签直接用；total 是当 前筛选条件下的总数，供前端算总页数。
          */
         get: operations["listSkillsForReview"];
         put?: never;
@@ -5048,6 +5048,11 @@ export interface operations {
             query?: {
                 review_status?: components["schemas"]["SkillReviewStatus"];
                 source_id?: string;
+                /** @description 在 slug / 名称 / 简介里做不区分大小写的模糊匹配 */
+                q?: string;
+                /** @description 从 1 开始 */
+                page?: number;
+                page_size?: number;
             };
             header?: never;
             path?: never;
@@ -5064,6 +5069,14 @@ export interface operations {
                     "application/json": components["schemas"]["Envelope"] & {
                         data?: {
                             items: components["schemas"]["MarketSkill"][];
+                            /**
+                             * Format: int64
+                             * @description 当前筛选条件下的条目总数
+                             */
+                            total: number;
+                            page: number;
+                            page_size: number;
+                            has_more: boolean;
                             counts: {
                                 /** Format: int64 */
                                 pending: number;
@@ -5076,6 +5089,7 @@ export interface operations {
                     };
                 };
             };
+            400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
         };
     };

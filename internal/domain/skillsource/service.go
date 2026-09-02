@@ -146,10 +146,12 @@ type Repository interface {
 	ReplaceSkills(ctx context.Context, sourceID int64, skills []FetchedSkill) error
 	ListMarketSkills(ctx context.Context) ([]MarketSkill, error)
 	GetMarketSkill(ctx context.Context, sourceID int64, slug string) (MarketSkill, error)
-	// ListMarketSkillsForReview 不做审核状态过滤（status/sourceID 为零值时
-	// 该维度不筛），审核台要看到同步进来的全部条目。
-	ListMarketSkillsForReview(ctx context.Context, status ReviewStatus, sourceID int64) ([]MarketSkill, error)
-	CountByReviewStatus(ctx context.Context) (map[ReviewStatus]int64, error)
+	// ListMarketSkillsForReview 不做审核状态过滤（query 里各字段为零值时该
+	// 维度不筛），审核台要看到同步进来的全部条目。分页和搜索都在库里做——
+	// 一个公开源动辄成百上千条，全量捞回来再由上层切片等于白分页。
+	ListMarketSkillsForReview(ctx context.Context, q ReviewQuery) ([]MarketSkill, error)
+	CountMarketSkillsForReview(ctx context.Context, q ReviewQuery) (int64, error)
+	CountByReviewStatus(ctx context.Context, sourceID int64) (map[ReviewStatus]int64, error)
 	SetReview(ctx context.Context, sourceID int64, slug string, status ReviewStatus, note string, reviewerID int64) error
 }
 
@@ -273,25 +275,74 @@ func (s *Service) ListMarketSkills(ctx context.Context) ([]MarketSkill, error) {
 	return s.repo.ListMarketSkills(ctx)
 }
 
-// ListForReview 是审核台的列表：同步进来的全部条目，不管审核状态、也不管
-// 源是否停用。status/sourceID 传零值表示该维度不筛。
-func (s *Service) ListForReview(ctx context.Context, userID int64, status ReviewStatus, sourceID int64) ([]MarketSkill, error) {
-	if err := s.requireAdmin(ctx, userID); err != nil {
-		return nil, err
-	}
-	if status != "" && !status.valid() {
-		return nil, domain.Invalid(CodeReviewStatusInvalid, "unknown review status").
-			WithDetails(domain.FieldError{Field: "review_status", Reason: "must be pending, approved or rejected"})
-	}
-	return s.repo.ListMarketSkillsForReview(ctx, status, sourceID)
+// ReviewQuery 是审核台一次查询的全部条件。Status/SourceID/Search 为零值表
+// 示该维度不筛；Limit <= 0 时由 ListForReview 补默认值。
+type ReviewQuery struct {
+	Status   ReviewStatus
+	SourceID int64
+	Search   string
+	Limit    int
+	Offset   int
 }
 
-// ReviewCounts 是审核台顶部的状态计数。
-func (s *Service) ReviewCounts(ctx context.Context, userID int64) (map[ReviewStatus]int64, error) {
-	if err := s.requireAdmin(ctx, userID); err != nil {
-		return nil, err
+// 审核台每页条数：默认 15（一屏能审完的量），上限 100 挡住 ?page_size=99999
+// 这种把分页绕过去的调用。
+const (
+	ReviewPageSizeDefault = 15
+	ReviewPageSizeMax     = 100
+)
+
+// normalize 把越界的分页参数夹回可用范围，顺带去掉搜索词两头的空白——
+// 前端 trim 过一遍不代表别的调用方也会。
+func (q ReviewQuery) normalize() ReviewQuery {
+	q.Search = strings.TrimSpace(q.Search)
+	if q.Limit <= 0 {
+		q.Limit = ReviewPageSizeDefault
 	}
-	return s.repo.CountByReviewStatus(ctx)
+	if q.Limit > ReviewPageSizeMax {
+		q.Limit = ReviewPageSizeMax
+	}
+	if q.Offset < 0 {
+		q.Offset = 0
+	}
+	return q
+}
+
+// ReviewPage 是审核台的一页：当页条目 + 该筛选条件下的总数（前端据此算总
+// 页数），外加各审核状态的条目数（顶部那几个筛选按钮上的数字）。
+type ReviewPage struct {
+	Items  []MarketSkill
+	Total  int64
+	Counts map[ReviewStatus]int64
+}
+
+// ListForReview 是审核台的一页：同步进来的条目，不管审核状态、也不管源是
+// 否停用。query 各字段为零值表示该维度不筛。
+func (s *Service) ListForReview(ctx context.Context, userID int64, q ReviewQuery) (ReviewPage, error) {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return ReviewPage{}, err
+	}
+	if q.Status != "" && !q.Status.valid() {
+		return ReviewPage{}, domain.Invalid(CodeReviewStatusInvalid, "unknown review status").
+			WithDetails(domain.FieldError{Field: "review_status", Reason: "must be pending, approved or rejected"})
+	}
+	q = q.normalize()
+
+	items, err := s.repo.ListMarketSkillsForReview(ctx, q)
+	if err != nil {
+		return ReviewPage{}, err
+	}
+	total, err := s.repo.CountMarketSkillsForReview(ctx, q)
+	if err != nil {
+		return ReviewPage{}, err
+	}
+	// 顶部计数按源统计：审核台是从某个源点进来的，统计全库的话上面写着
+	// "待审核 800"、下面列表只有 12 条，对不上。
+	counts, err := s.repo.CountByReviewStatus(ctx, q.SourceID)
+	if err != nil {
+		return ReviewPage{}, err
+	}
+	return ReviewPage{Items: items, Total: total, Counts: counts}, nil
 }
 
 // ReviewItem 是一次批量审核里的一条。审核台面对的是成百上千条同步条目，

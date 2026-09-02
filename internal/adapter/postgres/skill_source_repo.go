@@ -231,17 +231,33 @@ func (r *SkillSourceRepository) GetMarketSkill(ctx context.Context, sourceID int
 	}), nil
 }
 
-// ListMarketSkillsForReview 的空值语义：status == "" / sourceID == 0 表示
-// 该维度不筛，映射成 sqlc 的 narg NULL。
-func (r *SkillSourceRepository) ListMarketSkillsForReview(ctx context.Context, status skillsource.ReviewStatus, sourceID int64) ([]skillsource.MarketSkill, error) {
-	params := store.ListMarketSkillsForReviewParams{}
-	if status != "" {
-		params.ReviewStatus = pgtype.Text{String: string(status), Valid: true}
+// reviewFilter 把领域层的 ReviewQuery 翻成 sqlc 的 narg：零值 = 该维度不
+// 筛 = NULL。列表和计数用同一套条件，所以抽出来，免得两处筛选漂移导致总
+// 数和当页对不上。
+func reviewFilter(q skillsource.ReviewQuery) (status, search pgtype.Text, sourceID pgtype.Int8) {
+	if q.Status != "" {
+		status = pgtype.Text{String: string(q.Status), Valid: true}
 	}
-	if sourceID != 0 {
-		params.SourceID = pgtype.Int8{Int64: sourceID, Valid: true}
+	if q.Search != "" {
+		search = pgtype.Text{String: q.Search, Valid: true}
 	}
-	rows, err := r.q.ListMarketSkillsForReview(ctx, params)
+	if q.SourceID != 0 {
+		sourceID = pgtype.Int8{Int64: q.SourceID, Valid: true}
+	}
+	return status, search, sourceID
+}
+
+// ListMarketSkillsForReview 的空值语义：ReviewQuery 里各字段为零值表示该
+// 维度不筛，映射成 sqlc 的 narg NULL。
+func (r *SkillSourceRepository) ListMarketSkillsForReview(ctx context.Context, q skillsource.ReviewQuery) ([]skillsource.MarketSkill, error) {
+	status, search, sourceID := reviewFilter(q)
+	rows, err := r.q.ListMarketSkillsForReview(ctx, store.ListMarketSkillsForReviewParams{
+		ReviewStatus: status,
+		SourceID:     sourceID,
+		Search:       search,
+		Lim:          int32(q.Limit),
+		Off:          int32(q.Offset),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -258,8 +274,21 @@ func (r *SkillSourceRepository) ListMarketSkillsForReview(ctx context.Context, s
 	return out, nil
 }
 
-func (r *SkillSourceRepository) CountByReviewStatus(ctx context.Context) (map[skillsource.ReviewStatus]int64, error) {
-	rows, err := r.q.CountMarketSkillsByReview(ctx)
+func (r *SkillSourceRepository) CountMarketSkillsForReview(ctx context.Context, q skillsource.ReviewQuery) (int64, error) {
+	status, search, sourceID := reviewFilter(q)
+	return r.q.CountMarketSkillsForReview(ctx, store.CountMarketSkillsForReviewParams{
+		ReviewStatus: status,
+		SourceID:     sourceID,
+		Search:       search,
+	})
+}
+
+func (r *SkillSourceRepository) CountByReviewStatus(ctx context.Context, sourceID int64) (map[skillsource.ReviewStatus]int64, error) {
+	var arg pgtype.Int8
+	if sourceID != 0 {
+		arg = pgtype.Int8{Int64: sourceID, Valid: true}
+	}
+	rows, err := r.q.CountMarketSkillsByReview(ctx, arg)
 	if err != nil {
 		return nil, err
 	}

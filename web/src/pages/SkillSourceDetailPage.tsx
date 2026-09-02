@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Check, ExternalLink, Globe, RefreshCw, X } from 'lucide-react'
@@ -28,6 +28,16 @@ type Filter = ReviewStatus | 'all'
 
 /** 一屏审 15 条：再多就得一直滚，批量勾选也失去"这一批"的边界感。 */
 const PAGE_SIZE = 15
+
+/** 搜索词防抖：输入停下来再发请求，否则每个字符一次往返。 */
+function useDebounced<T>(value: T, delayMs: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), delayMs)
+    return () => clearTimeout(t)
+  }, [value, delayMs])
+  return settled
+}
 
 function formatSyncedAt(iso: string | null): string {
   if (!iso) return '从未同步'
@@ -60,47 +70,48 @@ export function SkillSourceDetailPage() {
   })
   const source = sourcesQuery.data?.items.find((s) => Number(s.id) === sourceId)
 
+  // 搜索防抖后才进 queryKey：每敲一个字符发一次请求太吵。
+  const debouncedSearch = useDebounced(search, 300)
+
+  // 筛选条件或搜索词一变，当前页码多半越界，回第一页。
+  useEffect(() => {
+    setPage(1)
+  }, [filter, debouncedSearch, sourceId])
+
   const skillsQuery = useQuery({
-    queryKey: ['skill-review', sourceId, filter],
+    queryKey: ['skill-review', sourceId, filter, debouncedSearch, page],
     queryFn: async () =>
-      unwrap<{ items: MarketSkill[]; counts: Record<ReviewStatus, number> }>(
+      unwrap<{
+        items: MarketSkill[]
+        total: number
+        counts: Record<ReviewStatus, number>
+      }>(
         await apiClient.GET('/skill-sources/skills', {
           params: {
             query: {
               source_id: String(sourceId),
               ...(filter === 'all' ? {} : { review_status: filter }),
+              ...(debouncedSearch ? { q: debouncedSearch } : {}),
+              page,
+              page_size: PAGE_SIZE,
             },
           },
         }),
       ),
     enabled: Number.isFinite(sourceId),
+    // 翻页时保留上一页的数据，列表不会闪成骨架屏再闪回来。
+    placeholderData: (prev) => prev,
   })
 
-  const items = useMemo(() => {
-    const all = skillsQuery.data?.items ?? []
-    const q = search.trim().toLowerCase()
-    if (!q) return all
-    return all.filter(
-      (s) =>
-        s.slug.toLowerCase().includes(q) ||
-        s.name.toLowerCase().includes(q) ||
-        (s.summary ?? '').toLowerCase().includes(q),
-    )
-  }, [skillsQuery.data, search])
+  const visible = skillsQuery.data?.items ?? []
+  const total = skillsQuery.data?.total ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
-  // 筛选条件一变，当前页码多半越界，回第一页。
+  // 审核完一批之后列表会变短，当前页可能落到末页之后——退回去，免得停在
+  // 一张空页上。
   useEffect(() => {
-    setPage(1)
-  }, [filter, search, sourceId])
-
-  const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
-  // 审核完一批之后列表会变短，页码可能落在末页之后——夹一下再切片，免得
-  // 显示成空页。
-  const safePage = Math.min(page, pageCount)
-  const visible = useMemo(
-    () => items.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
-    [items, safePage],
-  )
+    if (page > pageCount) setPage(pageCount)
+  }, [page, pageCount])
 
   const counts = skillsQuery.data?.counts
   // 全选只覆盖当前页：跨页的"全选"点下去会连没看过的条目一起批掉。
@@ -204,23 +215,34 @@ export function SkillSourceDetailPage() {
             {counts && f !== 'all' && <span className="text-caption tabular ml-1 text-ink-500">{counts[f] ?? 0}</span>}
           </Button>
         ))}
+
+        {/* 搜索框留在筛选行：搜不到东西时列表整块消失，放在列表里就没法把
+            搜索词清掉了。 */}
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="按名称 / slug / 简介搜索"
+          className="ml-auto h-9 max-w-[260px]"
+        />
       </div>
 
       {skillsQuery.isLoading && <ListSkeleton />}
       {skillsQuery.isError && <ErrorPanel message="Skill 列表没能加载出来" onRetry={() => skillsQuery.refetch()} />}
 
-      {skillsQuery.isSuccess && items.length === 0 && (
+      {skillsQuery.isSuccess && visible.length === 0 && (
         <EmptyRail
-          title={filter === 'pending' ? '没有待审核的 Skill' : '这里还没有内容'}
+          title={debouncedSearch ? '没有匹配的 Skill' : filter === 'pending' ? '没有待审核的 Skill' : '这里还没有内容'}
           description={
-            filter === 'pending'
-              ? '这个源同步下来的条目都已经审过了。点右上角「同步」拉取上游的最新内容。'
-              : '换个筛选条件看看，或者先同步一次。'
+            debouncedSearch
+              ? `当前筛选下没有匹配「${debouncedSearch}」的条目，换个词或切到「全部」看看。`
+              : filter === 'pending'
+                ? '这个源同步下来的条目都已经审过了。点右上角「同步」拉取上游的最新内容。'
+                : '换个筛选条件看看，或者先同步一次。'
           }
         />
       )}
 
-      {items.length > 0 && (
+      {visible.length > 0 && (
         <>
           <div className="flex flex-wrap items-center gap-space-3">
             <label className="flex cursor-pointer items-center gap-space-2">
@@ -232,12 +254,6 @@ export function SkillSourceDetailPage() {
                 {selected.size > 0 ? `已选 ${selected.size} 个` : `全选本页（${visible.length}）`}
               </span>
             </label>
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="按名称 / slug / 简介筛选"
-              className="h-9 max-w-[260px]"
-            />
             <div className="ml-auto flex items-center gap-space-2">
               <Button
                 size="sm"
@@ -328,10 +344,10 @@ export function SkillSourceDetailPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-space-3">
             <span className="text-caption text-ink-500">
-              共 {items.length} 个，第 {safePage} / {pageCount} 页
+              共 {total} 个，第 {page} / {pageCount} 页
             </span>
             <Pagination
-              page={safePage}
+              page={page}
               pageCount={pageCount}
               pageSize={PAGE_SIZE}
               onPageChange={(p) => {

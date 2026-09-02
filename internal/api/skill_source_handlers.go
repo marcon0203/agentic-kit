@@ -67,7 +67,7 @@ func toMarketSkillDTO(m skillsource.MarketSkill) marketSkillDTO {
 		SourceID: m.SourceID, SourceName: m.SourceName, SourceBaseURL: m.SourceBaseURL,
 		Slug: m.Slug, Name: m.Name, Summary: m.Summary, Version: m.Version,
 		License: m.License,
-		Topics: m.Topics, Stars: m.Stars, Downloads: m.Downloads,
+		Topics:  m.Topics, Stars: m.Stars, Downloads: m.Downloads,
 		ReviewStatus: string(m.ReviewStatus), ReviewNote: m.ReviewNote,
 	}
 	if !m.ReviewedAt.IsZero() {
@@ -84,10 +84,10 @@ func toMarketSkillDTO(m skillsource.MarketSkill) marketSkillDTO {
 
 type marketSkillDetailDTO struct {
 	marketSkillDTO
-	Usage       string               `json:"usage,omitempty"`
-	Owner       *skillsource.Owner   `json:"owner,omitempty"`
-	UpstreamURL string               `json:"upstream_url,omitempty"`
-	Versions    []marketVersionDTO  `json:"versions"`
+	Usage       string             `json:"usage,omitempty"`
+	Owner       *skillsource.Owner `json:"owner,omitempty"`
+	UpstreamURL string             `json:"upstream_url,omitempty"`
+	Versions    []marketVersionDTO `json:"versions"`
 }
 
 type marketVersionDTO struct {
@@ -212,47 +212,82 @@ func (h *SkillSourceHandlers) ListMarket(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "has_more": false})
 }
 
-// ListForReview handles GET /skill-sources/skills：审核台的列表，同步进来
-// 的全部条目（可按 review_status / source_id 筛）。管理员限定。
+// ListForReview handles GET /skill-sources/skills：审核台的一页，同步进来
+// 的条目（可按 review_status / source_id / q 筛，page + page_size 分页）。
+// 管理员限定。
 func (h *SkillSourceHandlers) ListForReview(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
-	status := skillsource.ReviewStatus(r.URL.Query().Get("review_status"))
-	var sourceID int64
-	if raw := r.URL.Query().Get("source_id"); raw != "" {
+	q := r.URL.Query()
+	query := skillsource.ReviewQuery{
+		Status: skillsource.ReviewStatus(q.Get("review_status")),
+		Search: q.Get("q"),
+	}
+	if raw := q.Get("source_id"); raw != "" {
 		parsed, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
 			writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid source_id")
 			return
 		}
-		sourceID = parsed
+		query.SourceID = parsed
 	}
+	page, pageSize, ok := parseReviewPaging(w, r)
+	if !ok {
+		return
+	}
+	query.Limit = pageSize
+	query.Offset = (page - 1) * pageSize
 
-	skills, err := h.svc.ListForReview(r.Context(), userID, status, sourceID)
+	result, err := h.svc.ListForReview(r.Context(), userID, query)
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return
 	}
-	counts, err := h.svc.ReviewCounts(r.Context(), userID)
-	if err != nil {
-		writeDomainErr(w, r, err)
-		return
-	}
 
-	items := make([]marketSkillDTO, 0, len(skills))
-	for _, m := range skills {
+	items := make([]marketSkillDTO, 0, len(result.Items))
+	for _, m := range result.Items {
 		items = append(items, toMarketSkillDTO(m))
 	}
 	writeJSON(w, r, http.StatusOK, map[string]any{
-		"items": items,
+		"items":     items,
+		"total":     result.Total,
+		"page":      page,
+		"page_size": pageSize,
+		// has_more 让不想自己算总页数的调用方也能一路翻到底。
+		"has_more": int64(query.Offset+len(items)) < result.Total,
 		"counts": map[string]int64{
-			"pending":  counts[skillsource.ReviewPending],
-			"approved": counts[skillsource.ReviewApproved],
-			"rejected": counts[skillsource.ReviewRejected],
+			"pending":  result.Counts[skillsource.ReviewPending],
+			"approved": result.Counts[skillsource.ReviewApproved],
+			"rejected": result.Counts[skillsource.ReviewRejected],
 		},
 	})
+}
+
+// parseReviewPaging 读 page / page_size：缺省走领域层的默认每页条数，非法
+// 值直接 400 而不是悄悄纠正——静默改写会让调用方以为自己传对了。上限由
+// skillsource.ReviewPageSizeMax 兜底。
+func parseReviewPaging(w http.ResponseWriter, r *http.Request) (page, pageSize int, ok bool) {
+	page, pageSize = 1, skillsource.ReviewPageSizeDefault
+	q := r.URL.Query()
+	if raw := q.Get("page"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "page 必须是大于 0 的整数")
+			return 0, 0, false
+		}
+		page = parsed
+	}
+	if raw := q.Get("page_size"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > skillsource.ReviewPageSizeMax {
+			writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "page_size 必须在 1..100 之间")
+			return 0, 0, false
+		}
+		pageSize = parsed
+	}
+	return page, pageSize, true
 }
 
 type reviewSkillsRequest struct {

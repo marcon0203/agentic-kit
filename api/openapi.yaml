@@ -2760,8 +2760,10 @@ paths:
       summary: 审核台：同步进来的全部 Skill 条目，管理员
       description: >-
         和 /skill-market 的区别：这里不过滤审核状态、也不过滤源是否停用，
-        管理员要看得到"同步进来了什么"才能审。counts 是三种状态的总数，
-        供页面顶部的筛选标签直接用。
+        管理员要看得到"同步进来了什么"才能审。分页、搜索都在库里做——一个
+        公开源同步下来动辄成百上千条。counts 是三种状态的条目数（传了
+        source_id 就按该源统计），供页面顶部的筛选标签直接用；total 是当
+        前筛选条件下的总数，供前端算总页数。
       operationId: listSkillsForReview
       parameters:
         - name: review_status
@@ -2770,6 +2772,17 @@ paths:
         - name: source_id
           in: query
           schema: { type: string }
+        - name: q
+          in: query
+          description: 在 slug / 名称 / 简介里做不区分大小写的模糊匹配
+          schema: { type: string }
+        - name: page
+          in: query
+          description: 从 1 开始
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 15 }
       responses:
         '200':
           description: 成功
@@ -2782,11 +2795,18 @@ paths:
                     properties:
                       data:
                         type: object
-                        required: [items, counts]
+                        required: [items, counts, total, page, page_size, has_more]
                         properties:
                           items:
                             type: array
                             items: { $ref: '#/components/schemas/MarketSkill' }
+                          total:
+                            type: integer
+                            format: int64
+                            description: 当前筛选条件下的条目总数
+                          page: { type: integer }
+                          page_size: { type: integer }
+                          has_more: { type: boolean }
                           counts:
                             type: object
                             required: [pending, approved, rejected]
@@ -2794,6 +2814,7 @@ paths:
                               pending: { type: integer, format: int64 }
                               approved: { type: integer, format: int64 }
                               rejected: { type: integer, format: int64 }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
   /skill-sources/skills/review:

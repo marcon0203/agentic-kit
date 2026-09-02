@@ -14,6 +14,7 @@ import (
 const countMarketSkillsByReview = `-- name: CountMarketSkillsByReview :many
 SELECT review_status, COUNT(*)::bigint AS count
 FROM market_skills
+WHERE ($1::bigint IS NULL OR source_id = $1::bigint)
 GROUP BY review_status
 `
 
@@ -22,9 +23,11 @@ type CountMarketSkillsByReviewRow struct {
 	Count        int64  `json:"count"`
 }
 
-// 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。
-func (q *Queries) CountMarketSkillsByReview(ctx context.Context) ([]CountMarketSkillsByReviewRow, error) {
-	rows, err := q.db.Query(ctx, countMarketSkillsByReview)
+// 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。source_id 为空时
+// 统计全部源；审核台是按源进的，那里必须传源 ID，否则顶部计数和下面的列表
+// 对不上。
+func (q *Queries) CountMarketSkillsByReview(ctx context.Context, sourceID pgtype.Int8) ([]CountMarketSkillsByReviewRow, error) {
+	rows, err := q.db.Query(ctx, countMarketSkillsByReview, sourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -41,6 +44,32 @@ func (q *Queries) CountMarketSkillsByReview(ctx context.Context) ([]CountMarketS
 		return nil, err
 	}
 	return items, nil
+}
+
+const countMarketSkillsForReview = `-- name: CountMarketSkillsForReview :one
+SELECT COUNT(*)::bigint
+FROM market_skills m
+JOIN skill_sources s ON s.id = m.source_id
+WHERE ($1::text IS NULL OR m.review_status = $1::text)
+  AND ($2::bigint IS NULL OR m.source_id = $2::bigint)
+  AND ($3::text IS NULL
+       OR m.slug ILIKE '%' || $3::text || '%'
+       OR m.name ILIKE '%' || $3::text || '%'
+       OR COALESCE(m.summary, '') ILIKE '%' || $3::text || '%')
+`
+
+type CountMarketSkillsForReviewParams struct {
+	ReviewStatus pgtype.Text `json:"review_status"`
+	SourceID     pgtype.Int8 `json:"source_id"`
+	Search       pgtype.Text `json:"search"`
+}
+
+// 与 ListMarketSkillsForReview 同一套筛选条件下的总数，供前端算总页数。
+func (q *Queries) CountMarketSkillsForReview(ctx context.Context, arg CountMarketSkillsForReviewParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMarketSkillsForReview, arg.ReviewStatus, arg.SourceID, arg.Search)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const createSkillSource = `-- name: CreateSkillSource :one
@@ -281,12 +310,20 @@ FROM market_skills m
 JOIN skill_sources s ON s.id = m.source_id
 WHERE ($1::text IS NULL OR m.review_status = $1::text)
   AND ($2::bigint IS NULL OR m.source_id = $2::bigint)
-ORDER BY m.review_status = 'pending' DESC, m.synced_at DESC
+  AND ($3::text IS NULL
+       OR m.slug ILIKE '%' || $3::text || '%'
+       OR m.name ILIKE '%' || $3::text || '%'
+       OR COALESCE(m.summary, '') ILIKE '%' || $3::text || '%')
+ORDER BY m.review_status = 'pending' DESC, m.synced_at DESC, m.slug
+LIMIT $5 OFFSET $4
 `
 
 type ListMarketSkillsForReviewParams struct {
 	ReviewStatus pgtype.Text `json:"review_status"`
 	SourceID     pgtype.Int8 `json:"source_id"`
+	Search       pgtype.Text `json:"search"`
+	Off          int32       `json:"off"`
+	Lim          int32       `json:"lim"`
 }
 
 type ListMarketSkillsForReviewRow struct {
@@ -312,10 +349,19 @@ type ListMarketSkillsForReviewRow struct {
 	SourceBaseUrl string             `json:"source_base_url"`
 }
 
-// 审核台（系统配置 → Skill 源）：不筛源状态、不筛审核状态地列出全部同步
-// 条目，让管理员看得到"同步进来了什么"。sqlc.narg 为空时该条件不生效。
+// 审核台（系统配置 → Skill 源）：不筛源状态、不筛审核状态地列出同步条目，
+// 让管理员看得到"同步进来了什么"。sqlc.narg 为空时该条件不生效。
+//
+// 分页在这里做而不是前端切片：一个公开源同步下来动辄成百上千条，全量返回
+// 一次要拖着整张表过网络。搜索同理——只筛当前页等于没筛。
 func (q *Queries) ListMarketSkillsForReview(ctx context.Context, arg ListMarketSkillsForReviewParams) ([]ListMarketSkillsForReviewRow, error) {
-	rows, err := q.db.Query(ctx, listMarketSkillsForReview, arg.ReviewStatus, arg.SourceID)
+	rows, err := q.db.Query(ctx, listMarketSkillsForReview,
+		arg.ReviewStatus,
+		arg.SourceID,
+		arg.Search,
+		arg.Off,
+		arg.Lim,
+	)
 	if err != nil {
 		return nil, err
 	}

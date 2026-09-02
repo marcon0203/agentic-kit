@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -78,24 +80,62 @@ func (f *fakeRepo) GetMarketSkill(ctx context.Context, sourceID int64, slug stri
 	return MarketSkill{}, errors.New("not found")
 }
 
-// 审核台的列表不筛审核状态，只按传入的维度过滤——和真实 SQL 一致。
-func (f *fakeRepo) ListMarketSkillsForReview(ctx context.Context, status ReviewStatus, sourceID int64) ([]MarketSkill, error) {
+// matchesReview 复刻真实 SQL 的筛选：零值维度不筛，搜索命中 slug/name/
+// summary 任一即可。
+func (f *fakeRepo) matchesReview(s MarketSkill, q ReviewQuery) bool {
+	if q.Status != "" && s.ReviewStatus != q.Status {
+		return false
+	}
+	if q.SourceID != 0 && s.SourceID != q.SourceID {
+		return false
+	}
+	if q.Search != "" {
+		needle := strings.ToLower(q.Search)
+		hit := strings.Contains(strings.ToLower(s.Slug), needle) ||
+			strings.Contains(strings.ToLower(s.Name), needle) ||
+			strings.Contains(strings.ToLower(s.Summary), needle)
+		if !hit {
+			return false
+		}
+	}
+	return true
+}
+
+// 审核台的列表不筛审核状态，只按传入的维度过滤，并且分页在"库里"做——和
+// 真实 SQL 一致，否则测不出 LIMIT/OFFSET 的越界行为。
+func (f *fakeRepo) ListMarketSkillsForReview(ctx context.Context, q ReviewQuery) ([]MarketSkill, error) {
 	out := make([]MarketSkill, 0, len(f.skills))
 	for _, s := range f.skills {
-		if status != "" && s.ReviewStatus != status {
-			continue
+		if f.matchesReview(s, q) {
+			out = append(out, s)
 		}
-		if sourceID != 0 && s.SourceID != sourceID {
-			continue
-		}
-		out = append(out, s)
+	}
+	if q.Offset >= len(out) {
+		return []MarketSkill{}, nil
+	}
+	out = out[q.Offset:]
+	if q.Limit > 0 && q.Limit < len(out) {
+		out = out[:q.Limit]
 	}
 	return out, nil
 }
 
-func (f *fakeRepo) CountByReviewStatus(ctx context.Context) (map[ReviewStatus]int64, error) {
+func (f *fakeRepo) CountMarketSkillsForReview(ctx context.Context, q ReviewQuery) (int64, error) {
+	var n int64
+	for _, s := range f.skills {
+		if f.matchesReview(s, q) {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeRepo) CountByReviewStatus(ctx context.Context, sourceID int64) (map[ReviewStatus]int64, error) {
 	counts := map[ReviewStatus]int64{}
 	for _, s := range f.skills {
+		if sourceID != 0 && s.SourceID != sourceID {
+			continue
+		}
 		counts[s.ReviewStatus]++
 	}
 	return counts, nil
@@ -247,7 +287,7 @@ func TestReview_RequiresAdmin(t *testing.T) {
 	if err := svc.Review(context.Background(), 1, []ReviewItem{{SourceID: 1, Slug: "x"}}, ReviewApproved, ""); err == nil {
 		t.Fatal("a non-admin must not be able to approve skills")
 	}
-	if _, err := svc.ListForReview(context.Background(), 1, "", 0); err == nil {
+	if _, err := svc.ListForReview(context.Background(), 1, ReviewQuery{}); err == nil {
 		t.Fatal("a non-admin must not see the review queue")
 	}
 }
@@ -264,5 +304,86 @@ func TestGetMarketSkill_HidesUnapprovedFromNonAdmin(t *testing.T) {
 	repo.skills[0].ReviewStatus = ReviewApproved
 	if _, err := svc.GetMarketSkill(context.Background(), 7, 1, "junk"); err != nil {
 		t.Fatalf("an approved skill should be readable: %v", err)
+	}
+}
+
+// 分页要在库里做：一个源同步下来上千条，全量返回再由前端切片等于没分页。
+// 这里连带盯住三件事——当页只给 Limit 条、Total 是筛选后的总数、末页之后
+// 的 offset 返回空页而不是报错。
+func TestListForReview_PaginatesAndReportsTotal(t *testing.T) {
+	svc, repo := newTestService(true, fakeFetcher{})
+	for i := 0; i < 23; i++ {
+		repo.skills = append(repo.skills, MarketSkill{
+			SourceID: 1, Slug: fmt.Sprintf("s%02d", i), Name: fmt.Sprintf("Skill %02d", i),
+			ReviewStatus: ReviewPending,
+		})
+	}
+	// 另一个源的条目不能混进来，也不能算进总数。
+	repo.skills = append(repo.skills, MarketSkill{SourceID: 2, Slug: "other", Name: "Other", ReviewStatus: ReviewPending})
+
+	first, err := svc.ListForReview(context.Background(), 1, ReviewQuery{SourceID: 1, Limit: 15})
+	if err != nil {
+		t.Fatalf("list page 1: %v", err)
+	}
+	if len(first.Items) != 15 {
+		t.Fatalf("page 1 should hold 15 items, got %d", len(first.Items))
+	}
+	if first.Total != 23 {
+		t.Fatalf("total should count every match in the source, got %d", first.Total)
+	}
+	if first.Counts[ReviewPending] != 23 {
+		t.Fatalf("counts must be scoped to the source, got %d", first.Counts[ReviewPending])
+	}
+
+	second, err := svc.ListForReview(context.Background(), 1, ReviewQuery{SourceID: 1, Limit: 15, Offset: 15})
+	if err != nil {
+		t.Fatalf("list page 2: %v", err)
+	}
+	if len(second.Items) != 8 {
+		t.Fatalf("page 2 should hold the remaining 8, got %d", len(second.Items))
+	}
+
+	past, err := svc.ListForReview(context.Background(), 1, ReviewQuery{SourceID: 1, Limit: 15, Offset: 300})
+	if err != nil {
+		t.Fatalf("an out-of-range page must not error: %v", err)
+	}
+	if len(past.Items) != 0 {
+		t.Fatalf("an out-of-range page should be empty, got %d", len(past.Items))
+	}
+}
+
+// 搜索也得在库里做：只筛当前页的话，第 2 页搜出来的东西和第 1 页不是一回事。
+func TestListForReview_SearchesAcrossTheWholeSource(t *testing.T) {
+	svc, repo := newTestService(true, fakeFetcher{})
+	repo.skills = []MarketSkill{
+		{SourceID: 1, Slug: "pdf-tools", Name: "PDF Tools", ReviewStatus: ReviewPending},
+		{SourceID: 1, Slug: "csv-clean", Name: "CSV Clean", Summary: "读取 pdf 附件", ReviewStatus: ReviewPending},
+		{SourceID: 1, Slug: "unrelated", Name: "Unrelated", ReviewStatus: ReviewPending},
+	}
+
+	page, err := svc.ListForReview(context.Background(), 1, ReviewQuery{SourceID: 1, Search: "PDF"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if page.Total != 2 || len(page.Items) != 2 {
+		t.Fatalf("search should match slug/name/summary case-insensitively, got total=%d items=%d", page.Total, len(page.Items))
+	}
+}
+
+// page_size 不设上限的话，?page_size=999999 就把分页绕过去了。
+func TestListForReview_ClampsPageSize(t *testing.T) {
+	svc, repo := newTestService(true, fakeFetcher{})
+	for i := 0; i < ReviewPageSizeMax+50; i++ {
+		repo.skills = append(repo.skills, MarketSkill{
+			SourceID: 1, Slug: fmt.Sprintf("s%03d", i), ReviewStatus: ReviewPending,
+		})
+	}
+
+	page, err := svc.ListForReview(context.Background(), 1, ReviewQuery{SourceID: 1, Limit: 999999})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(page.Items) != ReviewPageSizeMax {
+		t.Fatalf("page size should be clamped to %d, got %d", ReviewPageSizeMax, len(page.Items))
 	}
 }
