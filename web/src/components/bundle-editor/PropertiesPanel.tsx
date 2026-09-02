@@ -1,3 +1,5 @@
+import { Play, Trash2 } from 'lucide-react'
+
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -27,6 +29,8 @@ export function PropertiesPanel({
   onUpdateRunType,
   entry,
   onSetEntry,
+  onDeleteNode,
+  onDeleteEdge,
   issues,
   onFocusIssue,
 }: {
@@ -35,6 +39,8 @@ export function PropertiesPanel({
   nodeNames: string[]
   onUpdateNode: (id: string, patch: Partial<AgentNode['data']>) => void
   onUpdateEdge: (id: string, patch: Partial<BundleEdge['data']>) => void
+  onDeleteNode: (id: string) => void
+  onDeleteEdge: (id: string) => void
   bundleMeta: { bundle: string; version: string; description: string; runType: BundleRunType }
   onUpdateMeta: (patch: Partial<{ bundle: string; version: string; description: string }>) => void
   onUpdateRunType: (runType: BundleRunType) => void
@@ -45,11 +51,34 @@ export function PropertiesPanel({
 }) {
   if (selectedNode && selectedNode.type === 'agentNode') {
     const gate = selectedNode.data.gate
+    const isEntry = entry === selectedNode.id
     return (
-      <div className="flex h-full flex-col gap-space-5 border-l border-border bg-surface p-space-5">
+      <div className="flex h-full flex-col gap-space-5 overflow-y-auto border-l border-border bg-surface p-space-5">
         <div>
           <p className="text-label-md text-ink-900">节点</p>
           <p className="text-ref text-ink-700">{selectedNode.data.alias || selectedNode.data.ref}</p>
+          {selectedNode.data.alias && (
+            <p className="text-caption text-ink-500">来自 {selectedNode.data.ref}</p>
+          )}
+        </div>
+
+        {/* Both of these used to live somewhere else: entry only in the
+            Bundle panel's dropdown (which meant deselecting the node you
+            were looking at), delete only on the keyboard. */}
+        <div className="flex flex-col gap-space-2">
+          <Button
+            variant={isEntry ? 'secondary' : 'outline'}
+            size="sm"
+            disabled={isEntry}
+            onClick={() => onSetEntry(selectedNode.id)}
+          >
+            <Play className="mr-1 size-3.5" aria-hidden />
+            {isEntry ? '这是入口节点' : '设为入口节点'}
+          </Button>
+          <Button variant="ghost" size="sm" className="text-ink-500 hover:text-rust" onClick={() => onDeleteNode(selectedNode.id)}>
+            <Trash2 className="mr-1 size-3.5" aria-hidden />
+            删除这个节点
+          </Button>
         </div>
 
         <div className="flex items-center gap-space-2">
@@ -111,12 +140,23 @@ export function PropertiesPanel({
     const condition = selectedEdge.data?.condition ?? ''
     const error = condition ? validateCondition(condition) : null
     return (
-      <div className="flex h-full flex-col gap-space-5 border-l border-border bg-surface p-space-5">
-        <div>
-          <p className="text-label-md text-ink-900">连线</p>
-          <p className="text-ref text-ink-700">
-            {selectedEdge.source} → {selectedEdge.target}
-          </p>
+      <div className="flex h-full flex-col gap-space-5 overflow-y-auto border-l border-border bg-surface p-space-5">
+        <div className="flex items-start justify-between gap-space-2">
+          <div>
+            <p className="text-label-md text-ink-900">连线</p>
+            <p className="text-ref text-ink-700">
+              {selectedEdge.source} → {selectedEdge.target}
+            </p>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="删除这条连线"
+            className="text-ink-500 hover:text-rust"
+            onClick={() => onDeleteEdge(selectedEdge.id)}
+          >
+            <Trash2 className="size-3.5" aria-hidden />
+          </Button>
         </div>
 
         <div className="flex flex-col gap-space-2">

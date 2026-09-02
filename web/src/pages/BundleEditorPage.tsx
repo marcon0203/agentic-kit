@@ -7,11 +7,14 @@ import {
   ReactFlowProvider,
   Background,
   Controls,
+  MiniMap,
   addEdge,
   useNodesState,
   useEdgesState,
   useReactFlow,
   type Connection,
+  type NodeChange,
+  type EdgeChange,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { ArrowLeft } from 'lucide-react'
@@ -94,6 +97,18 @@ function EditorInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, existingQuery.data])
 
+  // Whatever removed a node — the panel's 删除, the Delete key, a source-view
+  // round-trip — the entry must not be left pointing at something that is no
+  // longer on the canvas. A graph Bundle without a valid entry doesn't
+  // compile, and the old failure mode was a save-time error message about a
+  // node the user had already forgotten deleting.
+  useEffect(() => {
+    if (!entry) return
+    if (nodes.some((n) => n.id === entry)) return
+    const firstAgent = nodes.find((n) => n.type === 'agentNode')
+    setEntry(firstAgent?.id ?? null)
+  }, [nodes, entry])
+
   // Unsaved-changes guard.
   useEffect(() => {
     function onBeforeUnload(e: BeforeUnloadEvent) {
@@ -104,6 +119,16 @@ function EditorInner() {
   }, [dirty])
 
   const markDirty = useCallback(() => setDirty(true), [])
+
+  // Selecting a node, or React Flow measuring one on mount, is not an edit.
+  // Marking dirty on every change put "有未保存的更改" on screen the moment
+  // the editor opened — which trains people to ignore the warning that is
+  // supposed to stop them losing work.
+  const isRealEdit = useCallback(
+    (changes: NodeChange<AgentNodeT>[] | EdgeChange<BundleEdge>[]) =>
+      changes.some((c) => c.type !== 'select' && c.type !== 'dimensions'),
+    [],
+  )
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -120,14 +145,8 @@ function EditorInner() {
     [setEdges, markDirty],
   )
 
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault()
-      const raw = e.dataTransfer.getData(AGENT_DRAG_MIME)
-      if (!raw) return
-      const agent = JSON.parse(raw) as { ref: string; version: string }
-      const position = screenToFlowPosition({ x: e.clientX, y: e.clientY })
-
+  const addAgent = useCallback(
+    (agent: { ref: string; version: string }, position?: { x: number; y: number }) => {
       let id = agent.ref
       let n = 2
       const existingIds = new Set(nodes.map((x) => x.id))
@@ -137,10 +156,14 @@ function EditorInner() {
       }
       const alias = id !== agent.ref ? id : undefined
 
+      // Clicking rather than dragging lands the node in open space near the
+      // last one instead of stacking every click on the exact same spot.
+      const fallback = { x: 120 + nodes.length * 40, y: 120 + nodes.length * 70 }
+
       const newNode: AgentNodeT = {
         id,
         type: 'agentNode',
-        position,
+        position: position ?? fallback,
         data: { ref: agent.ref, alias, version: agent.version },
       }
       setNodes((nds) => [...nds, newNode])
@@ -148,7 +171,18 @@ function EditorInner() {
       if (!entry) setEntry(id)
       markDirty()
     },
-    [nodes, screenToFlowPosition, setNodes, entry, markDirty],
+    [nodes, setNodes, entry, markDirty],
+  )
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault()
+      const raw = e.dataTransfer.getData(AGENT_DRAG_MIME)
+      if (!raw) return
+      const agent = JSON.parse(raw) as { ref: string; version: string }
+      addAgent(agent, screenToFlowPosition({ x: e.clientX, y: e.clientY }))
+    },
+    [addAgent, screenToFlowPosition],
   )
 
   function updateNodeData(id: string, patch: Partial<AgentNodeT['data']>) {
@@ -161,9 +195,33 @@ function EditorInner() {
     markDirty()
   }
 
+  function deleteNode(id: string) {
+    setNodes((nds) => nds.filter((n) => n.id !== id))
+    // A dangling edge would serialize into an orchestration referencing a
+    // node that no longer exists, which only surfaces as a save-time
+    // validation error well after the delete.
+    setEdges((eds) => annotateParallelEdges(eds.filter((e) => e.source !== id && e.target !== id)))
+    if (selectedNodeId === id) setSelectedNodeId(null)
+    markDirty()
+  }
+
+  function deleteEdge(id: string) {
+    setEdges((eds) => annotateParallelEdges(eds.filter((e) => e.id !== id)))
+    if (selectedEdgeId === id) setSelectedEdgeId(null)
+    markDirty()
+  }
+
   const nodeNames = useMemo(() => nodes.filter((n) => n.type === 'agentNode').map((n) => n.id), [nodes])
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null
+
+  // entry is Bundle-level state, but it's a fact about one node, so the
+  // canvas gets told which node it is rather than leaving that answer only
+  // in the properties panel's dropdown.
+  const renderNodes = useMemo(
+    () => nodes.map((n) => (n.type === 'agentNode' ? { ...n, data: { ...n.data, isEntry: n.id === entry } } : n)),
+    [nodes, entry],
+  )
 
   function buildDefinition(): BundleDefinition {
     const base = {
@@ -251,6 +309,14 @@ function EditorInner() {
     )
   }
 
+  // beforeunload only covers closing the tab — clicking 返回 is an in-app
+  // navigation the browser never sees, and it silently threw the whole graph
+  // away.
+  function leave() {
+    if (dirty && !window.confirm('有未保存的更改，确定离开吗？')) return
+    navigate('/apps/bundles')
+  }
+
   function focusIssue(target: string) {
     const node = nodes.find((n) => n.id === target || target.includes(n.id))
     if (node) {
@@ -274,11 +340,20 @@ function EditorInner() {
   return (
     <div className="flex h-[calc(100vh-160px)] flex-col gap-space-3">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-space-4">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/apps/bundles')}>
+        <div className="flex min-w-0 items-center gap-space-4">
+          <Button variant="ghost" size="sm" onClick={leave}>
             <ArrowLeft className="size-4" aria-hidden />
             返回
           </Button>
+          {/* Which app is open, and whether this is a new one or a new
+              version of an existing one — the old header showed neither, so
+              an edit was indistinguishable from a create. */}
+          <span className="flex min-w-0 items-baseline gap-space-2">
+            <span className="text-label-md truncate text-ink-900">
+              {ref ? `编辑 ${ref}` : '新建应用'}
+            </span>
+            {ref && <span className="text-caption tabular text-ink-500">将保存为 v{meta.version}</span>}
+          </span>
           <TabRail className="border-b-0">
             <TabRailItem active={tab === 'canvas'} onClick={switchToCanvas}>
               画布
@@ -304,7 +379,7 @@ function EditorInner() {
       )}
 
       <div className="grid flex-1 grid-cols-[240px_1fr_300px] overflow-hidden rounded-lg border border-border">
-        <AgentPanel />
+        <AgentPanel onAdd={(agent) => addAgent(agent)} />
 
         {tab === 'canvas' ? (
           <div
@@ -333,15 +408,15 @@ function EditorInner() {
               </div>
             )}
             <ReactFlow
-              nodes={nodes}
+              nodes={renderNodes}
               edges={edges}
               onNodesChange={(changes) => {
                 onNodesChange(changes)
-                markDirty()
+                if (isRealEdit(changes)) markDirty()
               }}
               onEdgesChange={(changes) => {
                 onEdgesChange(changes)
-                markDirty()
+                if (isRealEdit(changes)) markDirty()
               }}
               onConnect={onConnect}
               nodeTypes={nodeTypes}
@@ -355,7 +430,22 @@ function EditorInner() {
             >
               <Background gap={22} color="var(--color-border-strong)" />
               <Controls />
+              {/* Past a handful of nodes the canvas scrolls off-screen and
+                  panning becomes guesswork without an overview. */}
+              <MiniMap pannable zoomable className="!bg-surface" maskColor="var(--color-surface-muted)" />
             </ReactFlow>
+
+            {/* The canvas has real keyboard affordances (delete, multi-select,
+                self-loop) that were previously undiscoverable. */}
+            <div className="text-caption pointer-events-none absolute bottom-space-3 left-space-3 z-10 flex flex-wrap items-center gap-space-3 rounded-sm bg-surface/90 px-space-3 py-space-2 text-ink-500 shadow-sm">
+              <span>
+                <Kbd>Delete</Kbd> 删除选中
+              </span>
+              <span>
+                <Kbd>Shift</Kbd> + 拖拽 框选
+              </span>
+              <span>拖动节点右侧圆点连线；连回自己 = 自循环重试</span>
+            </div>
           </div>
         ) : (
           <SourceView value={sourceText} onChange={setSourceText} onValidChange={setSourceValid} />
@@ -381,11 +471,21 @@ function EditorInner() {
             setEntry(id)
             markDirty()
           }}
+          onDeleteNode={deleteNode}
+          onDeleteEdge={deleteEdge}
           issues={issues}
           onFocusIssue={focusIssue}
         />
       </div>
     </div>
+  )
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="text-caption rounded-xs border border-border-strong bg-surface-page px-1 py-0.5 font-mono text-ink-700">
+      {children}
+    </kbd>
   )
 }
 

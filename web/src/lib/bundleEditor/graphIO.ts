@@ -13,6 +13,9 @@ export interface AgentNodeData {
   version?: string
   gate?: { timeout_seconds?: number; on_timeout: 'auto_approve' | 'auto_reject' | 'abort' }
   invalid?: boolean
+  /** Computed from the Bundle's entry, not stored on the node — the badge
+   * that tells you which node a run starts from without opening a form. */
+  isEntry?: boolean
   [key: string]: unknown
 }
 

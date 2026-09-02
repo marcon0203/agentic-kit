@@ -3,10 +3,18 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { EmptyRail } from '@/components/common/Rail'
-import { Ref, Section } from '@/components/common/Page'
-import { cn } from '@/lib/utils'
+import { Section } from '@/components/common/Page'
+import { BundleCard } from '@/components/bundle/BundleCard'
 import { apiClient, unwrap, assertOk, ApiError } from '@/lib/api/client'
 import { useHasModelProvider } from '@/lib/models/useHasModelProvider'
 import type { components } from '@/lib/api/schema'
@@ -17,6 +25,10 @@ export function BundleListPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Deleting is not undoable and a card's actions sit close together, so it
+  // asks first — the old flat list deleted on a single click.
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const { hasProvider, isLoading: providerLoading } = useHasModelProvider()
   const runBlocked = !providerLoading && !hasProvider
 
@@ -25,13 +37,18 @@ export function BundleListPage() {
     queryFn: async () => unwrap<{ items: Bundle[] }>(await apiClient.GET('/bundles', {})),
   })
 
-  async function remove(ref: string) {
+  async function confirmDelete() {
+    if (!pendingDelete) return
+    setDeleting(true)
     setDeleteError(null)
     try {
-      assertOk(await apiClient.DELETE('/bundles/{ref}', { params: { path: { ref } } }))
+      assertOk(await apiClient.DELETE('/bundles/{ref}', { params: { path: { ref: pendingDelete } } }))
       queryClient.invalidateQueries({ queryKey: ['bundles'] })
+      setPendingDelete(null)
     } catch (err) {
       setDeleteError(err instanceof ApiError ? err.message : '删除没能完成，请再试一次')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -48,9 +65,7 @@ export function BundleListPage() {
         }
       >
         {query.isLoading && <ListSkeleton />}
-        {query.isError && (
-          <ErrorPanel message="应用列表没能加载出来" onRetry={() => query.refetch()} />
-        )}
+        {query.isError && <ErrorPanel message="应用列表没能加载出来" onRetry={() => query.refetch()} />}
         {deleteError && (
           <p role="alert" className="text-body-sm text-rust">
             {deleteError}
@@ -70,46 +85,39 @@ export function BundleListPage() {
         )}
 
         {items.length > 0 && (
-          <ul className="overflow-hidden rounded-lg border border-border bg-surface">
+          <div className="grid grid-cols-1 gap-space-4 md:grid-cols-2 xl:grid-cols-3">
             {items.map((b) => (
-              <li
+              <BundleCard
                 key={b.id}
-                className="flex items-center gap-space-4 border-b border-border px-space-5 py-space-3 last:border-0"
-              >
-                <span
-                  aria-hidden
-                  className={cn(
-                    'size-2 shrink-0 rounded-full',
-                    b.status === 1 ? 'bg-moss' : 'bg-border-strong',
-                  )}
-                />
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="flex items-center gap-space-2">
-                    <Ref>{b.bundle_ref}</Ref>
-                    <span className="text-caption tabular text-ink-500">v{b.version}</span>
-                  </span>
-                  {b.definition.description && (
-                    <span className="text-body-sm truncate text-ink-700">
-                      {b.definition.description}
-                    </span>
-                  )}
-                </span>
-                <Button
-                  size="sm"
-                  disabled={runBlocked}
-                  title={runBlocked ? '先去模型广场接入一个 Provider，才能发起运行' : undefined}
-                  onClick={() => navigate(`/runs/new?bundle=${encodeURIComponent(b.bundle_ref)}`)}
-                >
-                  运行
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => remove(b.bundle_ref)}>
-                  删除
-                </Button>
-              </li>
+                bundle={b}
+                runBlocked={runBlocked}
+                onRun={(ref) => navigate(`/runs/new?bundle=${encodeURIComponent(ref)}`)}
+                onEdit={(ref) => navigate(`/apps/bundles/${encodeURIComponent(ref)}/edit`)}
+                onDelete={setPendingDelete}
+              />
             ))}
-          </ul>
+          </div>
         )}
       </Section>
+
+      <Dialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除应用</DialogTitle>
+            <DialogDescription>
+              确定删除 <span className="text-ref text-ink-900">{pendingDelete}</span> 吗？它的所有版本都会被删除，已经跑过的运行记录会保留。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingDelete(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" disabled={deleting} onClick={confirmDelete}>
+              {deleting ? '删除中…' : '删除'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
