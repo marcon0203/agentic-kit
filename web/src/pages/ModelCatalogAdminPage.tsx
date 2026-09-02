@@ -170,7 +170,7 @@ export function ModelCatalogAdminPage() {
                     >
                       {p.status === 1 ? '已启用' : '已停用'}
                     </span>
-                    <span className={cn('text-caption w-16 shrink-0 text-right', p.has_credential ? 'text-moss' : 'text-ink-500')}>
+                    <span className={cn('text-caption w-16 shrink-0 text-right', p.has_credential ? 'text-moss' : 'text-rust')}>
                       {p.has_credential ? '已配置凭证' : '未配置凭证'}
                     </span>
                     <Can permission="model_catalog.provider.create">
@@ -613,7 +613,7 @@ function CreateProviderDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             取消
           </Button>
-          <Button disabled={pending || !template || !key || !displayName || !baseUrl} onClick={submit}>
+          <Button disabled={pending || !template || !key || !displayName || !baseUrl || !apiKey} onClick={submit}>
             {pending ? '保存中…' : '保存'}
           </Button>
         </DialogFooter>

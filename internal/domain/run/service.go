@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
 )
@@ -116,7 +117,7 @@ func (s *Service) StartAgentTest(ctx context.Context, userID int64, cmd AgentTes
 	if err != nil {
 		return Run{}, domain.Internal(err)
 	}
-	if depErr := dependencyError(status); depErr != nil {
+	if depErr := s.agentTestDependencyError(ctx, userID, resolved.Definition, status); depErr != nil {
 		return Run{}, depErr
 	}
 
@@ -212,6 +213,26 @@ func dependencyError(status DependencyStatus) error {
 	default:
 		return nil
 	}
+}
+
+// agentTestDependencyError 是 dependencyError 在试运行路径上的版本：缺凭据
+// 时把具体是哪个提供商说出来。试运行的对象是调用者自己刚写的 Agent，不适
+// 用 spec-11 那条"不能让订阅者知道 Bundle 用了什么"的脱敏约束，而含糊的
+// "Provider 未配置"只会让人去猜是哪一个、猜是不是没保存成功。
+func (s *Service) agentTestDependencyError(ctx context.Context, userID int64, def map[string]any, status DependencyStatus) error {
+	if status != DependencyProviderMissing {
+		return dependencyError(status)
+	}
+	detail, ok := s.deps.(ProviderDetailChecker)
+	if !ok {
+		return dependencyError(status)
+	}
+	missing, err := detail.MissingProviders(ctx, userID, def)
+	if err != nil || len(missing) == 0 {
+		return dependencyError(status)
+	}
+	return domain.Unprocessable(domain.CodeProviderNotConfigured,
+		"模型提供商 "+strings.Join(missing, "、")+" 还没有配置 API Key，去 系统配置 → 模型提供商 里补上")
 }
 
 // List returns the caller's own runs, newest first.

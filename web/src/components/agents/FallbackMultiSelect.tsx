@@ -1,9 +1,17 @@
 import * as React from 'react'
-import * as SelectPrimitive from '@radix-ui/react-select'
 import { ChevronDownIcon } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { Checkbox } from '@/components/ui/checkbox'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { ProviderIcon } from '@/components/models/ProviderIcon'
 import type { components } from '@/lib/api/schema'
 
 type ModelCatalogEntry = components['schemas']['ModelCatalogEntry']
@@ -12,14 +20,43 @@ interface FallbackMultiSelectProps {
   catalog: ModelCatalogEntry[]
   value: string
   onChange: (v: string) => void
+  /** 主模型的 provider/model；它自己不该出现在降级链里 */
+  exclude?: string
 }
 
-export function FallbackMultiSelect({ catalog, value, onChange }: FallbackMultiSelectProps) {
-  const [open, setOpen] = React.useState(false)
+/**
+ * Fallback 模型多选。
+ *
+ * 之前是拿 Radix Select 拼的，点不动——Select.Item 没有 onSelect 这个 prop
+ * （那是 DropdownMenu 的），传进去只会被当成未知 DOM 属性丢掉，所以点击什
+ * 么都不会发生；而 Root 的 onValueChange 又被写成了空函数。这里换成
+ * DropdownMenu.CheckboxItem，它本来就是"可多选、选完不关"的原语。
+ *
+ * 列表按供应商分组：降级链的每一项都是 `provider/模型名`，不按供应商分组
+ * 的话，几十个模型平铺出来根本认不出哪个是哪家的。
+ */
+export function FallbackMultiSelect({ catalog, value, onChange, exclude }: FallbackMultiSelectProps) {
   const selected = value
     .split(',')
     .map((v) => v.trim())
     .filter(Boolean)
+
+  const options = React.useMemo(
+    () => catalog.filter((e) => `${e.provider}/${e.model}` !== exclude),
+    [catalog, exclude],
+  )
+
+  // 分组保持 catalog 本身的顺序（后端按供应商创建时间排），不重新排序——
+  // 广场上看到的顺序和这里一致，找起来才有肌肉记忆。
+  const groups = React.useMemo(() => {
+    const byProvider = new Map<string, { label: string; items: ModelCatalogEntry[] }>()
+    for (const e of options) {
+      const bucket = byProvider.get(e.provider) ?? { label: e.provider_display_name, items: [] }
+      bucket.items.push(e)
+      byProvider.set(e.provider, bucket)
+    }
+    return Array.from(byProvider.entries())
+  }, [options])
 
   function toggle(ref: string) {
     const next = selected.includes(ref) ? selected.filter((r) => r !== ref) : [...selected, ref]
@@ -30,63 +67,57 @@ export function FallbackMultiSelect({ catalog, value, onChange }: FallbackMultiS
     selected.length === 0
       ? '选择 Fallback 模型'
       : selected.length === 1
-        ? catalog.find((e) => `${e.provider}/${e.model}` === selected[0])?.display_name ?? selected[0]
+        ? (catalog.find((e) => `${e.provider}/${e.model}` === selected[0])?.display_name ?? selected[0])
         : `已选 ${selected.length} 个模型`
 
-  if (catalog.length === 0) {
-    return <p className="text-body-sm text-ink-500">模型广场里还没有登记任何模型。</p>
+  if (options.length === 0) {
+    return <p className="text-body-sm text-ink-500">没有可选的模型——先在 系统配置 → 模型提供商 里添加。</p>
   }
 
   return (
-    <SelectPrimitive.Root value="" onValueChange={() => {}} open={open} onOpenChange={setOpen}>
-      <SelectPrimitive.Trigger
-        aria-label="选择 Fallback 模型"
-        className={cn(
-          "border-input data-[placeholder]:text-muted-foreground [&_svg:not([class*='text-'])]:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 aria-invalid:border-destructive flex w-full items-center justify-between gap-2 rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 h-9",
-        )}
-      >
-        <span className="line-clamp-1">{displayText}</span>
-        <SelectPrimitive.Icon asChild>
-          <ChevronDownIcon className="size-4 shrink-0 opacity-50" />
-        </SelectPrimitive.Icon>
-      </SelectPrimitive.Trigger>
-
-      <SelectPrimitive.Portal>
-        <SelectPrimitive.Content
-          position="popper"
-          className={cn(
-            'bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 relative z-50 max-h-[min(24rem,var(--radix-select-content-available-height))] min-w-[8rem] origin-[--radix-select-content-transform-origin] overflow-hidden rounded-md border shadow-md',
-            'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
-          )}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          aria-label="选择 Fallback 模型"
+          className={cn('h-9 w-full justify-between font-normal', selected.length === 0 && 'text-ink-500')}
         >
-          <SelectPrimitive.Viewport className="h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] p-1">
-            {catalog.map((entry) => {
+          <span className="line-clamp-1">{displayText}</span>
+          <ChevronDownIcon className="size-4 shrink-0 opacity-50" aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        align="start"
+        className="max-h-[min(24rem,var(--radix-dropdown-menu-content-available-height))] w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto"
+      >
+        {groups.map(([provider, group], i) => (
+          <React.Fragment key={provider}>
+            {i > 0 && <DropdownMenuSeparator />}
+            <DropdownMenuLabel className="flex items-center gap-space-2">
+              <ProviderIcon name={group.label} className="size-4" />
+              {group.label}
+            </DropdownMenuLabel>
+            {group.items.map((entry) => {
               const ref = `${entry.provider}/${entry.model}`
-              const checked = selected.includes(ref)
               return (
-                <SelectPrimitive.Item
+                <DropdownMenuCheckboxItem
                   key={ref}
-                  value={ref}
-                  onSelect={(e) => {
-                    e.preventDefault()
-                    toggle(ref)
-                  }}
-                  className={cn(
-                    'relative flex w-full cursor-default items-center gap-3 rounded-sm py-2 pr-8 pl-2 text-sm outline-hidden select-none',
-                    'focus:bg-accent focus:text-accent-foreground',
-                  )}
+                  checked={selected.includes(ref)}
+                  // 不 preventDefault 的话选一个就关一次，多选变成"开关开关"。
+                  onSelect={(e) => e.preventDefault()}
+                  onCheckedChange={() => toggle(ref)}
                 >
-                  <Checkbox checked={checked} tabIndex={-1} aria-hidden="true" />
                   <span className="flex flex-col">
                     <span className="text-body-sm">{entry.display_name}</span>
                     <span className="text-caption text-ink-500">{ref}</span>
                   </span>
-                </SelectPrimitive.Item>
+                </DropdownMenuCheckboxItem>
               )
             })}
-          </SelectPrimitive.Viewport>
-        </SelectPrimitive.Content>
-      </SelectPrimitive.Portal>
-    </SelectPrimitive.Root>
+          </React.Fragment>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

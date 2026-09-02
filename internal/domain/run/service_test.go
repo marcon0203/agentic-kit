@@ -3,6 +3,7 @@ package run_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,10 +112,17 @@ func (f *fakeResolver) LoadForRun(_ context.Context, _ int64) (run.ResolvedBundl
 type fakeDeps struct {
 	status run.DependencyStatus
 	err    error
+	// missing 让这个 fake 同时实现 run.ProviderDetailChecker，用来盯住
+	// "试运行的报错要说清是哪个提供商没配"。
+	missing []string
 }
 
 func (f *fakeDeps) Check(context.Context, int64, map[string]any) (run.DependencyStatus, error) {
 	return f.status, f.err
+}
+
+func (f *fakeDeps) MissingProviders(context.Context, int64, map[string]any) ([]string, error) {
+	return f.missing, nil
 }
 
 type fakeOrchestrator struct {
@@ -819,5 +827,49 @@ func TestList_EmptyPageIsAnEmptySliceNotNil(t *testing.T) {
 	}
 	if page.Items == nil {
 		t.Fatal("items must serialise as [] rather than null")
+	}
+}
+
+// 试运行的对象是调用者自己刚写的 Agent，不适用 spec-11 那条"不能让订阅者
+// 知道 Bundle 用了什么"的脱敏约束。一句含糊的"Provider 未配置"只会让人去
+// 猜是哪一个、猜是不是没保存成功——最常见的真实原因是建提供商时没填 API
+// Key。
+func TestStartAgentTest_ProviderMissing_NamesTheProvider(t *testing.T) {
+	h := newHarness()
+	h.svc = h.svc.WithAgentTestRuns(&fakeTestBundles{})
+	h.deps.status = run.DependencyProviderMissing
+	h.deps.missing = []string{"my-deepseek"}
+
+	_, err := h.svc.StartAgentTest(context.Background(), 1, run.AgentTestCommand{
+		Definition: map[string]any{"agent": "a", "model": map[string]any{"provider": "my-deepseek"}},
+	})
+
+	de := mustDomainErr(t, err)
+	if de.Code != domain.CodeProviderNotConfigured {
+		t.Fatalf("错误码不对: %d", de.Code)
+	}
+	if !strings.Contains(de.Message, "my-deepseek") {
+		t.Fatalf("报错里应点名具体的提供商: %s", de.Message)
+	}
+	if !strings.Contains(de.Message, "API Key") {
+		t.Fatalf("报错里应说清要补什么: %s", de.Message)
+	}
+}
+
+// 正式运行（可能是订阅者跑别人的 Bundle）仍然脱敏——那条约束没有被这次改
+// 动放宽。
+func TestStart_ProviderMissing_StaysGeneric(t *testing.T) {
+	h := newHarness()
+	h.deps.status = run.DependencyProviderMissing
+	h.deps.missing = []string{"my-deepseek"}
+
+	_, err := h.svc.Start(context.Background(), 1, run.StartCommand{BundleRef: "b"})
+
+	de := mustDomainErr(t, err)
+	if de.Code != domain.CodeProviderNotConfigured {
+		t.Fatalf("错误码不对: %d", de.Code)
+	}
+	if strings.Contains(de.Message, "my-deepseek") {
+		t.Fatalf("正式运行的报错不该泄漏 Bundle 用了哪个提供商: %s", de.Message)
 	}
 }

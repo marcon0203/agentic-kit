@@ -88,6 +88,16 @@ type DependencyChecker interface {
 	Check(ctx context.Context, ownerID int64, bundleDef map[string]any) (DependencyStatus, error)
 }
 
+// ProviderDetailChecker 是 DependencyChecker 的可选补充：说清楚是**哪些**
+// 模型提供商没配好。
+//
+// Check 的报错刻意脱敏（spec-11：订阅者不该知道一个私有 Bundle 是用什么搭
+// 的），但试运行自己的 Agent 不存在这个顾虑——那是你自己刚写的东西，含糊
+// 的"Provider 未配置"只会让人去猜是哪一个、猜是不是没保存成功。
+type ProviderDetailChecker interface {
+	MissingProviders(ctx context.Context, ownerID int64, bundleDef map[string]any) ([]string, error)
+}
+
 // Orchestrator compiles a Bundle definition into something executable and
 // runs it. Compilation and execution are one port because a compiled graph
 // is an opaque handle: the domain decides *when* to compile, launch and

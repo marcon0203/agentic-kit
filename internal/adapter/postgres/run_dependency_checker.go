@@ -29,7 +29,10 @@ func NewRunDependencyChecker(q store.Querier, catalog *ResourceCatalog, keys *Pr
 	return &RunDependencyChecker{q: q, catalog: catalog, keys: keys}
 }
 
-var _ run.DependencyChecker = (*RunDependencyChecker)(nil)
+var (
+	_ run.DependencyChecker     = (*RunDependencyChecker)(nil)
+	_ run.ProviderDetailChecker = (*RunDependencyChecker)(nil)
+)
 
 func (c *RunDependencyChecker) Check(ctx context.Context, ownerID int64, bundleDef map[string]any) (run.DependencyStatus, error) {
 	apiKeys, err := c.keys.Keys(ctx, ownerID)
@@ -150,4 +153,50 @@ func stringSlice(v any) []string {
 		}
 	}
 	return out
+}
+
+// MissingProviders 实现 run.ProviderDetailChecker：列出这个 Bundle 里没有
+// 可用凭据的模型提供商。
+//
+// "可用"的判据和 Check 完全一致（ProviderKeyStore.Keys：个人凭据或管理员配
+// 的组织级默认），所以不会出现"报错说没配、实际能跑"这种自相矛盾。主模型
+// 的提供商没配、但某个 fallback 配了的话不算缺——那种情况下运行本来就能成
+// 功，Check 也是这么判的。
+func (c *RunDependencyChecker) MissingProviders(ctx context.Context, ownerID int64, bundleDef map[string]any) ([]string, error) {
+	apiKeys, err := c.keys.Keys(ctx, ownerID)
+	if err != nil {
+		return nil, err
+	}
+
+	var missing []string
+	seen := map[string]bool{}
+	agentsRaw, _ := bundleDef["agents"].([]any)
+	for _, a := range agentsRaw {
+		am, ok := a.(map[string]any)
+		if !ok {
+			continue
+		}
+		def, inline := am["definition"].(map[string]any)
+		if !inline {
+			ref, _ := am["ref"].(string)
+			version, _ := am["version"].(string)
+			row, err := ResolveAgentVersion(ctx, c.q, ownerID, ref, version)
+			if err != nil {
+				continue // 缺 Agent 是另一种失败，由 Check 报
+			}
+			if err := json.Unmarshal(row.Definition, &def); err != nil {
+				continue
+			}
+		}
+		if checkProvider(def, apiKeys) == run.DependenciesOK {
+			continue
+		}
+		model, _ := def["model"].(map[string]any)
+		provider, _ := model["provider"].(string)
+		if provider != "" && !seen[provider] {
+			seen[provider] = true
+			missing = append(missing, provider)
+		}
+	}
+	return missing, nil
 }

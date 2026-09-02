@@ -85,7 +85,12 @@ export function BasicInfoStep({ form, set, modelsForProvider, catalog, isEdit }:
         </Field>
 
         <Field label="Fallback 模型" htmlFor="wizard-fallback" helper="主模型不可用时按顺序尝试的备选">
-          <FallbackMultiSelect catalog={catalog} value={form.fallback} onChange={(v) => set('fallback', v)} />
+          <FallbackMultiSelect
+            catalog={catalog}
+            value={form.fallback}
+            onChange={(v) => set('fallback', v)}
+            exclude={form.model ? `${form.provider}/${form.model}` : undefined}
+          />
         </Field>
       </div>
 
