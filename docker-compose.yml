@@ -117,7 +117,7 @@ services:
     build:
       context: ./web
     ports:
-      - "5173:80"
+      - "5174:80"
     depends_on:
       - server
 
