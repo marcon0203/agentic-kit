@@ -23,7 +23,12 @@ function pageWindow(page: number, pageCount: number): (number | '…')[] {
   return out
 }
 
-/** 卡片墙通用的分页行：页码 + 每页条数。 */
+/**
+ * 卡片墙通用的分页行：页码 + 每页条数。
+ *
+ * `onPageSizeChange` 可以不传——每页条数固定的列表（比如审核台的 15 条）不
+ * 需要那个选择器，传了反而多一个改不出意义的控件。
+ */
 export function Pagination({
   page,
   pageCount,
@@ -35,7 +40,7 @@ export function Pagination({
   pageCount: number
   pageSize: number
   onPageChange: (page: number) => void
-  onPageSizeChange: (size: number) => void
+  onPageSizeChange?: (size: number) => void
 }) {
   return (
     <nav aria-label="分页" className="flex items-center justify-end gap-space-2">
@@ -84,18 +89,20 @@ export function Pagination({
         <ChevronRight className="size-4" aria-hidden />
       </Button>
 
-      <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
-        <SelectTrigger className="h-8 w-[110px]" aria-label="每页条数">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {PAGE_SIZES.map((size) => (
-            <SelectItem key={size} value={String(size)}>
-              {size} 条/页
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {onPageSizeChange && (
+        <Select value={String(pageSize)} onValueChange={(v) => onPageSizeChange(Number(v))}>
+          <SelectTrigger className="h-8 w-[110px]" aria-label="每页条数">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {PAGE_SIZES.map((size) => (
+              <SelectItem key={size} value={String(size)}>
+                {size} 条/页
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </nav>
   )
 }

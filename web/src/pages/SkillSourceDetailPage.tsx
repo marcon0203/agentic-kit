@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Check, ExternalLink, Globe, RefreshCw, X } from 'lucide-react'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyRail } from '@/components/common/Rail'
+import { Pagination } from '@/components/common/Pagination'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
@@ -24,6 +25,9 @@ const STATUS_META: Record<ReviewStatus, { label: string; className: string }> = 
 }
 
 type Filter = ReviewStatus | 'all'
+
+/** 一屏审 15 条：再多就得一直滚，批量勾选也失去"这一批"的边界感。 */
+const PAGE_SIZE = 15
 
 function formatSyncedAt(iso: string | null): string {
   if (!iso) return '从未同步'
@@ -48,6 +52,7 @@ export function SkillSourceDetailPage() {
   const [filter, setFilter] = useState<Filter>('pending')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [page, setPage] = useState(1)
 
   const sourcesQuery = useQuery({
     queryKey: ['skill-sources'],
@@ -83,8 +88,23 @@ export function SkillSourceDetailPage() {
     )
   }, [skillsQuery.data, search])
 
+  // 筛选条件一变，当前页码多半越界，回第一页。
+  useEffect(() => {
+    setPage(1)
+  }, [filter, search, sourceId])
+
+  const pageCount = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
+  // 审核完一批之后列表会变短，页码可能落在末页之后——夹一下再切片，免得
+  // 显示成空页。
+  const safePage = Math.min(page, pageCount)
+  const visible = useMemo(
+    () => items.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [items, safePage],
+  )
+
   const counts = skillsQuery.data?.counts
-  const allSelected = items.length > 0 && items.every((s) => selected.has(s.slug))
+  // 全选只覆盖当前页：跨页的"全选"点下去会连没看过的条目一起批掉。
+  const allSelected = visible.length > 0 && visible.every((s) => selected.has(s.slug))
 
   const reviewMutation = useMutation({
     mutationFn: async ({ status, targets }: { status: ReviewStatus; targets: MarketSkill[] }) =>
@@ -124,7 +144,7 @@ export function SkillSourceDetailPage() {
     })
   }
 
-  const selectedItems = items.filter((s) => selected.has(s.slug))
+  const selectedItems = visible.filter((s) => selected.has(s.slug))
 
   return (
     <div className="flex flex-col gap-space-6">
@@ -206,10 +226,10 @@ export function SkillSourceDetailPage() {
             <label className="flex cursor-pointer items-center gap-space-2">
               <Checkbox
                 checked={allSelected}
-                onCheckedChange={() => setSelected(allSelected ? new Set() : new Set(items.map((s) => s.slug)))}
+                onCheckedChange={() => setSelected(allSelected ? new Set() : new Set(visible.map((s) => s.slug)))}
               />
               <span className="text-body-sm text-ink-700">
-                {selected.size > 0 ? `已选 ${selected.size} 个` : `全选（${items.length}）`}
+                {selected.size > 0 ? `已选 ${selected.size} 个` : `全选本页（${visible.length}）`}
               </span>
             </label>
             <Input
@@ -240,7 +260,7 @@ export function SkillSourceDetailPage() {
           </div>
 
           <ul className="overflow-hidden rounded-lg border border-border bg-surface">
-            {items.map((s) => {
+            {visible.map((s) => {
               const meta = STATUS_META[s.review_status as ReviewStatus] ?? STATUS_META.pending
               return (
                 <li
@@ -305,6 +325,22 @@ export function SkillSourceDetailPage() {
               )
             })}
           </ul>
+
+          <div className="flex flex-wrap items-center justify-between gap-space-3">
+            <span className="text-caption text-ink-500">
+              共 {items.length} 个，第 {safePage} / {pageCount} 页
+            </span>
+            <Pagination
+              page={safePage}
+              pageCount={pageCount}
+              pageSize={PAGE_SIZE}
+              onPageChange={(p) => {
+                setPage(p)
+                // 勾选是"这一页这一批"的意思，翻页就作废，免得批量误伤别页。
+                setSelected(new Set())
+              }}
+            />
+          </div>
         </>
       )}
     </div>

@@ -35,7 +35,14 @@ export function SectionSidebar({
   return (
     <nav
       aria-label="模块导航"
-      className="flex shrink-0 flex-row gap-space-5 overflow-x-auto sm:w-48 sm:flex-col"
+      className={cn(
+        'flex shrink-0 flex-row gap-space-5 overflow-x-auto sm:w-48 sm:flex-col',
+        // 二级菜单跟着长列表一起滚走的话，翻到页尾就没法换模块了。粘在顶
+        // 栏（h-14）下面：self-start 让它按内容高度收缩，否则作为被拉伸的
+        // flex item 它已经占满容器，sticky 没有可移动的空间；自身太高时
+        // 内部滚动，不去挤主内容区。
+        'sm:sticky sm:top-20 sm:max-h-[calc(100vh-7rem)] sm:self-start sm:overflow-y-auto',
+      )}
     >
       {resolvedGroups.map((group, i) => (
         <div key={group.label ?? i} className="flex shrink-0 flex-row gap-space-1 sm:flex-col">
