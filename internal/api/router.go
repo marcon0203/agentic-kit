@@ -171,6 +171,8 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Post("/skill-sources", cfg.SkillSources.Create)
 				r.Post("/skill-sources/{id}/sync", cfg.SkillSources.Sync)
 				r.Delete("/skill-sources/{id}", cfg.SkillSources.Delete)
+				r.Get("/skill-sources/skills", cfg.SkillSources.ListForReview)
+				r.Post("/skill-sources/skills/review", cfg.SkillSources.ReviewSkills)
 				r.Get("/skill-market", cfg.SkillSources.ListMarket)
 				r.Get("/skill-market/{source_id}/{slug}", cfg.SkillSources.MarketDetail)
 				r.Post("/skill-market/{source_id}/{slug}/install", cfg.SkillSources.MarketInstall)

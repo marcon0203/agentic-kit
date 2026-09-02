@@ -2754,6 +2754,93 @@ paths:
   # ────────────────────────── Skill 源 ──────────────────────────
   # 系统配置 → Skill 源：管理员登记公开 Skill 市场（如 https://clawhub.ai/），
   # 同步后的公开 Skill 出现在 Skill 管理 → 市场视图（GET /skill-market）。
+  /skill-sources/skills:
+    get:
+      tags: [SkillSources]
+      summary: 审核台：同步进来的全部 Skill 条目，管理员
+      description: >-
+        和 /skill-market 的区别：这里不过滤审核状态、也不过滤源是否停用，
+        管理员要看得到"同步进来了什么"才能审。counts 是三种状态的总数，
+        供页面顶部的筛选标签直接用。
+      operationId: listSkillsForReview
+      parameters:
+        - name: review_status
+          in: query
+          schema: { $ref: '#/components/schemas/SkillReviewStatus' }
+        - name: source_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, counts]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/MarketSkill' }
+                          counts:
+                            type: object
+                            required: [pending, approved, rejected]
+                            properties:
+                              pending: { type: integer, format: int64 }
+                              approved: { type: integer, format: int64 }
+                              rejected: { type: integer, format: int64 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /skill-sources/skills/review:
+    post:
+      tags: [SkillSources]
+      summary: 批量审核同步条目，管理员
+      description: >-
+        整批用同一个结论——"通过这一批"和"驳回这一批"是两个动作。批量是主
+        路径而非附加优化：一个公开源同步下来动辄成百上千条，逐条点审不完。
+      operationId: reviewMarketSkills
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items, status]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [source_id, slug]
+                    properties:
+                      source_id: { type: integer, format: int64 }
+                      slug: { type: string }
+                status: { $ref: '#/components/schemas/SkillReviewStatus' }
+                note: { type: string, description: 驳回理由等，会展示在审核台 }
+      responses:
+        '200':
+          description: 已审核
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [reviewed]
+                        properties:
+                          reviewed: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /skill-sources:
     get:
       tags: [SkillSources]
@@ -3724,6 +3811,19 @@ components:
         updated_at:
           type: [string, 'null']
           format: date-time
+        review_status:
+          $ref: '#/components/schemas/SkillReviewStatus'
+        review_note: { type: string }
+        reviewed_at: { type: string, format: date-time }
+        synced_at: { type: string, format: date-time }
+
+    SkillReviewStatus:
+      type: string
+      description: >-
+        同步条目的本地审核结论。同步进来默认 pending，只有 approved 才会出现在
+        Skill 管理的市场视图里、也才允许安装——公开源里混着大量低质量条目，
+        默认放行等于没有门槛。审核结论不会被后续同步重置。
+      enum: [pending, approved, rejected]
 
     MarketSkillOwner:
       type: object

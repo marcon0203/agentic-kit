@@ -35,6 +35,10 @@ RETURNING *;
 -- name: UpsertMarketSkill :one
 -- 同步落库：同一 (source, slug) 覆盖刷新，上次同步后被上游下架的条目由
 -- Sync 清理（见 DeleteStaleMarketSkills）。
+--
+-- review_status/review_note/reviewed_* 刻意不在 DO UPDATE 里：审核结论是
+-- 本地的判断，不是上游字段。每次同步都重置的话，管理员批准过的条目会在下
+-- 次同步后集体打回待审，等于审核白做。
 INSERT INTO market_skills (source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (source_id, slug) DO UPDATE SET
@@ -56,11 +60,35 @@ DELETE FROM market_skills
 WHERE source_id = $1 AND slug <> ALL($2::text[]);
 
 -- name: ListMarketSkills :many
--- Skill 管理 → 市场视图：所有启用源的缓存条目，附源信息供卡片和详情回链。
+-- Skill 管理 → 市场视图：所有启用源里**审核通过**的缓存条目，附源信息供
+-- 卡片和详情回链。未过审的条目对普通用户根本不存在（审核台走
+-- ListMarketSkillsForReview）。
 SELECT m.*, s.name AS source_name, s.base_url AS source_base_url
 FROM market_skills m
 JOIN skill_sources s ON s.id = m.source_id AND s.status = 1
+WHERE m.review_status = 'approved'
 ORDER BY m.updated_at DESC NULLS LAST;
+
+-- name: ListMarketSkillsForReview :many
+-- 审核台（系统配置 → Skill 源）：不筛源状态、不筛审核状态地列出全部同步
+-- 条目，让管理员看得到"同步进来了什么"。sqlc.narg 为空时该条件不生效。
+SELECT m.*, s.name AS source_name, s.base_url AS source_base_url
+FROM market_skills m
+JOIN skill_sources s ON s.id = m.source_id
+WHERE (sqlc.narg('review_status')::text IS NULL OR m.review_status = sqlc.narg('review_status')::text)
+  AND (sqlc.narg('source_id')::bigint IS NULL OR m.source_id = sqlc.narg('source_id')::bigint)
+ORDER BY m.review_status = 'pending' DESC, m.synced_at DESC;
+
+-- name: CountMarketSkillsByReview :many
+-- 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。
+SELECT review_status, COUNT(*)::bigint AS count
+FROM market_skills
+GROUP BY review_status;
+
+-- name: SetMarketSkillReview :execrows
+UPDATE market_skills
+SET review_status = $3, review_note = $4, reviewed_at = now(), reviewed_by = $5
+WHERE source_id = $1 AND slug = $2;
 
 -- name: GetMarketSkill :one
 SELECT m.*, s.name AS source_name, s.base_url AS source_base_url

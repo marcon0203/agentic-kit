@@ -11,6 +11,38 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countMarketSkillsByReview = `-- name: CountMarketSkillsByReview :many
+SELECT review_status, COUNT(*)::bigint AS count
+FROM market_skills
+GROUP BY review_status
+`
+
+type CountMarketSkillsByReviewRow struct {
+	ReviewStatus string `json:"review_status"`
+	Count        int64  `json:"count"`
+}
+
+// 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。
+func (q *Queries) CountMarketSkillsByReview(ctx context.Context) ([]CountMarketSkillsByReviewRow, error) {
+	rows, err := q.db.Query(ctx, countMarketSkillsByReview)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountMarketSkillsByReviewRow{}
+	for rows.Next() {
+		var i CountMarketSkillsByReviewRow
+		if err := rows.Scan(&i.ReviewStatus, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createSkillSource = `-- name: CreateSkillSource :one
 INSERT INTO skill_sources (name, base_url)
 VALUES ($1, $2)
@@ -68,7 +100,7 @@ func (q *Queries) DeleteStaleMarketSkills(ctx context.Context, arg DeleteStaleMa
 }
 
 const getMarketSkill = `-- name: GetMarketSkill :one
-SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, s.name AS source_name, s.base_url AS source_base_url
+SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, s.name AS source_name, s.base_url AS source_base_url
 FROM market_skills m
 JOIN skill_sources s ON s.id = m.source_id
 WHERE m.source_id = $1 AND m.slug = $2
@@ -94,6 +126,10 @@ type GetMarketSkillRow struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	Raw           []byte             `json:"raw"`
 	SyncedAt      pgtype.Timestamptz `json:"synced_at"`
+	ReviewStatus  string             `json:"review_status"`
+	ReviewNote    pgtype.Text        `json:"review_note"`
+	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
 	SourceName    string             `json:"source_name"`
 	SourceBaseUrl string             `json:"source_base_url"`
 }
@@ -116,6 +152,10 @@ func (q *Queries) GetMarketSkill(ctx context.Context, arg GetMarketSkillParams) 
 		&i.UpdatedAt,
 		&i.Raw,
 		&i.SyncedAt,
+		&i.ReviewStatus,
+		&i.ReviewNote,
+		&i.ReviewedAt,
+		&i.ReviewedBy,
 		&i.SourceName,
 		&i.SourceBaseUrl,
 	)
@@ -161,9 +201,10 @@ func (q *Queries) GetSkillSourceByURL(ctx context.Context, baseUrl string) (Skil
 }
 
 const listMarketSkills = `-- name: ListMarketSkills :many
-SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, s.name AS source_name, s.base_url AS source_base_url
+SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, s.name AS source_name, s.base_url AS source_base_url
 FROM market_skills m
 JOIN skill_sources s ON s.id = m.source_id AND s.status = 1
+WHERE m.review_status = 'approved'
 ORDER BY m.updated_at DESC NULLS LAST
 `
 
@@ -182,11 +223,17 @@ type ListMarketSkillsRow struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	Raw           []byte             `json:"raw"`
 	SyncedAt      pgtype.Timestamptz `json:"synced_at"`
+	ReviewStatus  string             `json:"review_status"`
+	ReviewNote    pgtype.Text        `json:"review_note"`
+	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
 	SourceName    string             `json:"source_name"`
 	SourceBaseUrl string             `json:"source_base_url"`
 }
 
-// Skill 管理 → 市场视图：所有启用源的缓存条目，附源信息供卡片和详情回链。
+// Skill 管理 → 市场视图：所有启用源里**审核通过**的缓存条目，附源信息供
+// 卡片和详情回链。未过审的条目对普通用户根本不存在（审核台走
+// ListMarketSkillsForReview）。
 func (q *Queries) ListMarketSkills(ctx context.Context) ([]ListMarketSkillsRow, error) {
 	rows, err := q.db.Query(ctx, listMarketSkills)
 	if err != nil {
@@ -211,6 +258,90 @@ func (q *Queries) ListMarketSkills(ctx context.Context) ([]ListMarketSkillsRow, 
 			&i.UpdatedAt,
 			&i.Raw,
 			&i.SyncedAt,
+			&i.ReviewStatus,
+			&i.ReviewNote,
+			&i.ReviewedAt,
+			&i.ReviewedBy,
+			&i.SourceName,
+			&i.SourceBaseUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMarketSkillsForReview = `-- name: ListMarketSkillsForReview :many
+SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, s.name AS source_name, s.base_url AS source_base_url
+FROM market_skills m
+JOIN skill_sources s ON s.id = m.source_id
+WHERE ($1::text IS NULL OR m.review_status = $1::text)
+  AND ($2::bigint IS NULL OR m.source_id = $2::bigint)
+ORDER BY m.review_status = 'pending' DESC, m.synced_at DESC
+`
+
+type ListMarketSkillsForReviewParams struct {
+	ReviewStatus pgtype.Text `json:"review_status"`
+	SourceID     pgtype.Int8 `json:"source_id"`
+}
+
+type ListMarketSkillsForReviewRow struct {
+	ID            int64              `json:"id"`
+	SourceID      int64              `json:"source_id"`
+	Slug          string             `json:"slug"`
+	Name          string             `json:"name"`
+	Summary       pgtype.Text        `json:"summary"`
+	Version       pgtype.Text        `json:"version"`
+	License       pgtype.Text        `json:"license"`
+	Changelog     pgtype.Text        `json:"changelog"`
+	Topics        []string           `json:"topics"`
+	Stars         int64              `json:"stars"`
+	Downloads     int64              `json:"downloads"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	Raw           []byte             `json:"raw"`
+	SyncedAt      pgtype.Timestamptz `json:"synced_at"`
+	ReviewStatus  string             `json:"review_status"`
+	ReviewNote    pgtype.Text        `json:"review_note"`
+	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
+	SourceName    string             `json:"source_name"`
+	SourceBaseUrl string             `json:"source_base_url"`
+}
+
+// 审核台（系统配置 → Skill 源）：不筛源状态、不筛审核状态地列出全部同步
+// 条目，让管理员看得到"同步进来了什么"。sqlc.narg 为空时该条件不生效。
+func (q *Queries) ListMarketSkillsForReview(ctx context.Context, arg ListMarketSkillsForReviewParams) ([]ListMarketSkillsForReviewRow, error) {
+	rows, err := q.db.Query(ctx, listMarketSkillsForReview, arg.ReviewStatus, arg.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMarketSkillsForReviewRow{}
+	for rows.Next() {
+		var i ListMarketSkillsForReviewRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.Slug,
+			&i.Name,
+			&i.Summary,
+			&i.Version,
+			&i.License,
+			&i.Changelog,
+			&i.Topics,
+			&i.Stars,
+			&i.Downloads,
+			&i.UpdatedAt,
+			&i.Raw,
+			&i.SyncedAt,
+			&i.ReviewStatus,
+			&i.ReviewNote,
+			&i.ReviewedAt,
+			&i.ReviewedBy,
 			&i.SourceName,
 			&i.SourceBaseUrl,
 		); err != nil {
@@ -322,6 +453,34 @@ func (q *Queries) MarkSkillSourceSynced(ctx context.Context, id int64) (SkillSou
 	return i, err
 }
 
+const setMarketSkillReview = `-- name: SetMarketSkillReview :execrows
+UPDATE market_skills
+SET review_status = $3, review_note = $4, reviewed_at = now(), reviewed_by = $5
+WHERE source_id = $1 AND slug = $2
+`
+
+type SetMarketSkillReviewParams struct {
+	SourceID     int64       `json:"source_id"`
+	Slug         string      `json:"slug"`
+	ReviewStatus string      `json:"review_status"`
+	ReviewNote   pgtype.Text `json:"review_note"`
+	ReviewedBy   pgtype.Int8 `json:"reviewed_by"`
+}
+
+func (q *Queries) SetMarketSkillReview(ctx context.Context, arg SetMarketSkillReviewParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setMarketSkillReview,
+		arg.SourceID,
+		arg.Slug,
+		arg.ReviewStatus,
+		arg.ReviewNote,
+		arg.ReviewedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertMarketSkill = `-- name: UpsertMarketSkill :one
 INSERT INTO market_skills (source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -337,7 +496,7 @@ ON CONFLICT (source_id, slug) DO UPDATE SET
     updated_at  = EXCLUDED.updated_at,
     raw         = EXCLUDED.raw,
     synced_at   = now()
-RETURNING id, source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw, synced_at
+RETURNING id, source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw, synced_at, review_status, review_note, reviewed_at, reviewed_by
 `
 
 type UpsertMarketSkillParams struct {
@@ -357,6 +516,10 @@ type UpsertMarketSkillParams struct {
 
 // 同步落库：同一 (source, slug) 覆盖刷新，上次同步后被上游下架的条目由
 // Sync 清理（见 DeleteStaleMarketSkills）。
+//
+// review_status/review_note/reviewed_* 刻意不在 DO UPDATE 里：审核结论是
+// 本地的判断，不是上游字段。每次同步都重置的话，管理员批准过的条目会在下
+// 次同步后集体打回待审，等于审核白做。
 func (q *Queries) UpsertMarketSkill(ctx context.Context, arg UpsertMarketSkillParams) (MarketSkill, error) {
 	row := q.db.QueryRow(ctx, upsertMarketSkill,
 		arg.SourceID,
@@ -388,6 +551,10 @@ func (q *Queries) UpsertMarketSkill(ctx context.Context, arg UpsertMarketSkillPa
 		&i.UpdatedAt,
 		&i.Raw,
 		&i.SyncedAt,
+		&i.ReviewStatus,
+		&i.ReviewNote,
+		&i.ReviewedAt,
+		&i.ReviewedBy,
 	)
 	return i, err
 }

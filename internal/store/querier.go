@@ -14,6 +14,8 @@ type Querier interface {
 	CountActiveSubscribedListingsForAgentRef(ctx context.Context, arg CountActiveSubscribedListingsForAgentRefParams) (int64, error)
 	CountActiveSubscribedListingsForBundleRef(ctx context.Context, arg CountActiveSubscribedListingsForBundleRefParams) (int64, error)
 	CountAdminUsers(ctx context.Context) (int64, error)
+	// 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。
+	CountMarketSkillsByReview(ctx context.Context) ([]CountMarketSkillsByReviewRow, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (CreateAPIKeyRow, error)
 	CreateAdminUser(ctx context.Context, arg CreateAdminUserParams) (User, error)
 	// Owner-view and subscriber-view queries are kept physically separate so the
@@ -231,8 +233,13 @@ type Querier interface {
 	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)
 	// 组件广场"插件" Tab 用的市场列表：只列公开且审核通过的，每个 plugin_id 一行（最新版本）。
 	ListMarketPlugins(ctx context.Context) ([]Plugin, error)
-	// Skill 管理 → 市场视图：所有启用源的缓存条目，附源信息供卡片和详情回链。
+	// Skill 管理 → 市场视图：所有启用源里**审核通过**的缓存条目，附源信息供
+	// 卡片和详情回链。未过审的条目对普通用户根本不存在（审核台走
+	// ListMarketSkillsForReview）。
 	ListMarketSkills(ctx context.Context) ([]ListMarketSkillsRow, error)
+	// 审核台（系统配置 → Skill 源）：不筛源状态、不筛审核状态地列出全部同步
+	// 条目，让管理员看得到"同步进来了什么"。sqlc.narg 为空时该条件不生效。
+	ListMarketSkillsForReview(ctx context.Context, arg ListMarketSkillsForReviewParams) ([]ListMarketSkillsForReviewRow, error)
 	ListMemoriesForOwnerPage(ctx context.Context, arg ListMemoriesForOwnerPageParams) ([]Memory, error)
 	ListModelProvidersForOwner(ctx context.Context, ownerUserID int64) ([]ListModelProvidersForOwnerRow, error)
 	// Backs the timeout-scanning job (spec-11): a pending gate with a
@@ -289,6 +296,7 @@ type Querier interface {
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
 	SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerDisplayMetaParams) error
 	SetMCPServerStatusByID(ctx context.Context, arg SetMCPServerStatusByIDParams) error
+	SetMarketSkillReview(ctx context.Context, arg SetMarketSkillReviewParams) (int64, error)
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error
 	SetPluginReviewStatus(ctx context.Context, arg SetPluginReviewStatusParams) (Plugin, error)
 	SetPluginVisibility(ctx context.Context, arg SetPluginVisibilityParams) (Plugin, error)
@@ -308,6 +316,10 @@ type Querier interface {
 	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)
 	// 同步落库：同一 (source, slug) 覆盖刷新，上次同步后被上游下架的条目由
 	// Sync 清理（见 DeleteStaleMarketSkills）。
+	//
+	// review_status/review_note/reviewed_* 刻意不在 DO UPDATE 里：审核结论是
+	// 本地的判断，不是上游字段。每次同步都重置的话，管理员批准过的条目会在下
+	// 次同步后集体打回待审，等于审核白做。
 	UpsertMarketSkill(ctx context.Context, arg UpsertMarketSkillParams) (MarketSkill, error)
 	UpsertPluginKV(ctx context.Context, arg UpsertPluginKVParams) (PluginKv, error)
 	UpsertPublisherKey(ctx context.Context, arg UpsertPublisherKeyParams) (PluginPublisherKey, error)

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -54,6 +55,11 @@ type marketSkillDTO struct {
 	Stars         int64    `json:"stars"`
 	Downloads     int64    `json:"downloads"`
 	UpdatedAt     string   `json:"updated_at,omitempty"`
+	// 审核字段：用户侧列表拿到的永远是 approved，这几个字段是给审核台看的。
+	ReviewStatus string `json:"review_status"`
+	ReviewNote   string `json:"review_note,omitempty"`
+	ReviewedAt   string `json:"reviewed_at,omitempty"`
+	SyncedAt     string `json:"synced_at,omitempty"`
 }
 
 func toMarketSkillDTO(m skillsource.MarketSkill) marketSkillDTO {
@@ -62,6 +68,13 @@ func toMarketSkillDTO(m skillsource.MarketSkill) marketSkillDTO {
 		Slug: m.Slug, Name: m.Name, Summary: m.Summary, Version: m.Version,
 		License: m.License,
 		Topics: m.Topics, Stars: m.Stars, Downloads: m.Downloads,
+		ReviewStatus: string(m.ReviewStatus), ReviewNote: m.ReviewNote,
+	}
+	if !m.ReviewedAt.IsZero() {
+		dto.ReviewedAt = m.ReviewedAt.Format("2006-01-02T15:04:05Z07:00")
+	}
+	if !m.SyncedAt.IsZero() {
+		dto.SyncedAt = m.SyncedAt.Format("2006-01-02T15:04:05Z07:00")
 	}
 	if !m.UpdatedAt.IsZero() {
 		dto.UpdatedAt = m.UpdatedAt.Format("2006-01-02T15:04:05Z07:00")
@@ -199,9 +212,86 @@ func (h *SkillSourceHandlers) ListMarket(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, r, http.StatusOK, map[string]any{"items": items, "has_more": false})
 }
 
+// ListForReview handles GET /skill-sources/skills：审核台的列表，同步进来
+// 的全部条目（可按 review_status / source_id 筛）。管理员限定。
+func (h *SkillSourceHandlers) ListForReview(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	status := skillsource.ReviewStatus(r.URL.Query().Get("review_status"))
+	var sourceID int64
+	if raw := r.URL.Query().Get("source_id"); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid source_id")
+			return
+		}
+		sourceID = parsed
+	}
+
+	skills, err := h.svc.ListForReview(r.Context(), userID, status, sourceID)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	counts, err := h.svc.ReviewCounts(r.Context(), userID)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+
+	items := make([]marketSkillDTO, 0, len(skills))
+	for _, m := range skills {
+		items = append(items, toMarketSkillDTO(m))
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{
+		"items": items,
+		"counts": map[string]int64{
+			"pending":  counts[skillsource.ReviewPending],
+			"approved": counts[skillsource.ReviewApproved],
+			"rejected": counts[skillsource.ReviewRejected],
+		},
+	})
+}
+
+type reviewSkillsRequest struct {
+	Items []struct {
+		SourceID int64  `json:"source_id"`
+		Slug     string `json:"slug"`
+	} `json:"items"`
+	Status string `json:"status"`
+	Note   string `json:"note"`
+}
+
+// ReviewSkills handles POST /skill-sources/skills/review：给一批同步条目
+// 下同一个审核结论。批量是主路径——一个公开源同步下来动辄成百上千条，逐
+// 条点审不完。
+func (h *SkillSourceHandlers) ReviewSkills(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	var req reviewSkillsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
+		return
+	}
+	items := make([]skillsource.ReviewItem, 0, len(req.Items))
+	for _, it := range req.Items {
+		items = append(items, skillsource.ReviewItem{SourceID: it.SourceID, Slug: it.Slug})
+	}
+	if err := h.svc.Review(r.Context(), userID, items, skillsource.ReviewStatus(req.Status), req.Note); err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{"reviewed": len(items)})
+}
+
 // MarketDetail handles GET /skill-market/{source_id}/{slug}。
 func (h *SkillSourceHandlers) MarketDetail(w http.ResponseWriter, r *http.Request) {
-	if _, ok := requireUserID(w, r); !ok {
+	userID, ok := requireUserID(w, r)
+	if !ok {
 		return
 	}
 	sourceID, ok := parseIDParam(w, r, "source_id")
@@ -213,7 +303,7 @@ func (h *SkillSourceHandlers) MarketDetail(w http.ResponseWriter, r *http.Reques
 		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "invalid slug")
 		return
 	}
-	detail, err := h.svc.GetMarketSkill(r.Context(), sourceID, slug)
+	detail, err := h.svc.GetMarketSkill(r.Context(), userID, sourceID, slug)
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return

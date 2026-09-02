@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { SkillReviewPanel } from '@/components/resources/SkillReviewPanel'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 
@@ -93,6 +94,7 @@ export function SkillSourcesPage() {
   const items = query.data?.items ?? []
 
   return (
+    <div className="flex flex-col gap-space-8">
     <Section
       title="Skill 源"
       aside={
@@ -232,5 +234,10 @@ export function SkillSourcesPage() {
         </DialogContent>
       </Dialog>
     </Section>
+
+      {/* 审核台紧跟在源列表下面：同步是这里做的，同步进来的东西也在这里
+          过一遍，不用再跳一个页面。 */}
+      <SkillReviewPanel />
+    </div>
   )
 }

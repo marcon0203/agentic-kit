@@ -136,20 +136,24 @@ type KnowledgeBasis struct {
 }
 
 type MarketSkill struct {
-	ID        int64              `json:"id"`
-	SourceID  int64              `json:"source_id"`
-	Slug      string             `json:"slug"`
-	Name      string             `json:"name"`
-	Summary   pgtype.Text        `json:"summary"`
-	Version   pgtype.Text        `json:"version"`
-	License   pgtype.Text        `json:"license"`
-	Changelog pgtype.Text        `json:"changelog"`
-	Topics    []string           `json:"topics"`
-	Stars     int64              `json:"stars"`
-	Downloads int64              `json:"downloads"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	Raw       []byte             `json:"raw"`
-	SyncedAt  pgtype.Timestamptz `json:"synced_at"`
+	ID           int64              `json:"id"`
+	SourceID     int64              `json:"source_id"`
+	Slug         string             `json:"slug"`
+	Name         string             `json:"name"`
+	Summary      pgtype.Text        `json:"summary"`
+	Version      pgtype.Text        `json:"version"`
+	License      pgtype.Text        `json:"license"`
+	Changelog    pgtype.Text        `json:"changelog"`
+	Topics       []string           `json:"topics"`
+	Stars        int64              `json:"stars"`
+	Downloads    int64              `json:"downloads"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Raw          []byte             `json:"raw"`
+	SyncedAt     pgtype.Timestamptz `json:"synced_at"`
+	ReviewStatus string             `json:"review_status"`
+	ReviewNote   pgtype.Text        `json:"review_note"`
+	ReviewedAt   pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewedBy   pgtype.Int8        `json:"reviewed_by"`
 }
 
 type MarketplaceListing struct {

@@ -25,7 +25,24 @@ const (
 	CodeMarketSkillNotFound  = 110004
 	CodeSkillSourceUpstream  = 110005
 	CodeSkillSourceForbidden = 110006
+	CodeMarketSkillNotPassed = 110007
+	CodeReviewStatusInvalid  = 110008
 )
+
+// ReviewStatus 是一条同步条目的本地审核结论。同步进来的条目默认 pending，
+// 只有 approved 才进用户侧的 Skill 管理市场视图——一个公开源里混着大量低
+// 质量条目，默认放行等于没有门槛。
+type ReviewStatus string
+
+const (
+	ReviewPending  ReviewStatus = "pending"
+	ReviewApproved ReviewStatus = "approved"
+	ReviewRejected ReviewStatus = "rejected"
+)
+
+func (r ReviewStatus) valid() bool {
+	return r == ReviewPending || r == ReviewApproved || r == ReviewRejected
+}
 
 // Source 是一个已登记的公开 Skill 市场。
 type Source struct {
@@ -56,6 +73,13 @@ type MarketSkill struct {
 	Downloads     int64           `json:"downloads"`
 	UpdatedAt     time.Time       `json:"updated_at"` // 上游的更新时间；zero = 上游没给
 	Raw           json.RawMessage `json:"raw,omitempty"`
+
+	// 审核结论。用户侧列表只会拿到 approved 的条目，这几个字段是给审核台
+	// （系统配置 → Skill 源）看的。
+	ReviewStatus ReviewStatus `json:"review_status"`
+	ReviewNote   string       `json:"review_note,omitempty"`
+	ReviewedAt   time.Time    `json:"reviewed_at"` // zero = 还没审过
+	SyncedAt     time.Time    `json:"synced_at"`
 }
 
 // Owner / SkillDetail / SkillVersion 是详情回源时从上游拿到的、列表接口
@@ -122,6 +146,11 @@ type Repository interface {
 	ReplaceSkills(ctx context.Context, sourceID int64, skills []FetchedSkill) error
 	ListMarketSkills(ctx context.Context) ([]MarketSkill, error)
 	GetMarketSkill(ctx context.Context, sourceID int64, slug string) (MarketSkill, error)
+	// ListMarketSkillsForReview 不做审核状态过滤（status/sourceID 为零值时
+	// 该维度不筛），审核台要看到同步进来的全部条目。
+	ListMarketSkillsForReview(ctx context.Context, status ReviewStatus, sourceID int64) ([]MarketSkill, error)
+	CountByReviewStatus(ctx context.Context) (map[ReviewStatus]int64, error)
+	SetReview(ctx context.Context, sourceID int64, slug string, status ReviewStatus, note string, reviewerID int64) error
 }
 
 // AdminDirectory 与 modelcatalog 的同名接口一致：管理面权限判定收在
@@ -244,12 +273,70 @@ func (s *Service) ListMarketSkills(ctx context.Context) ([]MarketSkill, error) {
 	return s.repo.ListMarketSkills(ctx)
 }
 
+// ListForReview 是审核台的列表：同步进来的全部条目，不管审核状态、也不管
+// 源是否停用。status/sourceID 传零值表示该维度不筛。
+func (s *Service) ListForReview(ctx context.Context, userID int64, status ReviewStatus, sourceID int64) ([]MarketSkill, error) {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return nil, err
+	}
+	if status != "" && !status.valid() {
+		return nil, domain.Invalid(CodeReviewStatusInvalid, "unknown review status").
+			WithDetails(domain.FieldError{Field: "review_status", Reason: "must be pending, approved or rejected"})
+	}
+	return s.repo.ListMarketSkillsForReview(ctx, status, sourceID)
+}
+
+// ReviewCounts 是审核台顶部的状态计数。
+func (s *Service) ReviewCounts(ctx context.Context, userID int64) (map[ReviewStatus]int64, error) {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return nil, err
+	}
+	return s.repo.CountByReviewStatus(ctx)
+}
+
+// ReviewItem 是一次批量审核里的一条。审核台面对的是成百上千条同步条目，
+// 逐条点会审不完，所以批量是主路径而不是附加优化。
+type ReviewItem struct {
+	SourceID int64
+	Slug     string
+}
+
+// Review 批量给条目下审核结论。整批用同一个结论——"通过这一批"和"驳回这一
+// 批"是两个动作，混在一次请求里没有意义。
+func (s *Service) Review(ctx context.Context, userID int64, items []ReviewItem, status ReviewStatus, note string) error {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return err
+	}
+	if !status.valid() {
+		return domain.Invalid(CodeReviewStatusInvalid, "unknown review status").
+			WithDetails(domain.FieldError{Field: "status", Reason: "must be pending, approved or rejected"})
+	}
+	if len(items) == 0 {
+		return domain.Invalid(domain.CodeValidationFailed, "invalid request").
+			WithDetails(domain.FieldError{Field: "items", Reason: "required"})
+	}
+	for _, it := range items {
+		if err := s.repo.SetReview(ctx, it.SourceID, it.Slug, status, note, userID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // GetMarketSkill 取一个 Skill 的完整详情：缓存快照打底，再回源补用法、
 // 作者和版本历史。回源失败不报错（上游可能临时不可达），页面退回缓存字段。
-func (s *Service) GetMarketSkill(ctx context.Context, sourceID int64, slug string) (SkillDetail, error) {
+//
+// 未过审的条目只有管理员看得到——否则审核就只挡住了列表，详情页仍然是一
+// 条绕过去的路。
+func (s *Service) GetMarketSkill(ctx context.Context, userID, sourceID int64, slug string) (SkillDetail, error) {
 	cached, err := s.repo.GetMarketSkill(ctx, sourceID, slug)
 	if err != nil {
 		return SkillDetail{}, err
+	}
+	if cached.ReviewStatus != ReviewApproved {
+		if adminErr := s.requireAdmin(ctx, userID); adminErr != nil {
+			return SkillDetail{}, domain.NotFound(CodeMarketSkillNotFound, "skill not found")
+		}
 	}
 	detail := SkillDetail{MarketSkill: cached}
 

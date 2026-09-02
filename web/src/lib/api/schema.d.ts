@@ -1367,6 +1367,46 @@ export interface paths {
         patch: operations["updateUserRoles"];
         trace?: never;
     };
+    "/skill-sources/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 审核台：同步进来的全部 Skill 条目，管理员
+         * @description 和 /skill-market 的区别：这里不过滤审核状态、也不过滤源是否停用， 管理员要看得到"同步进来了什么"才能审。counts 是三种状态的总数， 供页面顶部的筛选标签直接用。
+         */
+        get: operations["listSkillsForReview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skill-sources/skills/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量审核同步条目，管理员
+         * @description 整批用同一个结论——"通过这一批"和"驳回这一批"是两个动作。批量是主 路径而非附加优化：一个公开源同步下来动辄成百上千条，逐条点审不完。
+         */
+        post: operations["reviewMarketSkills"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/skill-sources": {
         parameters: {
             query?: never;
@@ -2060,7 +2100,18 @@ export interface components {
             downloads: number;
             /** Format: date-time */
             updated_at?: string | null;
+            review_status?: components["schemas"]["SkillReviewStatus"];
+            review_note?: string;
+            /** Format: date-time */
+            reviewed_at?: string;
+            /** Format: date-time */
+            synced_at?: string;
         };
+        /**
+         * @description 同步条目的本地审核结论。同步进来默认 pending，只有 approved 才会出现在 Skill 管理的市场视图里、也才允许安装——公开源里混着大量低质量条目， 默认放行等于没有门槛。审核结论不会被后续同步重置。
+         * @enum {string}
+         */
+        SkillReviewStatus: "pending" | "approved" | "rejected";
         MarketSkillOwner: {
             /** @example mattpocock */
             handle: string;
@@ -4989,6 +5040,81 @@ export interface operations {
                     "application/json": components["schemas"]["Envelope"];
                 };
             };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listSkillsForReview: {
+        parameters: {
+            query?: {
+                review_status?: components["schemas"]["SkillReviewStatus"];
+                source_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["MarketSkill"][];
+                            counts: {
+                                /** Format: int64 */
+                                pending: number;
+                                /** Format: int64 */
+                                approved: number;
+                                /** Format: int64 */
+                                rejected: number;
+                            };
+                        };
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    reviewMarketSkills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    items: {
+                        /** Format: int64 */
+                        source_id: number;
+                        slug: string;
+                    }[];
+                    status: components["schemas"]["SkillReviewStatus"];
+                    /** @description 驳回理由等，会展示在审核台 */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已审核 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            reviewed: number;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
         };
     };

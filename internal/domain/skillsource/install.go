@@ -69,6 +69,11 @@ func (s *Service) Install(ctx context.Context, userID, sourceID int64, slug stri
 	if err != nil {
 		return resource.Resource{}, err
 	}
+	// 审核如果只挡列表，安装接口就是绕过它的一条路：知道 slug 的人直接
+	// POST 就能把没过审的条目装进来。
+	if cached.ReviewStatus != ReviewApproved {
+		return resource.Resource{}, domain.Forbidden(CodeMarketSkillNotPassed, "这个 Skill 还没有通过审核，暂时不能安装")
+	}
 
 	zipBytes, err := s.fetch.DownloadZip(ctx, cached.SourceBaseURL, slug, cached.Version)
 	if err != nil {

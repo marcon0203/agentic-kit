@@ -191,6 +191,14 @@ func marketSkillFromRow(row store.ListMarketSkillsRow) skillsource.MarketSkill {
 	if row.UpdatedAt.Valid {
 		ms.UpdatedAt = row.UpdatedAt.Time
 	}
+	ms.ReviewStatus = skillsource.ReviewStatus(row.ReviewStatus)
+	ms.ReviewNote = textOrEmpty(row.ReviewNote)
+	if row.ReviewedAt.Valid {
+		ms.ReviewedAt = row.ReviewedAt.Time
+	}
+	if row.SyncedAt.Valid {
+		ms.SyncedAt = row.SyncedAt.Time
+	}
 	return ms
 }
 
@@ -219,5 +227,62 @@ func (r *SkillSourceRepository) GetMarketSkill(ctx context.Context, sourceID int
 		Summary: row.Summary, Version: row.Version, License: row.License, Changelog: row.Changelog,
 		Topics: row.Topics, Stars: row.Stars, Downloads: row.Downloads,
 		UpdatedAt: row.UpdatedAt, Raw: row.Raw, SourceName: row.SourceName, SourceBaseUrl: row.SourceBaseUrl,
+		ReviewStatus: row.ReviewStatus, ReviewNote: row.ReviewNote, ReviewedAt: row.ReviewedAt, SyncedAt: row.SyncedAt,
 	}), nil
+}
+
+// ListMarketSkillsForReview 的空值语义：status == "" / sourceID == 0 表示
+// 该维度不筛，映射成 sqlc 的 narg NULL。
+func (r *SkillSourceRepository) ListMarketSkillsForReview(ctx context.Context, status skillsource.ReviewStatus, sourceID int64) ([]skillsource.MarketSkill, error) {
+	params := store.ListMarketSkillsForReviewParams{}
+	if status != "" {
+		params.ReviewStatus = pgtype.Text{String: string(status), Valid: true}
+	}
+	if sourceID != 0 {
+		params.SourceID = pgtype.Int8{Int64: sourceID, Valid: true}
+	}
+	rows, err := r.q.ListMarketSkillsForReview(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]skillsource.MarketSkill, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, marketSkillFromRow(store.ListMarketSkillsRow{
+			ID: row.ID, SourceID: row.SourceID, Slug: row.Slug, Name: row.Name,
+			Summary: row.Summary, Version: row.Version, License: row.License, Changelog: row.Changelog,
+			Topics: row.Topics, Stars: row.Stars, Downloads: row.Downloads,
+			UpdatedAt: row.UpdatedAt, Raw: row.Raw, SourceName: row.SourceName, SourceBaseUrl: row.SourceBaseUrl,
+			ReviewStatus: row.ReviewStatus, ReviewNote: row.ReviewNote, ReviewedAt: row.ReviewedAt, SyncedAt: row.SyncedAt,
+		}))
+	}
+	return out, nil
+}
+
+func (r *SkillSourceRepository) CountByReviewStatus(ctx context.Context) (map[skillsource.ReviewStatus]int64, error) {
+	rows, err := r.q.CountMarketSkillsByReview(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[skillsource.ReviewStatus]int64, len(rows))
+	for _, row := range rows {
+		out[skillsource.ReviewStatus(row.ReviewStatus)] = row.Count
+	}
+	return out, nil
+}
+
+func (r *SkillSourceRepository) SetReview(ctx context.Context, sourceID int64, slug string, status skillsource.ReviewStatus, note string, reviewerID int64) error {
+	n, err := r.q.SetMarketSkillReview(ctx, store.SetMarketSkillReviewParams{
+		SourceID:     sourceID,
+		Slug:         slug,
+		ReviewStatus: string(status),
+		ReviewNote:   pgtype.Text{String: note, Valid: note != ""},
+		ReviewedBy:   pgtype.Int8{Int64: reviewerID, Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errMarketSkillNotFound
+	}
+	return nil
 }
