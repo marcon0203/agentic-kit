@@ -25,6 +25,7 @@ import { BundleEditorPage } from '@/pages/BundleEditorPage'
 import { McpServerEditorPage } from '@/pages/McpServerEditorPage'
 import { SkillUploadPage } from '@/pages/SkillUploadPage'
 import { SkillSourcesPage } from '@/pages/SkillSourcesPage'
+import { SkillSourceDetailPage } from '@/pages/SkillSourceDetailPage'
 import { SkillMarketDetailPage } from '@/pages/SkillMarketDetailPage'
 import { ComponentWizardPage } from '@/pages/ComponentWizardPage'
 import { ComponentPlazaPage } from '@/pages/ComponentPlazaPage'
@@ -188,6 +189,7 @@ export default function App() {
               <Route index element={<Navigate to="providers" replace />} />
               <Route path="providers" element={<ModelCatalogAdminPage />} />
               <Route path="skill-sources" element={<SkillSourcesPage />} />
+              <Route path="skill-sources/:id" element={<SkillSourceDetailPage />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="roles" element={<RolesPage />} />
             </Route>

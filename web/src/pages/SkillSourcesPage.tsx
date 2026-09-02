@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Globe, RefreshCw, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -16,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { SkillReviewPanel } from '@/components/resources/SkillReviewPanel'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 
@@ -34,6 +34,7 @@ function formatSyncedAt(iso: string | null): string {
   last_sync_error 原样展示在这里。
  */
 export function SkillSourcesPage() {
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [addOpen, setAddOpen] = useState(false)
   const [name, setName] = useState('')
@@ -94,7 +95,6 @@ export function SkillSourcesPage() {
   const items = query.data?.items ?? []
 
   return (
-    <div className="flex flex-col gap-space-8">
     <Section
       title="Skill 源"
       aside={
@@ -133,7 +133,14 @@ export function SkillSourcesPage() {
               </span>
               <div className="flex min-w-0 flex-1 flex-col gap-space-1">
                 <span className="flex flex-wrap items-center gap-space-3">
-                  <span className="text-body-md font-medium text-ink-900">{s.name}</span>
+                  {/* 源名进详情：那个源同步下来的 Skill 在详情里逐条/批量审核。 */}
+                  <button
+                    type="button"
+                    className="text-body-md font-medium text-ink-900 hover:text-blueprint hover:underline"
+                    onClick={() => navigate(`/settings/skill-sources/${s.id}`)}
+                  >
+                    {s.name}
+                  </button>
                   <a
                     href={s.base_url}
                     target="_blank"
@@ -154,6 +161,9 @@ export function SkillSourcesPage() {
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-space-2">
+                <Button variant="outline" size="sm" onClick={() => navigate(`/settings/skill-sources/${s.id}`)}>
+                  审核 Skill
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -234,10 +244,5 @@ export function SkillSourcesPage() {
         </DialogContent>
       </Dialog>
     </Section>
-
-      {/* 审核台紧跟在源列表下面：同步是这里做的，同步进来的东西也在这里
-          过一遍，不用再跳一个页面。 */}
-      <SkillReviewPanel />
-    </div>
   )
 }
