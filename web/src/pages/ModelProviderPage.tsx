@@ -24,15 +24,34 @@ type ModelCatalogEntry = components['schemas']['ModelCatalogEntry']
 type ProviderName = components['schemas']['ProviderName']
 type Modality = ModelCatalogEntry['modality']
 
-const KNOWN_PROVIDER_NAMES: ProviderName[] = ['anthropic', 'openai', 'google', 'deepseek', 'qwen', 'custom']
-const PROVIDER_LABEL: Record<ProviderName, string> = {
-  anthropic: 'Anthropic',
-  openai: 'OpenAI',
-  google: 'Google',
-  deepseek: 'DeepSeek',
-  qwen: '通义千问',
-  custom: '自定义',
+type ProviderSpec = components['schemas']['ModelProviderSpec']
+
+/**
+ * 渠道列表来自后端的 GET /model-provider-specs（后端的渠道注册表：内置的
+ * 声明式渠道描述符 + 少数手写 client）。前端不再抄第二份——抄了的下场是每
+ * 加一个渠道就有一处忘了改。
+ *
+ * 下面这份是加载中/请求失败时的兜底，只保证下拉框不是空的。
+ */
+const FALLBACK_SPECS: ProviderSpec[] = [
+  { name: 'deepseek', label: 'DeepSeek', credentials: [] },
+  { name: 'volcengine', label: '火山引擎方舟', credentials: [] },
+  { name: 'qwen', label: '通义千问', credentials: [] },
+  { name: 'custom', label: '自定义（OpenAI 兼容）', credentials: [] },
+  { name: 'google', label: 'Google Gemini', credentials: [] },
+]
+
+function useProviderSpecs(): ProviderSpec[] {
+  const query = useQuery({
+    queryKey: ['model-provider-specs'],
+    queryFn: async () =>
+      unwrap<{ items: ProviderSpec[] }>(await apiClient.GET('/model-provider-specs', {})),
+    staleTime: Infinity, // 渠道列表随二进制发布，一次会话里不会变
+  })
+  return query.data?.items?.length ? query.data.items : FALLBACK_SPECS
 }
+
+const KNOWN_PROVIDER_NAMES: ProviderName[] = FALLBACK_SPECS.map((s) => s.name)
 
 // A catalog entry's provider is now a free-text key from 系统配置 → 模型
 // 提供商 — an admin can register one that isn't among the 6 credentials
@@ -139,7 +158,7 @@ export function ModelProviderPage() {
                   </SelectContent>
                 </Select>
               )}
-              <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setConnecting('anthropic')}>
+              <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setConnecting('deepseek')}>
                 新增模型
               </Button>
             </div>
@@ -225,13 +244,16 @@ function ConnectProviderDialog({
   onOpenChange: (v: boolean) => void
   onConnected: () => void
 }) {
+  const specs = useProviderSpecs()
   const [selectedProvider, setSelectedProvider] = useState(provider)
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
-  const requiresBaseUrl = selectedProvider === 'custom'
+  // 没有默认地址的渠道（custom）必须自己填 base_url。这条判据来自后端声明
+  // 的 default_base_url，不再在前端硬编渠道名。
+  const requiresBaseUrl = specs.find((s) => s.name === selectedProvider)?.default_base_url === ''
 
   async function submit() {
     setPending(true)
@@ -270,9 +292,9 @@ function ConnectProviderDialog({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {Object.entries(PROVIDER_LABEL).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
+              {specs.map((spec) => (
+                <SelectItem key={spec.name} value={spec.name}>
+                  {spec.label}
                 </SelectItem>
               ))}
             </SelectContent>

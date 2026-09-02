@@ -3,7 +3,6 @@ package modelgateway
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,50 +10,6 @@ import (
 )
 
 // ── connectivity ─────────────────────────────────────────────────────
-
-func TestAnthropicValidator_ValidKey(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("x-api-key") != "good-key" {
-			t.Fatalf("expected x-api-key header, got %q", r.Header.Get("x-api-key"))
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"data":[]}`))
-	}))
-	defer srv.Close()
-
-	v := newValidatorWithEndpoints("anthropic", "", providerOverrides{"anthropic": srv.URL})
-	if err := v.Validate(context.Background(), "good-key"); err != nil {
-		t.Fatalf("expected valid key to pass, got %v", err)
-	}
-}
-
-func TestAnthropicValidator_InvalidKey(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	defer srv.Close()
-
-	v := newValidatorWithEndpoints("anthropic", "", providerOverrides{"anthropic": srv.URL})
-	err := v.Validate(context.Background(), "bad-key")
-	if err != ErrCredentialsInvalid {
-		t.Fatalf("expected ErrCredentialsInvalid, got %v", err)
-	}
-}
-
-func TestOpenAIValidator_ValidKey(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer good-key" {
-			t.Fatalf("expected bearer header, got %q", r.Header.Get("Authorization"))
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	v := newValidatorWithEndpoints("openai", "", providerOverrides{"openai": srv.URL})
-	if err := v.Validate(context.Background(), "good-key"); err != nil {
-		t.Fatalf("expected valid key to pass, got %v", err)
-	}
-}
 
 func TestDeepSeekValidator_ValidKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +51,7 @@ func TestGoogleValidator_InvalidKey(t *testing.T) {
 }
 
 func TestValidator_Unreachable(t *testing.T) {
-	v := newValidatorWithEndpoints("anthropic", "", providerOverrides{"anthropic": "http://127.0.0.1:1"})
+	v := newValidatorWithEndpoints("deepseek", "", providerOverrides{"deepseek": "http://127.0.0.1:1"})
 	err := v.Validate(context.Background(), "any-key")
 	if err == nil || err == ErrCredentialsInvalid {
 		t.Fatalf("expected a network error distinct from ErrCredentialsInvalid, got %v", err)
@@ -136,11 +91,11 @@ func TestNewValidator_UnknownProvider(t *testing.T) {
 // ── ParseModelSpec ───────────────────────────────────────────────────
 
 func TestParseModelSpec(t *testing.T) {
-	spec, err := ParseModelSpec("anthropic/claude-sonnet-5")
+	spec, err := ParseModelSpec("deepseek/deepseek-chat")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if spec.Provider != "anthropic" || spec.Name != "claude-sonnet-5" {
+	if spec.Provider != "deepseek" || spec.Name != "deepseek-chat" {
 		t.Fatalf("unexpected spec: %+v", spec)
 	}
 }
@@ -152,355 +107,6 @@ func TestParseModelSpec_Invalid(t *testing.T) {
 }
 
 // ── completion clients ───────────────────────────────────────────────
-
-func TestAnthropicClient_Complete(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["model"] != "claude-sonnet-5" {
-			t.Fatalf("unexpected model in request: %v", body["model"])
-		}
-		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"hello there"}],"usage":{"input_tokens":10,"output_tokens":5}}`))
-	}))
-	defer srv.Close()
-
-	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
-	result, err := c.Complete(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}}, MaxTokens: 100,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Content != "hello there" || result.InputTokens != 10 || result.OutputTokens != 5 {
-		t.Fatalf("unexpected result: %+v", result)
-	}
-}
-
-// TestAnthropicClient_SendsToolsAndParsesToolUse is the regression test for
-// the bug this was written to fix: a model with capabilities.tools[]
-// configured that behaved as if it had no tools at all, because
-// CompletionRequest never carried a Tools field and no Client ever sent
-// one. This asserts both directions: the outgoing request actually
-// contains the tool's input_schema, the system prompt is a top-level
-// field (not a "system"-role message, which the real Anthropic API
-// rejects), and a tool_use response block round-trips into a ToolCall.
-func TestAnthropicClient_SendsToolsAndParsesToolUse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["system"] != "be helpful" {
-			t.Fatalf("expected system prompt as a top-level field, got %v", body)
-		}
-		tools, _ := body["tools"].([]any)
-		if len(tools) != 1 {
-			t.Fatalf("expected 1 tool in request, got %v", body["tools"])
-		}
-		tool := tools[0].(map[string]any)
-		if tool["name"] != "run_query" {
-			t.Fatalf("unexpected tool name: %v", tool["name"])
-		}
-		schema := tool["input_schema"].(map[string]any)
-		if schema["type"] != "object" {
-			t.Fatalf("expected input_schema to carry a lowercase JSON Schema type, got %v", schema)
-		}
-		messages, _ := body["messages"].([]any)
-		for _, m := range messages {
-			if m.(map[string]any)["role"] == "system" {
-				t.Fatal("system prompt must never appear as a message role for Anthropic")
-			}
-		}
-		_, _ = w.Write([]byte(`{"content":[{"type":"tool_use","id":"toolu_1","name":"run_query","input":{"sql":"select 1"}}],"usage":{"input_tokens":20,"output_tokens":10}}`))
-	}))
-	defer srv.Close()
-
-	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
-	result, err := c.Complete(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{
-		Messages: []Message{{Role: "system", Content: "be helpful"}, {Role: "user", Content: "how many agents?"}},
-		Tools: []Tool{{
-			Name: "run_query", Description: "runs a SQL query",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"sql": map[string]any{"type": "string"}}},
-		}},
-		MaxTokens: 100,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "run_query" || result.ToolCalls[0].ID != "toolu_1" {
-		t.Fatalf("unexpected tool calls: %+v", result.ToolCalls)
-	}
-	if result.ToolCalls[0].Arguments["sql"] != "select 1" {
-		t.Fatalf("unexpected tool call arguments: %+v", result.ToolCalls[0].Arguments)
-	}
-}
-
-// TestAnthropicClient_SendsToolResultForToolMessage verifies the reverse
-// leg: replaying a tool's result back as the next turn produces a
-// tool_result content block tagged with the same tool_use_id, not a plain
-// user-role text message (which Anthropic would silently misinterpret as
-// unrelated conversation, not a function result).
-func TestAnthropicClient_SendsToolResultForToolMessage(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		messages, _ := body["messages"].([]any)
-		if len(messages) != 2 {
-			t.Fatalf("expected 2 messages, got %v", messages)
-		}
-		toolMsg := messages[1].(map[string]any)
-		if toolMsg["role"] != "user" {
-			t.Fatalf("tool results must be sent as role=user for Anthropic, got %v", toolMsg["role"])
-		}
-		blocks := toolMsg["content"].([]any)
-		block := blocks[0].(map[string]any)
-		if block["type"] != "tool_result" || block["tool_use_id"] != "toolu_1" || block["content"] != "3 agents" {
-			t.Fatalf("unexpected tool_result block: %+v", block)
-		}
-		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"there are 3 agents"}],"usage":{"input_tokens":5,"output_tokens":5}}`))
-	}))
-	defer srv.Close()
-
-	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
-	_, err := c.Complete(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{
-		Messages: []Message{
-			{Role: "assistant", ToolCalls: []ToolCall{{ID: "toolu_1", Name: "run_query", Arguments: map[string]any{"sql": "select count(*) from agents"}}}},
-			{Role: "tool", ToolCallID: "toolu_1", ToolName: "run_query", Content: "3 agents"},
-		},
-		MaxTokens: 100,
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-// TestAnthropicClient_CompleteStream_StreamsTextDeltas is the regression
-// test for "试运行的时候消息没有流式输出": Complete always made one blocking
-// call and returned the whole answer at once — this is CompleteStream's
-// SSE path, asserting onDelta actually fires per chunk (not just once at
-// the end) and the aggregated CompletionResult still matches what a
-// non-streaming Complete would have produced.
-func TestAnthropicClient_CompleteStream_StreamsTextDeltas(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		if body["stream"] != true {
-			t.Fatalf("expected stream=true in the request body, got %v", body["stream"])
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		frames := []string{
-			`event: message_start` + "\n" + `data: {"type":"message_start","message":{"usage":{"input_tokens":10}}}` + "\n\n",
-			`event: content_block_start` + "\n" + `data: {"type":"content_block_start","index":0,"content_block":{"type":"text"}}` + "\n\n",
-			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}` + "\n\n",
-			`event: content_block_delta` + "\n" + `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", world"}}` + "\n\n",
-			`event: content_block_stop` + "\n" + `data: {"type":"content_block_stop","index":0}` + "\n\n",
-			`event: message_delta` + "\n" + `data: {"type":"message_delta","delta":{},"usage":{"output_tokens":5}}` + "\n\n",
-			`event: message_stop` + "\n" + `data: {"type":"message_stop"}` + "\n\n",
-		}
-		for _, f := range frames {
-			_, _ = w.Write([]byte(f))
-		}
-	}))
-	defer srv.Close()
-
-	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
-	var deltas []string
-	result, err := c.CompleteStream(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}}, MaxTokens: 100,
-	}, func(d StreamDelta) { deltas = append(deltas, d.TextDelta) })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(deltas) != 2 || deltas[0] != "Hello" || deltas[1] != ", world" {
-		t.Fatalf("expected 2 incremental deltas, got %v", deltas)
-	}
-	if result.Content != "Hello, world" || result.InputTokens != 10 || result.OutputTokens != 5 {
-		t.Fatalf("unexpected aggregated result: %+v", result)
-	}
-}
-
-func TestAnthropicClient_ErrorResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_, _ = w.Write([]byte(`{"error":{"message":"rate limited"}}`))
-	}))
-	defer srv.Close()
-
-	c := &anthropicClient{client: srv.Client(), baseURL: srv.URL}
-	_, err := c.Complete(context.Background(), "key", "", "claude-sonnet-5", CompletionRequest{})
-	if err == nil || !strings.Contains(err.Error(), "rate limited") {
-		t.Fatalf("expected rate limited error, got %v", err)
-	}
-}
-
-func TestOpenAICompatibleClient_Complete(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer key" {
-			t.Fatalf("expected bearer header, got %q", r.Header.Get("Authorization"))
-		}
-		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"hi from openai"},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`))
-	}))
-	defer srv.Close()
-
-	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
-	result, err := c.Complete(context.Background(), "key", "", "gpt-4o", CompletionRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Content != "hi from openai" || result.InputTokens != 8 || result.OutputTokens != 4 {
-		t.Fatalf("unexpected result: %+v", result)
-	}
-}
-
-func TestOpenAICompatibleClient_SendsToolsAndParsesToolCalls(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		tools, _ := body["tools"].([]any)
-		if len(tools) != 1 {
-			t.Fatalf("expected 1 tool in request, got %v", body["tools"])
-		}
-		fn := tools[0].(map[string]any)["function"].(map[string]any)
-		if fn["name"] != "run_query" {
-			t.Fatalf("unexpected function name: %v", fn["name"])
-		}
-		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"run_query","arguments":"{\"sql\":\"select 1\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`))
-	}))
-	defer srv.Close()
-
-	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
-	result, err := c.Complete(context.Background(), "key", "", "gpt-4o", CompletionRequest{
-		Messages: []Message{{Role: "user", Content: "how many agents?"}},
-		Tools: []Tool{{
-			Name: "run_query", Description: "runs a SQL query",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"sql": map[string]any{"type": "string"}}},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "run_query" || result.ToolCalls[0].ID != "call_1" {
-		t.Fatalf("unexpected tool calls: %+v", result.ToolCalls)
-	}
-	if result.ToolCalls[0].Arguments["sql"] != "select 1" {
-		t.Fatalf("unexpected tool call arguments: %+v", result.ToolCalls[0].Arguments)
-	}
-}
-
-func TestOpenAICompatibleClient_SendsToolResultWithToolCallID(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		messages, _ := body["messages"].([]any)
-		toolMsg := messages[len(messages)-1].(map[string]any)
-		if toolMsg["role"] != "tool" || toolMsg["tool_call_id"] != "call_1" || toolMsg["content"] != "3 agents" {
-			t.Fatalf("unexpected tool-result message: %+v", toolMsg)
-		}
-		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"gpt-4o","choices":[{"index":0,"message":{"role":"assistant","content":"there are 3"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
-	}))
-	defer srv.Close()
-
-	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
-	_, err := c.Complete(context.Background(), "key", "", "gpt-4o", CompletionRequest{
-		Messages: []Message{
-			{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_1", Name: "run_query", Arguments: map[string]any{"sql": "select count(*) from agents"}}}},
-			{Role: "tool", ToolCallID: "call_1", ToolName: "run_query", Content: "3 agents"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestOpenAICompatibleClient_CompleteStream_StreamsTextDeltas(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		chunks := []string{
-			`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}`,
-			`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":", world"},"finish_reason":null}]}`,
-			`{"id":"x","object":"chat.completion.chunk","created":1,"model":"gpt-4o","choices":[],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12}}`,
-		}
-		for _, c := range chunks {
-			_, _ = w.Write([]byte("data: " + c + "\n\n"))
-		}
-		_, _ = w.Write([]byte("data: [DONE]\n\n"))
-	}))
-	defer srv.Close()
-
-	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
-	var deltas []string
-	result, err := c.CompleteStream(context.Background(), "key", "", "gpt-4o", CompletionRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}},
-	}, func(d StreamDelta) { deltas = append(deltas, d.TextDelta) })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(deltas) != 2 || deltas[0] != "Hello" || deltas[1] != ", world" {
-		t.Fatalf("expected 2 incremental deltas, got %v", deltas)
-	}
-	if result.Content != "Hello, world" || result.InputTokens != 8 || result.OutputTokens != 4 {
-		t.Fatalf("unexpected aggregated result: %+v", result)
-	}
-}
-
-func TestOpenAICompatibleClient_Embed(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Response order deliberately reversed to prove Embed sorts back
-		// into request order by index rather than trusting response order.
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","embedding":[0.4,0.5],"index":1},{"object":"embedding","embedding":[0.1,0.2],"index":0}],"model":"text-embedding-3-small","usage":{"prompt_tokens":4,"total_tokens":4}}`))
-	}))
-	defer srv.Close()
-
-	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: srv.URL, label: "openai"}
-	vecs, err := c.Embed(context.Background(), "key", "", "text-embedding-3-small", []string{"a", "b"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(vecs) != 2 || vecs[0][0] != 0.1 || vecs[1][0] != 0.4 {
-		t.Fatalf("unexpected vectors, not sorted into request order: %+v", vecs)
-	}
-}
-
-func TestGateway_Embed_UnsupportedProviderReturnsClearError(t *testing.T) {
-	gw := NewGatewayWithClients(map[string]Client{
-		"anthropic": &anthropicClient{},
-	}, nil)
-	_, err := gw.Embed(context.Background(), ModelSpec{Provider: "anthropic", Name: "n/a"},
-		map[string]Credential{"anthropic": {APIKey: "key"}}, []string{"hi"})
-	if !errors.Is(err, ErrEmbeddingsNotSupported) {
-		t.Fatalf("expected ErrEmbeddingsNotSupported, got %v", err)
-	}
-}
-
-// DeepSeek and Qwen speak the identical OpenAI-compatible wire format, so
-// the same client type serves them — this test exercises it under the
-// deepseek label with a per-call baseURL override, the same path a
-// "custom" Credential takes.
-func TestOpenAICompatibleClient_DeepSeekViaBaseURLOverride(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","created":1,"model":"deepseek-chat","choices":[{"index":0,"message":{"role":"assistant","content":"hi from deepseek"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}`))
-	}))
-	defer srv.Close()
-
-	c := &openAICompatibleClient{httpClient: srv.Client(), defaultBaseURL: "", label: "deepseek"}
-	result, err := c.Complete(context.Background(), "key", srv.URL, "deepseek-chat", CompletionRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Content != "hi from deepseek" {
-		t.Fatalf("unexpected result: %+v", result)
-	}
-}
-
-func TestOpenAICompatibleClient_NoBaseURLConfigured(t *testing.T) {
-	c := &openAICompatibleClient{httpClient: http.DefaultClient, defaultBaseURL: "", label: "custom"}
-	_, err := c.Complete(context.Background(), "key", "", "some-model", CompletionRequest{})
-	if err == nil || !strings.Contains(err.Error(), "no base_url configured") {
-		t.Fatalf("expected a clear no-base_url error, got %v", err)
-	}
-}
 
 func TestGoogleClient_Complete(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -761,16 +367,19 @@ func TestGateway_CompleteStream_DegradesGracefullyForNonStreamingClient(t *testi
 	}
 }
 
+// 价格表现在长在渠道描述符里（internal/builtinchannels/deepseek.json），
+// EstimateCost 读的是同一张表——加渠道不用再改 Go 侧的第二份价格表。
 func TestEstimateCost_KnownModel(t *testing.T) {
-	cost := EstimateCost("anthropic", "claude-sonnet-5", 1000, 1000)
-	want := 0.003 + 0.015
-	if cost != want {
+	cost := EstimateCost("deepseek", "deepseek-chat", 1000, 1000)
+	want := 0.00027 + 0.0011
+	// 浮点比较留个容差：价格是小数相加，精确相等在这里没有意义。
+	if diff := cost - want; diff > 1e-9 || diff < -1e-9 {
 		t.Fatalf("expected %v, got %v", want, cost)
 	}
 }
 
 func TestEstimateCost_UnknownModel_ReturnsZero(t *testing.T) {
-	if cost := EstimateCost("anthropic", "does-not-exist", 1000, 1000); cost != 0 {
+	if cost := EstimateCost("deepseek", "does-not-exist", 1000, 1000); cost != 0 {
 		t.Fatalf("expected 0 for unknown model, got %v", cost)
 	}
 }
@@ -795,26 +404,6 @@ func TestRegistry_EveryProviderIsWiredEverywhere(t *testing.T) {
 		}
 		if NewValidator(name, "") == nil {
 			t.Errorf("provider %q registered in ProviderNames() but NewValidator returned nil", name)
-		}
-	}
-}
-
-func TestProviderNames_IncludesEveryBuiltInProvider(t *testing.T) {
-	want := []string{"anthropic", "openai", "google", "deepseek", "qwen", "custom"}
-	got := ProviderNames()
-	if len(got) != len(want) {
-		t.Fatalf("expected %d providers, got %d: %v", len(want), len(got), got)
-	}
-	for _, name := range want {
-		found := false
-		for _, g := range got {
-			if g == name {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected %q in ProviderNames(), got %v", name, got)
 		}
 	}
 }

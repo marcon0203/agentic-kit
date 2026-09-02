@@ -1,0 +1,131 @@
+{
+  "descriptor_version": 1,
+  "id": "custom",
+  "label": "自定义（OpenAI 兼容）",
+  "wire": "openai.chat.v1",
+  "description": "任何 OpenAI 线协议兼容的端点：自建 vLLM/Ollama、内网代理、第三方中转。base_url 必填，没有默认值。流式不带 stream_options——自建服务对未知字段的容忍度参差不齐，少发一个可选字段的代价只是 usage 可能拿不到。",
+  "capabilities": [
+    "text",
+    "tools",
+    "stream",
+    "embed"
+  ],
+  "base_url": "",
+  "credentials": [
+    {
+      "name": "api_key",
+      "type": "secret",
+      "label": "API Key",
+      "required": true
+    },
+    {
+      "name": "base_url",
+      "type": "url",
+      "label": "接口地址（留空用官方默认）",
+      "required": false
+    }
+  ],
+  "auth": {
+    "driver": "bearer",
+    "credential": "api_key"
+  },
+  "messages": {
+    "system": "inline",
+    "content": "string",
+    "tool_calls": "sibling_field",
+    "tool_calls_field": "tool_calls",
+    "tool_call_part": {
+      "id": "$.id",
+      "type": "function",
+      "function": {
+        "name": "$.name",
+        "arguments": {
+          "$json": "$.arguments"
+        }
+      }
+    }
+  },
+  "complete": {
+    "method": "POST",
+    "path": "/chat/completions",
+    "body": {
+      "model": "$.model",
+      "messages": "$.messages",
+      "tools": "$.tools",
+      "max_tokens": "$.max_tokens",
+      "temperature": "$.temperature"
+    },
+    "response": {
+      "text": [
+        "choices.0.message.content"
+      ],
+      "reasoning": [
+        "choices.0.message.reasoning_content"
+      ],
+      "tool_calls": {
+        "each": "choices.0.message.tool_calls",
+        "id": "id",
+        "name": "function.name",
+        "arguments_json": "function.arguments"
+      },
+      "usage": {
+        "input": "usage.prompt_tokens",
+        "output": "usage.completion_tokens"
+      },
+      "error": {
+        "when": "error",
+        "code": "error.code",
+        "message": "error.message"
+      }
+    }
+  },
+  "stream": {
+    "request": {
+      "patch": {
+        "stream": true
+      }
+    },
+    "transport": "sse",
+    "done": [
+      "[DONE]"
+    ],
+    "on": [
+      {
+        "emit_text": "$.choices.0.delta.content"
+      },
+      {
+        "emit_reasoning": "$.choices.0.delta.reasoning_content"
+      },
+      {
+        "each": "$.choices.0.delta.tool_calls",
+        "index": "$.index",
+        "set_id": "$.id",
+        "set_name": "$.function.name",
+        "append_args": "$.function.arguments"
+      },
+      {
+        "usage_in": "$.usage.prompt_tokens",
+        "usage_out": "$.usage.completion_tokens"
+      },
+      {
+        "fail": "$.error.message"
+      }
+    ]
+  },
+  "probe": {
+    "method": "GET",
+    "path": "/models"
+  },
+  "embed": {
+    "method": "POST",
+    "path": "/embeddings",
+    "body": {
+      "model": "$.model",
+      "input": "$.texts"
+    },
+    "response": {
+      "each": "data",
+      "vector": "embedding"
+    }
+  }
+}

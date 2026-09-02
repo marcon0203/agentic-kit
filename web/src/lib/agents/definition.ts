@@ -43,7 +43,7 @@ export const EMPTY_FORM: FormState = {
   agent: '',
   role: '',
   version: '1.0',
-  provider: 'anthropic',
+  provider: 'deepseek',
   modelName: '',
   fallback: '',
   temperature: '',

@@ -53,12 +53,11 @@
         "provider": {
           "type": "string",
           "enum": [
-            "anthropic",
-            "openai",
-            "google",
             "deepseek",
+            "volcengine",
             "qwen",
-            "custom"
+            "custom",
+            "google"
           ]
         },
         "name": {

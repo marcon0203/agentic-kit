@@ -1367,6 +1367,26 @@ export interface paths {
         patch: operations["updateUserRoles"];
         trace?: never;
     };
+    "/model-provider-specs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 平台支持的模型渠道及其凭据字段
+         * @description 来源是后端的渠道注册表（内置的声明式渠道描述符 + 少数手写 client）。 前端据此渲染"新增模型提供商"的表单和显示名，不要在前端再抄一份渠道 列表。响应里只有渠道的形状，没有任何凭据值。
+         */
+        get: operations["listModelProviderSpecs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/skill-sources/skills": {
         parameters: {
             query?: never;
@@ -1564,8 +1584,22 @@ export interface components {
         Status: 1 | 2;
         /** @enum {string} */
         ResourceType: "tool" | "skill" | "mcp" | "knowledge_base" | "memory";
+        ModelProviderSpec: {
+            name: components["schemas"]["ProviderName"];
+            /** @description 给人看的渠道名 */
+            label: string;
+            /** @description 留空表示这个渠道没有默认地址（如 custom），登记时必须自己填 */
+            default_base_url?: string;
+            credentials: {
+                name: string;
+                /** @enum {string} */
+                type: "secret" | "text" | "url";
+                label: string;
+                required: boolean;
+            }[];
+        };
         /** @enum {string} */
-        ProviderName: "anthropic" | "openai" | "google" | "deepseek" | "qwen" | "custom";
+        ProviderName: "deepseek" | "volcengine" | "qwen" | "custom" | "google";
         /** @enum {string} */
         RunStatus: "running" | "finished" | "failed";
         Resource: {
@@ -5041,6 +5075,31 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listModelProviderSpecs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["ModelProviderSpec"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     listSkillsForReview: {

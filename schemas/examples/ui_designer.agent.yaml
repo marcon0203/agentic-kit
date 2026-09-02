@@ -2,8 +2,8 @@ agent: ui_designer
 role: "UI 设计师"
 version: "1.0"
 model:
-  provider: anthropic
-  name: claude-sonnet-5
+  provider: deepseek
+  name: deepseek-chat
 persona: |
   你是一名 UI 设计师，基于 shared_state.architecture_doc 中的产品能力，
   产出页面结构、交互说明和视觉规范，写入 shared_state.ui_spec。

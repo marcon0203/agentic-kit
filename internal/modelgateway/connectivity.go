@@ -27,9 +27,9 @@ type Validator interface {
 }
 
 // NewValidator returns the Validator for a components.schemas.ProviderName
-// value ("anthropic", "openai", "google", "deepseek", "qwen", "custom", or
-// any provider appended to registry.go's providers), or nil if the name
-// isn't registered. baseURL overrides the provider's documented default
+// value ("deepseek", "volcengine", "qwen", "custom", "google", or any
+// provider appended to registry.go's providers / added as a channel
+// descriptor), or nil if the name isn't registered. baseURL overrides the provider's documented default
 // endpoint; for "custom" there is no default, so an empty baseURL there
 // yields a Validator whose Validate call always fails (the domain Service
 // is expected to reject a base_url-less "custom" registration before ever
@@ -48,51 +48,6 @@ func newValidatorWithEndpoints(provider, baseURL string, ep providerOverrides) V
 		base = baseURL
 	}
 	return def.NewValidator(&http.Client{Timeout: connectivityTimeout}, base)
-}
-
-// anthropicValidator probes GET /v1/models, which Anthropic's API accepts
-// with just an x-api-key header and costs no completion tokens.
-type anthropicValidator struct {
-	client  *http.Client
-	baseURL string
-}
-
-func (v *anthropicValidator) Validate(ctx context.Context, apiKey string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.baseURL+"/v1/models", nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-	return doAuthProbe(v.client, req)
-}
-
-// openAICompatibleValidator probes GET {baseURL}/models with a bearer
-// token, the auth scheme shared by OpenAI, DeepSeek, Qwen's DashScope
-// compatible-mode endpoint, and any "custom" OpenAI-wire-compatible
-// endpoint.
-type openAICompatibleValidator struct {
-	client  *http.Client
-	baseURL string
-}
-
-func (v *openAICompatibleValidator) Validate(ctx context.Context, apiKey string) error {
-	if v.baseURL == "" {
-		return &validationError{"no base_url configured for this provider"}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, trimTrailingSlash(v.baseURL)+"/models", nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	return doAuthProbe(v.client, req)
-}
-
-func trimTrailingSlash(s string) string {
-	if len(s) > 0 && s[len(s)-1] == '/' {
-		return s[:len(s)-1]
-	}
-	return s
 }
 
 // googleValidator probes GET /v1beta/models with the key as a query

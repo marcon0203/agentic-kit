@@ -126,7 +126,7 @@ func validAgentDefinition(agentRef, version string) map[string]any {
 		"agent":        agentRef,
 		"role":         "Test Role",
 		"version":      version,
-		"model":        map[string]any{"provider": "anthropic", "name": "claude-sonnet-5"},
+		"model":        map[string]any{"provider": "deepseek", "name": "deepseek-chat"},
 		"persona":      "You are a test agent.",
 		"capabilities": map[string]any{"tools": []any{}, "skills": []any{}},
 		"constraints":  map[string]any{},

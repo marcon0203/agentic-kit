@@ -22,12 +22,12 @@ func (c *fakeGWClient) Complete(context.Context, string, string, string, modelga
 
 func TestGatewayLLM_GenerateContent(t *testing.T) {
 	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{
-		"anthropic": &fakeGWClient{content: "hello from the model", in: 12, out: 6},
+		"deepseek": &fakeGWClient{content: "hello from the model", in: 12, out: 6},
 	}, nil)
-	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil,
-		map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}})
+	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "deepseek", Name: "deepseek-chat"}, nil,
+		map[string]modelgateway.Credential{"deepseek": {APIKey: "sk-test"}})
 
-	if llm.Name() != "anthropic/claude-sonnet-5" {
+	if llm.Name() != "deepseek/deepseek-chat" {
 		t.Fatalf("unexpected Name(): %q", llm.Name())
 	}
 
@@ -57,7 +57,7 @@ func TestGatewayLLM_GenerateContent(t *testing.T) {
 
 func TestGatewayLLM_GenerateContent_PropagatesError(t *testing.T) {
 	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{}, nil) // no client registered
-	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil, map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}})
+	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "deepseek", Name: "deepseek-chat"}, nil, map[string]modelgateway.Credential{"deepseek": {APIKey: "sk-test"}})
 
 	req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hi", genai.RoleUser)}}
 	var gotErr error
@@ -85,9 +85,9 @@ func (c *fakeToolGWClient) Complete(_ context.Context, _, _, _ string, req model
 
 func TestGatewayLLM_GenerateContent_PassesDeclaredToolsThrough(t *testing.T) {
 	client := &fakeToolGWClient{toolCalls: []modelgateway.ToolCall{{ID: "call_1", Name: "run_query", Arguments: map[string]any{"sql": "select 1"}}}}
-	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{"anthropic": client}, nil)
-	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil,
-		map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}})
+	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{"deepseek": client}, nil)
+	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "deepseek", Name: "deepseek-chat"}, nil,
+		map[string]modelgateway.Credential{"deepseek": {APIKey: "sk-test"}})
 
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{genai.NewContentFromText("how many agents?", genai.RoleUser)},
@@ -131,9 +131,9 @@ func TestGatewayLLM_GenerateContent_PassesDeclaredToolsThrough(t *testing.T) {
 // the way a text-only contentText walk would drop them.
 func TestGatewayLLM_GenerateContent_ReplaysFunctionCallHistory(t *testing.T) {
 	client := &fakeToolGWClient{}
-	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{"anthropic": client}, nil)
-	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil,
-		map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}})
+	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{"deepseek": client}, nil)
+	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "deepseek", Name: "deepseek-chat"}, nil,
+		map[string]modelgateway.Credential{"deepseek": {APIKey: "sk-test"}})
 
 	req := &model.LLMRequest{
 		Contents: []*genai.Content{
@@ -228,9 +228,9 @@ func (c *fakeStreamingGWClient) CompleteStream(_ context.Context, _, _, _ string
 // LLMResponse per delta before the final non-partial one.
 func TestGatewayLLM_GenerateContent_StreamTrueYieldsPartialChunksThenFinal(t *testing.T) {
 	client := &fakeStreamingGWClient{deltas: []string{"Hello", ", world"}}
-	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{"anthropic": client}, nil)
-	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "anthropic", Name: "claude-sonnet-5"}, nil,
-		map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}})
+	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{"deepseek": client}, nil)
+	llm := NewGatewayLLM(gw, modelgateway.ModelSpec{Provider: "deepseek", Name: "deepseek-chat"}, nil,
+		map[string]modelgateway.Credential{"deepseek": {APIKey: "sk-test"}})
 
 	req := &model.LLMRequest{Contents: []*genai.Content{genai.NewContentFromText("hi", genai.RoleUser)}}
 	var responses []*model.LLMResponse

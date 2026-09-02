@@ -6,7 +6,7 @@ const VALID_AGENT = {
   agent: 'architect',
   role: '系统架构师',
   version: '1.0',
-  model: { provider: 'anthropic', name: 'claude-sonnet-5' },
+  model: { provider: 'deepseek', name: 'deepseek-chat' },
   persona: '你是一名系统架构师',
   capabilities: { tools: [], skills: [] },
   constraints: { max_tokens_per_turn: 8000 },

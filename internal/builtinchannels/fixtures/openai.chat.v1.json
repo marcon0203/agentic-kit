@@ -1,0 +1,248 @@
+[
+  {
+    "name": "基础文本 + usage",
+    "request": {
+      "model": "deepseek-chat",
+      "messages": [
+        {
+          "role": "system",
+          "content": "你是一个助手"
+        },
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ],
+      "max_tokens": 100,
+      "temperature": 0.7
+    },
+    "expect_http": {
+      "method": "POST",
+      "path": "/chat/completions",
+      "body": {
+        "model": "deepseek-chat",
+        "max_tokens": 100,
+        "temperature": 0.7,
+        "messages": [
+          {
+            "role": "system",
+            "content": "你是一个助手"
+          },
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ]
+      }
+    },
+    "complete_response": {
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "你好，有什么可以帮你？"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 12,
+        "completion_tokens": 8
+      }
+    },
+    "stream_response": "data: {\"choices\": [{\"delta\": {\"role\": \"assistant\", \"content\": \"你好\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"，有什么\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"可以帮你？\"}}]}\n\ndata: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}], \"usage\": {\"prompt_tokens\": 12, \"completion_tokens\": 8}}\n\ndata: [DONE]\n\n",
+    "expect_result": {
+      "content": "你好，有什么可以帮你？",
+      "input_tokens": 12,
+      "output_tokens": 8
+    }
+  },
+  {
+    "name": "工具调用（流式分片攒参数）",
+    "request": {
+      "model": "deepseek-chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "北京天气"
+        }
+      ],
+      "tools": [
+        {
+          "name": "get_weather",
+          "description": "查询天气",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      ]
+    },
+    "expect_http": {
+      "method": "POST",
+      "path": "/chat/completions",
+      "body": {
+        "tools": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "description": "查询天气",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "city": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "city"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "complete_response": {
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                  "name": "get_weather",
+                  "arguments": "{\"city\": \"北京\"}"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 30,
+        "completion_tokens": 15
+      }
+    },
+    "stream_response": "data: {\"choices\": [{\"delta\": {\"role\": \"assistant\", \"tool_calls\": [{\"index\": 0, \"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"arguments\": \"\"}}]}}]}\n\ndata: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": 0, \"function\": {\"arguments\": \"{\\\"ci\"}}]}}]}\n\ndata: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": 0, \"function\": {\"arguments\": \"ty\\\": \\\"北\"}}]}}]}\n\ndata: {\"choices\": [{\"delta\": {\"tool_calls\": [{\"index\": 0, \"function\": {\"arguments\": \"京\\\"}\"}}]}}]}\n\ndata: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"tool_calls\"}], \"usage\": {\"prompt_tokens\": 30, \"completion_tokens\": 15}}\n\ndata: [DONE]\n\n",
+    "expect_result": {
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "name": "get_weather",
+          "arguments": {
+            "city": "北京"
+          }
+        }
+      ],
+      "input_tokens": 30,
+      "output_tokens": 15
+    }
+  },
+  {
+    "name": "思维链（reasoning_content）",
+    "request": {
+      "model": "deepseek-reasoner",
+      "messages": [
+        {
+          "role": "user",
+          "content": "1+1"
+        }
+      ]
+    },
+    "complete_response": {
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "reasoning_content": "先想一下加法",
+            "content": "2"
+          }
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 5,
+        "completion_tokens": 3
+      }
+    },
+    "stream_response": "data: {\"choices\": [{\"delta\": {\"reasoning_content\": \"先想一下\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"reasoning_content\": \"加法\"}}]}\n\ndata: {\"choices\": [{\"delta\": {\"content\": \"2\"}}]}\n\ndata: {\"choices\": [{\"delta\": {}}], \"usage\": {\"prompt_tokens\": 5, \"completion_tokens\": 3}}\n\ndata: [DONE]\n\n",
+    "expect_result": {
+      "content": "2",
+      "reasoning": "先想一下加法",
+      "input_tokens": 5,
+      "output_tokens": 3
+    }
+  },
+  {
+    "name": "工具结果回放的消息形状",
+    "request": {
+      "model": "deepseek-chat",
+      "messages": [
+        {
+          "role": "user",
+          "content": "北京天气"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "name": "get_weather",
+              "arguments": {
+                "city": "北京"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "tool_name": "get_weather",
+          "content": "晴，25 度"
+        }
+      ]
+    },
+    "expect_http": {
+      "method": "POST",
+      "path": "/chat/completions",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "北京天气"
+          },
+          {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                  "name": "get_weather",
+                  "arguments": "{\"city\":\"北京\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "晴，25 度"
+          }
+        ]
+      }
+    }
+  }
+]

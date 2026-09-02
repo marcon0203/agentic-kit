@@ -9,7 +9,7 @@ import type { components } from '@/lib/api/schema'
 type ProviderName = components['schemas']['ProviderName']
 type ModelCatalogEntry = components['schemas']['ModelCatalogEntry']
 
-const PROVIDERS: ProviderName[] = ['anthropic', 'openai', 'google', 'deepseek', 'qwen', 'custom']
+const PROVIDERS: ProviderName[] = ['deepseek', 'volcengine', 'qwen', 'custom', 'google']
 
 interface BasicInfoStepProps {
   form: FormState

@@ -315,12 +315,11 @@ export function AgentForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="anthropic">anthropic</SelectItem>
-              <SelectItem value="openai">openai</SelectItem>
-              <SelectItem value="google">google</SelectItem>
               <SelectItem value="deepseek">deepseek</SelectItem>
+              <SelectItem value="volcengine">volcengine</SelectItem>
               <SelectItem value="qwen">qwen</SelectItem>
               <SelectItem value="custom">custom</SelectItem>
+              <SelectItem value="google">google</SelectItem>
             </SelectContent>
           </Select>
         </Field>
@@ -331,7 +330,7 @@ export function AgentForm({
             onChange={(e) => set('modelName', e.target.value)}
             onBlur={() => validateField('model.name')}
             className={inputClass('model.name')}
-            placeholder="claude-sonnet-5"
+            placeholder="deepseek-chat"
           />
         </Field>
         <Field label="fallback（逗号分隔，格式 provider/name）" htmlFor="agent-fallback" helper="主模型不可用时按顺序降级">
@@ -340,7 +339,7 @@ export function AgentForm({
             value={form.fallback}
             onChange={(e) => set('fallback', e.target.value)}
             className="h-12 rounded-sm"
-            placeholder="openai/gpt-5, google/gemini-3-pro"
+            placeholder="volcengine/doubao-seed-1-6, qwen/qwen-plus"
           />
         </Field>
         <Field label="temperature（可选，0-2）" htmlFor="agent-temperature">

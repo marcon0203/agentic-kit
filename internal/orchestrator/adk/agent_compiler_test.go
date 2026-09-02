@@ -24,7 +24,7 @@ func TestCompileAgent_Success(t *testing.T) {
 	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{}, nil)
 	def := map[string]any{
 		"agent": "architect", "role": "System Architect",
-		"model":   map[string]any{"provider": "anthropic", "name": "claude-sonnet-5"},
+		"model":   map[string]any{"provider": "deepseek", "name": "deepseek-chat"},
 		"persona": "You are a system architect.",
 		"capabilities": map[string]any{
 			"tools":  []any{"internal-search"},
@@ -37,7 +37,7 @@ func TestCompileAgent_Success(t *testing.T) {
 	}}
 
 	a, err := CompileAgent(context.Background(), def, AgentCompileOptions{
-		Gateway: gw, Credentials: map[string]modelgateway.Credential{"anthropic": {APIKey: "sk-test"}}, Authorizer: authorizer,
+		Gateway: gw, Credentials: map[string]modelgateway.Credential{"deepseek": {APIKey: "sk-test"}}, Authorizer: authorizer,
 	})
 	if err != nil {
 		t.Fatalf("CompileAgent: %v", err)
@@ -50,7 +50,7 @@ func TestCompileAgent_Success(t *testing.T) {
 func TestCompileAgent_UnauthorizedResource_ExcludedFromTools(t *testing.T) {
 	def := map[string]any{
 		"agent": "architect", "role": "R",
-		"model":        map[string]any{"provider": "anthropic", "name": "claude-sonnet-5"},
+		"model":        map[string]any{"provider": "deepseek", "name": "deepseek-chat"},
 		"persona":      "p",
 		"capabilities": map[string]any{"tools": []any{"private-tool"}, "skills": []any{}},
 	}
@@ -68,7 +68,7 @@ func TestCompileAgent_UnauthorizedResource_ExcludedFromTools(t *testing.T) {
 func TestCompileAgent_AuthorizerError_PropagatesAsCompileError(t *testing.T) {
 	def := map[string]any{
 		"agent": "architect", "role": "R",
-		"model":        map[string]any{"provider": "anthropic", "name": "claude-sonnet-5"},
+		"model":        map[string]any{"provider": "deepseek", "name": "deepseek-chat"},
 		"persona":      "p",
 		"capabilities": map[string]any{"tools": []any{"boom"}, "skills": []any{}},
 	}
@@ -82,7 +82,7 @@ func TestCompileAgent_NoAPIKeyForProvider_ReturnsError(t *testing.T) {
 	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{}, nil)
 	def := map[string]any{
 		"agent": "architect", "role": "R",
-		"model":   map[string]any{"provider": "anthropic", "name": "claude-sonnet-5"},
+		"model":   map[string]any{"provider": "deepseek", "name": "deepseek-chat"},
 		"persona": "p",
 	}
 	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, Credentials: map[string]modelgateway.Credential{}})
@@ -96,12 +96,12 @@ func TestCompileAgent_APIKeyOnlyForFallback_Succeeds(t *testing.T) {
 	def := map[string]any{
 		"agent": "architect", "role": "R",
 		"model": map[string]any{
-			"provider": "anthropic", "name": "claude-sonnet-5",
-			"fallback": []any{"openai/gpt-4o"},
+			"provider": "deepseek", "name": "deepseek-chat",
+			"fallback": []any{"volcengine/doubao-seed-1-6"},
 		},
 		"persona": "p",
 	}
-	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, Credentials: map[string]modelgateway.Credential{"openai": {APIKey: "sk-test"}}})
+	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, Credentials: map[string]modelgateway.Credential{"volcengine": {APIKey: "sk-test"}}})
 	if err != nil {
 		t.Fatalf("expected compilation to succeed when only a fallback provider has a key, got %v", err)
 	}
@@ -119,9 +119,9 @@ func TestCompileAgent_InvalidFallbackSpec_ReturnsError(t *testing.T) {
 	gw := modelgateway.NewGatewayWithClients(map[string]modelgateway.Client{}, nil)
 	def := map[string]any{
 		"agent": "a", "role": "r", "persona": "p",
-		"model": map[string]any{"provider": "anthropic", "name": "claude-sonnet-5", "fallback": []any{"not-a-valid-spec"}},
+		"model": map[string]any{"provider": "deepseek", "name": "deepseek-chat", "fallback": []any{"not-a-valid-spec"}},
 	}
-	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, Credentials: map[string]modelgateway.Credential{"anthropic": {APIKey: "k"}}})
+	_, err := CompileAgent(context.Background(), def, AgentCompileOptions{Gateway: gw, Credentials: map[string]modelgateway.Credential{"deepseek": {APIKey: "k"}}})
 	if err == nil {
 		t.Fatal("expected an error for a malformed model.fallback entry")
 	}

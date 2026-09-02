@@ -2754,6 +2754,34 @@ paths:
   # ────────────────────────── Skill 源 ──────────────────────────
   # 系统配置 → Skill 源：管理员登记公开 Skill 市场（如 https://clawhub.ai/），
   # 同步后的公开 Skill 出现在 Skill 管理 → 市场视图（GET /skill-market）。
+  /model-provider-specs:
+    get:
+      tags: [ModelProviders]
+      summary: 平台支持的模型渠道及其凭据字段
+      description: >-
+        来源是后端的渠道注册表（内置的声明式渠道描述符 + 少数手写 client）。
+        前端据此渲染"新增模型提供商"的表单和显示名，不要在前端再抄一份渠道
+        列表。响应里只有渠道的形状，没有任何凭据值。
+      operationId: listModelProviderSpecs
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/ModelProviderSpec' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /skill-sources/skills:
     get:
       tags: [SkillSources]
@@ -3148,9 +3176,29 @@ components:
       type: string
       enum: [tool, skill, mcp, knowledge_base, memory]
 
+    ModelProviderSpec:
+      type: object
+      required: [name, label, credentials]
+      properties:
+        name: { $ref: '#/components/schemas/ProviderName' }
+        label: { type: string, description: 给人看的渠道名 }
+        default_base_url:
+          type: string
+          description: 留空表示这个渠道没有默认地址（如 custom），登记时必须自己填
+        credentials:
+          type: array
+          items:
+            type: object
+            required: [name, type, label, required]
+            properties:
+              name: { type: string }
+              type: { type: string, enum: [secret, text, url] }
+              label: { type: string }
+              required: { type: boolean }
+
     ProviderName:
       type: string
-      enum: [anthropic, openai, google, deepseek, qwen, custom]
+      enum: [deepseek, volcengine, qwen, custom, google]
 
     RunStatus:
       type: string

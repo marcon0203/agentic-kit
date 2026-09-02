@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
+	"github.com/marcon0203/agentic-kit/internal/modelgateway"
 )
 
 // ProviderAccessReader reports which providers the caller can actually run
@@ -127,4 +128,19 @@ func (h *ModelProviderHandlers) MyAccess(w http.ResponseWriter, r *http.Request)
 		providers = []string{}
 	}
 	writeJSON(w, r, http.StatusOK, modelAccessDTO{Providers: providers, HasProvider: len(providers) > 0})
+}
+
+// Specs handles GET /model-provider-specs — 平台支持的模型渠道以及每个渠
+// 道要哪几个凭据字段。
+//
+// 它的来源是 modelgateway 的渠道注册表（内置声明式描述符 + 少数手写
+// client），前端据此渲染"新增模型提供商"的表单和显示名，而不是在前端再抄
+// 一份渠道列表——抄第二份的下场是每加一个渠道就有一处忘了改。
+//
+// 不需要鉴权范围之外的东西：这里只有渠道的形状，没有任何凭据值。
+func (h *ModelProviderHandlers) Specs(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{"items": modelgateway.ProviderSpecs()})
 }

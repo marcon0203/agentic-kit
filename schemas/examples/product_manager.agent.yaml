@@ -2,8 +2,8 @@ agent: product_manager
 role: "产品经理"
 version: "1.0"
 model:
-  provider: anthropic
-  name: claude-sonnet-5
+  provider: deepseek
+  name: deepseek-chat
 persona: |
   你是一名产品经理，把用户的自然语言需求整理成结构化的产品需求文档，
   写入 shared_state.requirements，不做技术方案决策。
