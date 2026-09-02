@@ -50,7 +50,7 @@ export function ModelProviderPage() {
   const queryClient = useQueryClient()
   const [modality, setModality] = useState('all')
   const [providerFilter, setProviderFilter] = useState('all')
-  const [tab, setTab] = useState<'featured' | 'all'>('featured')
+  const [tab, setTab] = useState<'featured' | 'all'>('all')
   const [connecting, setConnecting] = useState<ProviderName | null>(null)
   const { specs } = useProviderSpecs()
 
@@ -145,7 +145,24 @@ export function ModelProviderPage() {
           )}
 
           {catalogQuery.isSuccess && grouped.length === 0 && (
-            <p className="text-body-sm text-ink-500">没有匹配当前筛选条件的模型。</p>
+            <div className="flex flex-col items-start gap-space-2">
+              {(catalogQuery.data ?? []).length === 0 ? (
+                <p className="text-body-sm text-ink-500">
+                  目录里还没有模型。去 系统配置 → 模型提供商 添加一个供应商，再在它下面添加模型。
+                </p>
+              ) : tab === 'featured' ? (
+                // 单说"没有匹配"会让人以为模型没添加成功。精选是个要手动勾
+                // 的标记，空在这里的最常见原因就是没人勾过。
+                <>
+                  <p className="text-body-sm text-ink-500">当前只显示标了精选的模型，还没有模型被标为精选。</p>
+                  <Button variant="outline" size="sm" onClick={() => setTab('all')}>
+                    查看全部模型
+                  </Button>
+                </>
+              ) : (
+                <p className="text-body-sm text-ink-500">没有匹配当前筛选条件的模型。</p>
+              )}
+            </div>
           )}
 
           {catalogQuery.isSuccess && (

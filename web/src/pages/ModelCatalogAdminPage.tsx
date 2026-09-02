@@ -78,6 +78,7 @@ export function ModelCatalogAdminPage() {
         }),
       )
       queryClient.invalidateQueries({ queryKey: ['catalog-providers'] })
+      queryClient.invalidateQueries({ queryKey: ['model-catalog'] })
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '操作没能完成，请再试一次')
     }
@@ -88,6 +89,7 @@ export function ModelCatalogAdminPage() {
     try {
       unwrap(await apiClient.DELETE('/model-catalog/providers/{id}', { params: { path: { id: p.id } } }))
       queryClient.invalidateQueries({ queryKey: ['catalog-providers'] })
+      queryClient.invalidateQueries({ queryKey: ['model-catalog'] })
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '删除没能完成，请再试一次')
     }
@@ -204,6 +206,7 @@ export function ModelCatalogAdminPage() {
         onOpenChange={setCreateOpen}
         onCreated={() => {
           queryClient.invalidateQueries({ queryKey: ['catalog-providers'] })
+          queryClient.invalidateQueries({ queryKey: ['model-catalog'] })
           setCreateOpen(false)
         }}
       />
@@ -215,6 +218,7 @@ export function ModelCatalogAdminPage() {
         }}
         onSaved={() => {
           queryClient.invalidateQueries({ queryKey: ['catalog-providers'] })
+          queryClient.invalidateQueries({ queryKey: ['model-catalog'] })
           setCredentialTarget(null)
         }}
       />
