@@ -1079,6 +1079,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/me/model-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 当前账号实际可用的 Provider（自己接入的 + 管理员配置的统一凭证）
+         * @description 运行前置检查和编译器判断"有没有可用模型"时用的是同一份数据：账号自己接入的
+         *     Provider，加上管理员在「系统配置 → 模型提供商」里配置的统一凭证（个人凭证优先）。
+         *     `/model-providers` 只列账号自己接入的那部分，所以所有"能不能发起运行"的 UI 判断
+         *     都应该读这个接口，否则纯靠管理员统一凭证的账号会被误判成"没有接入任何 Provider"。
+         *     只返回 Provider 名字，不返回任何凭证内容。
+         */
+        get: operations["getMyModelAccess"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model-providers": {
         parameters: {
             query?: never;
@@ -1850,6 +1874,18 @@ export interface components {
             status: components["schemas"]["Status"];
             /** Format: date-time */
             created_at: string;
+        };
+        /** @description 当前账号实际能跑起来的 Provider 集合——个人接入的，加上管理员配置的统一凭证。 运行前置检查用的就是这一份，所以 UI 的"能不能发起运行"判断读它而不是 /model-providers。只有名字，没有任何凭证内容。 */
+        ModelAccess: {
+            /**
+             * @example [
+             *       "deepseek",
+             *       "anthropic"
+             *     ]
+             */
+            providers: string[];
+            /** @description providers 是否非空，前端 gating 直接读这个 */
+            has_provider: boolean;
         };
         /** @description 一条模型广场展示行，来自系统配置 → 模型提供商里管理员登记的 Provider + Model 联合读取；provider 是该 Provider 的 key（自由文本），不是 ProviderName 那个 为已接入凭证准备的封闭枚举。 */
         ModelCatalogEntry: {
@@ -4244,6 +4280,29 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Envelope"] & {
                         data?: components["schemas"]["ModelCatalogEntry"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getMyModelAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ModelAccess"];
                     };
                 };
             };

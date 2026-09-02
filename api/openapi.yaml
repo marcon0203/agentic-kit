@@ -2126,6 +2126,30 @@ paths:
                         items: { $ref: '#/components/schemas/ModelCatalogEntry' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /me/model-access:
+    get:
+      tags: [ModelProviders]
+      summary: 当前账号实际可用的 Provider（自己接入的 + 管理员配置的统一凭证）
+      description: |
+        运行前置检查和编译器判断"有没有可用模型"时用的是同一份数据：账号自己接入的
+        Provider，加上管理员在「系统配置 → 模型提供商」里配置的统一凭证（个人凭证优先）。
+        `/model-providers` 只列账号自己接入的那部分，所以所有"能不能发起运行"的 UI 判断
+        都应该读这个接口，否则纯靠管理员统一凭证的账号会被误判成"没有接入任何 Provider"。
+        只返回 Provider 名字，不返回任何凭证内容。
+      operationId: getMyModelAccess
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ModelAccess' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /model-providers:
     get:
       tags: [ModelProviders]
@@ -3478,6 +3502,22 @@ components:
         base_url: { type: string }
         status: { $ref: '#/components/schemas/Status' }
         created_at: { type: string, format: date-time }
+
+    ModelAccess:
+      type: object
+      description: >-
+        当前账号实际能跑起来的 Provider 集合——个人接入的，加上管理员配置的统一凭证。
+        运行前置检查用的就是这一份，所以 UI 的"能不能发起运行"判断读它而不是
+        /model-providers。只有名字，没有任何凭证内容。
+      required: [providers, has_provider]
+      properties:
+        providers:
+          type: array
+          items: { type: string }
+          examples: [['deepseek', 'anthropic']]
+        has_provider:
+          type: boolean
+          description: providers 是否非空，前端 gating 直接读这个
 
     ModelCatalogEntry:
       type: object

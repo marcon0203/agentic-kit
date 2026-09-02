@@ -317,7 +317,7 @@ func run() error {
 		Agents:            api.NewAgentHandlers(agentService),
 		Bundles:           api.NewBundleHandlers(bundleService),
 		Marketplace:       api.NewMarketplaceHandlers(marketplaceService),
-		ModelProviders:    api.NewModelProviderHandlers(modelCenter),
+		ModelProviders:    api.NewModelProviderHandlers(modelCenter, providerKeys),
 		ModelCatalog:      api.NewModelCatalogHandlers(modelCatalog),
 		ModelCatalogAdmin: api.NewModelCatalogAdminHandlers(modelCatalog),
 		SkillSources: api.NewSkillSourceHandlers(skillsource.NewService(

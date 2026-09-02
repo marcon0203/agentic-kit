@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"sort"
 
 	"github.com/marcon0203/agentic-kit/internal/crypto"
 	"github.com/marcon0203/agentic-kit/internal/modelgateway"
@@ -62,4 +63,28 @@ func (s *ProviderKeyStore) Keys(ctx context.Context, ownerID int64) (map[string]
 		keys[row.ProviderKey] = modelgateway.Credential{APIKey: string(plaintext), BaseURL: row.BaseUrl.String}
 	}
 	return keys, nil
+}
+
+// UsableProviders names the providers this owner can actually run with —
+// Keys' own answer, with the credentials themselves dropped so the name
+// list can travel out to the API layer and the frontend.
+//
+// It exists because "can this account run anything?" was previously asked
+// two different ways: the run pre-flight and the compiler both ask Keys
+// (personal connection *or* an admin's org-wide default), while the UI
+// asked GET /model-providers, which only ever lists personal connections.
+// An account running purely on an admin-configured org default therefore
+// saw every 运行 button greyed out even though every run would have
+// succeeded. One source of truth avoids re-introducing that skew.
+func (s *ProviderKeyStore) UsableProviders(ctx context.Context, ownerID int64) ([]string, error) {
+	keys, err := s.Keys(ctx, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(keys))
+	for name := range keys {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
 }

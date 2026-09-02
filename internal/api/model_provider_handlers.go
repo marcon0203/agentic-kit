@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -9,15 +10,23 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 )
 
+// ProviderAccessReader reports which providers the caller can actually run
+// with. Deliberately names only — the credentials behind them never reach
+// the transport layer, so there is nothing here for a handler to leak.
+type ProviderAccessReader interface {
+	UsableProviders(ctx context.Context, ownerID int64) ([]string, error)
+}
+
 // ModelProviderHandlers is the HTTP transport for provider registration
 // (spec-09). Note what the DTO does not have: there is no credential
 // field, because modelcenter.Provider has no credential field either.
 type ModelProviderHandlers struct {
-	svc *modelcenter.Service
+	svc    *modelcenter.Service
+	access ProviderAccessReader
 }
 
-func NewModelProviderHandlers(svc *modelcenter.Service) *ModelProviderHandlers {
-	return &ModelProviderHandlers{svc: svc}
+func NewModelProviderHandlers(svc *modelcenter.Service, access ProviderAccessReader) *ModelProviderHandlers {
+	return &ModelProviderHandlers{svc: svc, access: access}
 }
 
 type modelProviderDTO struct {
@@ -84,4 +93,38 @@ func (h *ModelProviderHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, r, http.StatusCreated, toModelProviderDTO(created))
+}
+
+type modelAccessDTO struct {
+	Providers   []string `json:"providers"`
+	HasProvider bool     `json:"has_provider"`
+}
+
+// MyAccess handles GET /me/model-access — the providers this account can
+// actually run with, personal connections and an admin's org-wide defaults
+// alike. Every "can I start a run?" gate in the UI reads this rather than
+// GET /model-providers: that endpoint lists only what the user registered
+// themselves, so an account running purely on an org-wide default was told
+// it had no provider at all and had its 运行 buttons disabled, while the
+// backend would have run the same Bundle happily.
+func (h *ModelProviderHandlers) MyAccess(w http.ResponseWriter, r *http.Request) {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
+		return
+	}
+	if h.access == nil {
+		writeJSON(w, r, http.StatusOK, modelAccessDTO{Providers: []string{}})
+		return
+	}
+
+	providers, err := h.access.UsableProviders(r.Context(), userID)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	if providers == nil {
+		providers = []string{}
+	}
+	writeJSON(w, r, http.StatusOK, modelAccessDTO{Providers: providers, HasProvider: len(providers) > 0})
 }

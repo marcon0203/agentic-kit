@@ -76,16 +76,31 @@ type modelCenterFixture struct {
 	usage     *UsageHandlers
 	repo      *stubProviderRepo
 	reader    *stubUsageReader
+	access    *stubProviderAccess
 }
 
 func newModelCenterFixture(checkErr error) *modelCenterFixture {
 	repo := &stubProviderRepo{}
 	reader := &stubUsageReader{}
 	svc := modelcenter.NewService(repo, stubCipher{}, stubChecker{err: checkErr}, reader)
+	access := &stubProviderAccess{}
 	return &modelCenterFixture{
-		providers: NewModelProviderHandlers(svc), usage: NewUsageHandlers(svc),
-		repo: repo, reader: reader,
+		providers: NewModelProviderHandlers(svc, access), usage: NewUsageHandlers(svc),
+		repo: repo, reader: reader, access: access,
 	}
+}
+
+// stubProviderAccess stands in for postgres.ProviderKeyStore — the real one
+// merges an admin's org-wide default credentials in behind the caller's own
+// personal connections, which is exactly the difference GET /me/model-access
+// exists to surface.
+type stubProviderAccess struct {
+	providers []string
+	err       error
+}
+
+func (s *stubProviderAccess) UsableProviders(context.Context, int64) ([]string, error) {
+	return s.providers, s.err
 }
 
 func doModelCenterRequest(h http.HandlerFunc, userID int64, method, path string, body any) *httptest.ResponseRecorder {
@@ -254,10 +269,66 @@ func TestGetMyUsage_InvalidPeriodReturns400(t *testing.T) {
 	}
 }
 
+// TestModelProviderMyAccess_ReportsOrgWideCredential is the regression test
+// for "创建了应用但运行按钮是灰的": an account with no personal provider
+// connection of its own can still run on an admin's org-wide default
+// (系统配置 → 模型提供商), which is what the run pre-flight and the compiler
+// both see. GET /model-providers only ever lists personal connections, so
+// the UI's "can I run?" gate has to read this endpoint instead.
+func TestModelProviderMyAccess_ReportsOrgWideCredential(t *testing.T) {
+	f := newModelCenterFixture(nil)
+	f.access.providers = []string{"deepseek"} // no personal connection registered at all
+
+	w := doModelCenterRequest(f.providers.MyAccess, 1, http.MethodGet, "/me/model-access", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	dataBytes, _ := json.Marshal(env.Data)
+	var dto modelAccessDTO
+	if err := json.Unmarshal(dataBytes, &dto); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if !dto.HasProvider {
+		t.Fatal("expected has_provider=true for an account running on an org-wide default")
+	}
+	if len(dto.Providers) != 1 || dto.Providers[0] != "deepseek" {
+		t.Fatalf("providers = %+v, want [deepseek]", dto.Providers)
+	}
+}
+
+func TestModelProviderMyAccess_NoCredentialAnywhere(t *testing.T) {
+	f := newModelCenterFixture(nil)
+
+	w := doModelCenterRequest(f.providers.MyAccess, 1, http.MethodGet, "/me/model-access", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	var env Envelope
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	dataBytes, _ := json.Marshal(env.Data)
+	var dto modelAccessDTO
+	if err := json.Unmarshal(dataBytes, &dto); err != nil {
+		t.Fatalf("unmarshal data: %v", err)
+	}
+	if dto.HasProvider {
+		t.Fatal("expected has_provider=false when neither a personal nor an org-wide credential exists")
+	}
+	// A nil slice would serialize as JSON null and break the frontend's
+	// .length check — the same nil-slice guard every list response here has.
+	if dto.Providers == nil {
+		t.Fatal("expected an empty array rather than null")
+	}
+}
+
 func TestModelCenterHandlers_RequireAuthenticatedUser(t *testing.T) {
 	f := newModelCenterFixture(nil)
 	for name, handler := range map[string]http.HandlerFunc{
 		"list": f.providers.List, "create": f.providers.Create, "usage": f.usage.GetMyUsage,
+		"model-access": f.providers.MyAccess,
 	} {
 		w := httptest.NewRecorder()
 		handler(w, httptest.NewRequest(http.MethodGet, "/model-providers", nil))

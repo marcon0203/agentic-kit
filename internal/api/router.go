@@ -161,6 +161,7 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 			if cfg.ModelProviders != nil {
 				r.Get("/model-providers", cfg.ModelProviders.List)
 				r.Post("/model-providers", cfg.ModelProviders.Create)
+				r.Get("/me/model-access", cfg.ModelProviders.MyAccess)
 			}
 			if cfg.ModelCatalog != nil {
 				r.Get("/model-catalog", cfg.ModelCatalog.List)
