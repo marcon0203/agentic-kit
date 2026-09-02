@@ -2,7 +2,7 @@ package modelgateway
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,18 +33,6 @@ func TestQwenValidator_InvalidKey(t *testing.T) {
 	defer srv.Close()
 
 	v := newValidatorWithEndpoints("qwen", "", providerOverrides{"qwen": srv.URL})
-	if err := v.Validate(context.Background(), "bad-key"); err != ErrCredentialsInvalid {
-		t.Fatalf("expected ErrCredentialsInvalid, got %v", err)
-	}
-}
-
-func TestGoogleValidator_InvalidKey(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-	}))
-	defer srv.Close()
-
-	v := newValidatorWithEndpoints("google", "", providerOverrides{"google": srv.URL})
 	if err := v.Validate(context.Background(), "bad-key"); err != ErrCredentialsInvalid {
 		t.Fatalf("expected ErrCredentialsInvalid, got %v", err)
 	}
@@ -107,95 +95,6 @@ func TestParseModelSpec_Invalid(t *testing.T) {
 }
 
 // ── completion clients ───────────────────────────────────────────────
-
-func TestGoogleClient_Complete(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"hi from gemini"}]}}],"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":3}}`))
-	}))
-	defer srv.Close()
-
-	c := &googleClient{client: srv.Client(), baseURL: srv.URL}
-	result, err := c.Complete(context.Background(), "key", "", "gemini-1.5-pro", CompletionRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.Content != "hi from gemini" || result.InputTokens != 6 || result.OutputTokens != 3 {
-		t.Fatalf("unexpected result: %+v", result)
-	}
-}
-
-func TestGoogleClient_SendsFunctionDeclarationsAndParsesFunctionCall(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		sysInstr, ok := body["systemInstruction"].(map[string]any)
-		if !ok || sysInstr["parts"].([]any)[0].(map[string]any)["text"] != "be helpful" {
-			t.Fatalf("expected systemInstruction as a top-level field, got %v", body)
-		}
-		tools, _ := body["tools"].([]any)
-		if len(tools) != 1 {
-			t.Fatalf("expected 1 tools entry, got %v", body["tools"])
-		}
-		decls := tools[0].(map[string]any)["functionDeclarations"].([]any)
-		if len(decls) != 1 || decls[0].(map[string]any)["name"] != "run_query" {
-			t.Fatalf("unexpected functionDeclarations: %v", decls)
-		}
-		_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"functionCall":{"name":"run_query","args":{"sql":"select 1"}}}]}}],"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":3}}`))
-	}))
-	defer srv.Close()
-
-	c := &googleClient{client: srv.Client(), baseURL: srv.URL}
-	result, err := c.Complete(context.Background(), "key", "", "gemini-1.5-pro", CompletionRequest{
-		Messages: []Message{{Role: "system", Content: "be helpful"}, {Role: "user", Content: "how many agents?"}},
-		Tools: []Tool{{
-			Name: "run_query", Description: "runs a SQL query",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"sql": map[string]any{"type": "string"}}},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(result.ToolCalls) != 1 || result.ToolCalls[0].Name != "run_query" {
-		t.Fatalf("unexpected tool calls: %+v", result.ToolCalls)
-	}
-	if result.ToolCalls[0].Arguments["sql"] != "select 1" {
-		t.Fatalf("unexpected tool call arguments: %+v", result.ToolCalls[0].Arguments)
-	}
-}
-
-func TestGoogleClient_CompleteStream_StreamsTextDeltas(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.Path, ":streamGenerateContent") {
-			t.Fatalf("expected the streaming endpoint, got %s", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		chunks := []string{
-			`{"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}`,
-			`{"candidates":[{"content":{"parts":[{"text":", world"}]}}],"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":3}}`,
-		}
-		for _, c := range chunks {
-			_, _ = w.Write([]byte("data: " + c + "\n\n"))
-		}
-	}))
-	defer srv.Close()
-
-	c := &googleClient{client: srv.Client(), baseURL: srv.URL}
-	var deltas []string
-	result, err := c.CompleteStream(context.Background(), "key", "", "gemini-1.5-pro", CompletionRequest{
-		Messages: []Message{{Role: "user", Content: "hi"}},
-	}, func(d StreamDelta) { deltas = append(deltas, d.TextDelta) })
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(deltas) != 2 || deltas[0] != "Hello" || deltas[1] != ", world" {
-		t.Fatalf("expected 2 incremental deltas, got %v", deltas)
-	}
-	if result.Content != "Hello, world" || result.InputTokens != 6 || result.OutputTokens != 3 {
-		t.Fatalf("unexpected aggregated result: %+v", result)
-	}
-}
 
 // ── fallback chain ───────────────────────────────────────────────────
 
@@ -386,24 +285,160 @@ func TestEstimateCost_UnknownModel_ReturnsZero(t *testing.T) {
 
 // ── registry ─────────────────────────────────────────────────────────
 
-// Locks in the point of the registry: NewGateway, NewValidator and
-// EstimateCost must all recognize every provider ProviderNames() reports,
-// with no per-provider case needed anywhere outside registry.go.
-func TestRegistry_EveryProviderIsWiredEverywhere(t *testing.T) {
+// Locks in the point of the registry: a Gateway and NewValidator must both
+// recognize every channel ProviderNames() reports, with no per-channel case
+// anywhere outside registry.go.
+func TestRegistry_EveryChannelIsWiredEverywhere(t *testing.T) {
 	gw := NewGateway(nil)
 	for _, name := range ProviderNames() {
-		if _, ok := gw.clients[name]; !ok {
-			t.Errorf("provider %q registered in ProviderNames() but missing from Gateway.clients", name)
-		}
-		if name == "custom" {
-			// "custom" has no default endpoint — NewValidator("custom", "")
-			// legitimately returns a Validator whose Validate always fails,
-			// not a nil Validator, so it's covered by
-			// TestNewValidator_CustomWithoutBaseURLFails above instead.
-			continue
+		if _, ok := gw.clientFor(name); !ok {
+			t.Errorf("渠道 %q 在 ProviderNames() 里但 Gateway 取不到 client", name)
 		}
 		if NewValidator(name, "") == nil {
-			t.Errorf("provider %q registered in ProviderNames() but NewValidator returned nil", name)
+			t.Errorf("渠道 %q 在 ProviderNames() 里但 NewValidator 返回 nil", name)
 		}
+	}
+}
+
+// 注册表是运行时可变的：管理员删掉一个渠道之后，用它的 Agent 必须报"没有
+// 这个 client"，而不是继续用一个已经不该存在的缓存。
+func TestSetChannels_ReplacesTheWholeRegistry(t *testing.T) {
+	before := ProviderNames()
+	t.Cleanup(func() { restoreTestChannels(t) })
+
+	SetChannels(nil)
+	if len(ProviderNames()) != 0 {
+		t.Fatalf("清空后不该还有渠道: %v", ProviderNames())
+	}
+	if _, ok := NewGateway(nil).clientFor("deepseek"); ok {
+		t.Error("渠道删掉之后 Gateway 不该还能取到它的 client")
+	}
+	if NewValidator("deepseek", "") != nil {
+		t.Error("渠道删掉之后 NewValidator 应返回 nil")
+	}
+
+	restoreTestChannels(t)
+	if len(ProviderNames()) != len(before) {
+		t.Fatalf("恢复后渠道数不对: %v", ProviderNames())
+	}
+}
+
+// ── 流式 + 降级链 ─────────────────────────────────────────────────────
+
+// stubStreamClient 按脚本吐几段文字再（可选地）失败。
+type stubStreamClient struct {
+	deltas []string
+	err    error
+}
+
+func (c *stubStreamClient) Complete(context.Context, string, string, string, CompletionRequest) (CompletionResult, error) {
+	if c.err != nil {
+		return CompletionResult{}, c.err
+	}
+	return CompletionResult{Content: strings.Join(c.deltas, "")}, nil
+}
+
+func (c *stubStreamClient) CompleteStream(_ context.Context, _, _, _ string, _ CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error) {
+	for _, d := range c.deltas {
+		onDelta(StreamDelta{TextDelta: d})
+	}
+	if c.err != nil {
+		return CompletionResult{}, c.err
+	}
+	return CompletionResult{Content: strings.Join(c.deltas, "")}, nil
+}
+
+// clientSpy 记录"这一环有没有被调用过"。
+type clientSpy struct {
+	inner  Client
+	onCall func()
+}
+
+func (c *clientSpy) Complete(ctx context.Context, k, b, m string, req CompletionRequest) (CompletionResult, error) {
+	c.onCall()
+	return c.inner.Complete(ctx, k, b, m, req)
+}
+
+func (c *clientSpy) CompleteStream(ctx context.Context, k, b, m string, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error) {
+	c.onCall()
+	return c.inner.(StreamingClient).CompleteStream(ctx, k, b, m, req, onDelta)
+}
+
+// 第一环还没吐出任何 delta 就失败（连不上、鉴权失败、模型名不存在）——调
+// 用方什么都没看到，换一环是纯赚，降级照常。
+func TestCompleteStream_FallsBackWhenNothingStreamedYet(t *testing.T) {
+	gw := NewGatewayWithClients(map[string]Client{
+		"deepseek":   &stubStreamClient{err: errors.New("401 unauthorized")},
+		"volcengine": &stubStreamClient{deltas: []string{"你", "好"}},
+	}, nil)
+
+	var got []string
+	result, err := gw.CompleteStream(context.Background(),
+		ModelSpec{Provider: "deepseek", Name: "deepseek-chat"},
+		[]ModelSpec{{Provider: "volcengine", Name: "doubao"}},
+		map[string]Credential{"deepseek": {APIKey: "k"}, "volcengine": {APIKey: "k"}},
+		CompletionRequest{}, func(d StreamDelta) { got = append(got, d.TextDelta) })
+	if err != nil {
+		t.Fatalf("还没吐字就失败时应当降级: %v", err)
+	}
+	if result.Provider != "volcengine" || result.Content != "你好" {
+		t.Fatalf("应由第二环作答: %+v", result)
+	}
+	if len(got) != 2 {
+		t.Fatalf("期望两个增量，得到 %v", got)
+	}
+}
+
+// ★ 这条盯住修掉的那个 bug：第一环已经把半段文字推给了前端才失败。降级会
+// 让用户先看到 A 模型的半句话、再看到 B 模型的一整段，拼成读不通的东西，
+// 而且没有任何提示说中间换过模型。半截答案比明确的失败更糟。
+func TestCompleteStream_DoesNotFallBackAfterStreamingStarted(t *testing.T) {
+	secondCalled := false
+	gw := NewGatewayWithClients(map[string]Client{
+		"deepseek": &stubStreamClient{deltas: []string{"我来查"}, err: errors.New("connection reset")},
+		"volcengine": &clientSpy{
+			inner:  &stubStreamClient{deltas: []string{"这段不该出现"}},
+			onCall: func() { secondCalled = true },
+		},
+	}, nil)
+
+	var got []string
+	_, err := gw.CompleteStream(context.Background(),
+		ModelSpec{Provider: "deepseek", Name: "deepseek-chat"},
+		[]ModelSpec{{Provider: "volcengine", Name: "doubao"}},
+		map[string]Credential{"deepseek": {APIKey: "k"}, "volcengine": {APIKey: "k"}},
+		CompletionRequest{}, func(d StreamDelta) { got = append(got, d.TextDelta) })
+
+	if err == nil {
+		t.Fatal("已经吐过字之后失败，必须直接报错而不是降级")
+	}
+	if !errors.Is(err, ErrStreamAlreadyStarted) {
+		t.Errorf("错误应能被识别为「流已开始」，得到: %v", err)
+	}
+	// 上游的原始失败原因要带出来，否则只剩一句"没降级"没法排查。
+	if !strings.Contains(err.Error(), "connection reset") {
+		t.Errorf("错误里应带上上游的失败原因，得到: %v", err)
+	}
+	if secondCalled {
+		t.Error("第二环根本不该被调用")
+	}
+	if len(got) != 1 || got[0] != "我来查" {
+		t.Errorf("已经推出去的增量不回滚，但也不该有更多: %v", got)
+	}
+}
+
+// 非流式路径不受影响：Complete 的降级链语义一点没变。
+func TestComplete_StillFallsBackAfterAnyFailure(t *testing.T) {
+	gw := NewGatewayWithClients(map[string]Client{
+		"deepseek":   &stubStreamClient{err: errors.New("boom")},
+		"volcengine": &stubStreamClient{deltas: []string{"ok"}},
+	}, nil)
+	result, err := gw.Complete(context.Background(),
+		ModelSpec{Provider: "deepseek", Name: "a"},
+		[]ModelSpec{{Provider: "volcengine", Name: "b"}},
+		map[string]Credential{"deepseek": {APIKey: "k"}, "volcengine": {APIKey: "k"}},
+		CompletionRequest{})
+	if err != nil || result.Provider != "volcengine" {
+		t.Fatalf("非流式降级不该受影响: %v / %+v", err, result)
 	}
 }

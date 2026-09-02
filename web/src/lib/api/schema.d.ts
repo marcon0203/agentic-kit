@@ -1131,7 +1131,10 @@ export interface paths {
         /** 目录 Provider 列表（含禁用），管理员 */
         get: operations["listCatalogProviders"];
         put?: never;
-        /** 新增目录 Provider，管理员 */
+        /**
+         * 新增模型提供商，管理员
+         * @description 建出来的提供商同时也是一个可调用的渠道：必须挑一个协议模板 （GET /model-channel-templates），后端据此渲染渠道描述符、完整校验并 跑一遍回归用例，过不了就不落库。创建成功后渠道立刻可用，不需要重启。
+         */
         post: operations["createCatalogProvider"];
         delete?: never;
         options?: never;
@@ -1367,6 +1370,26 @@ export interface paths {
         patch: operations["updateUserRoles"];
         trace?: never;
     };
+    "/model-channel-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 可选的协议模板
+         * @description 新建模型提供商时挑一个模板。模板是一份写好了某家厂商线协议怎么调的 渠道描述符骨架——管理员只需要填 key、显示名和接口地址，不用懂描述符 本身。实例化出来的描述符是快照，以后模板改了不影响已建好的提供商。
+         */
+        get: operations["listModelChannelTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model-provider-specs": {
         parameters: {
             query?: never;
@@ -1584,6 +1607,24 @@ export interface components {
         Status: 1 | 2;
         /** @enum {string} */
         ResourceType: "tool" | "skill" | "mcp" | "knowledge_base" | "memory";
+        ModelChannelTemplate: {
+            /** @description 模板 id，创建提供商时回传 */
+            id: string;
+            label: string;
+            description?: string;
+            /** @description 线协议族标识，同族模板共用一套回归用例 */
+            wire: string;
+            /** @description 模板的默认接口地址；为空表示必须自己填（如 openai-compatible） */
+            base_url?: string;
+            capabilities: ("text" | "tools" | "stream" | "embed")[];
+            credentials: {
+                name?: string;
+                /** @enum {string} */
+                type?: "secret" | "text" | "url";
+                label?: string;
+                required?: boolean;
+            }[];
+        };
         ModelProviderSpec: {
             name: components["schemas"]["ProviderName"];
             /** @description 给人看的渠道名 */
@@ -1598,8 +1639,8 @@ export interface components {
                 required: boolean;
             }[];
         };
-        /** @enum {string} */
-        ProviderName: "deepseek" | "volcengine" | "qwen" | "custom" | "google";
+        /** @description 模型提供商（= 可调用的渠道）的 key，由管理员在 系统配置 → 模型提供商 里从协议模板创建。不是固定枚举：平台开箱不带任何渠道，有哪些取决于 这个部署配了什么。可选值见 GET /model-provider-specs。 */
+        ProviderName: string;
         /** @enum {string} */
         RunStatus: "running" | "finished" | "failed";
         Resource: {
@@ -1991,6 +2032,8 @@ export interface components {
             /** @description URL 或 data: URI */
             icon?: string;
             base_url?: string;
+            /** @description 从哪个协议模板建出来的，仅供展示；实际行为由落库的描述符快照决定 */
+            template?: string;
             status: components["schemas"]["Status"];
             /** Format: date-time */
             created_at: string;
@@ -4492,12 +4535,17 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @example deepseek */
-                    key: string;
-                    /** @example DeepSeek */
+                    key: components["schemas"]["ProviderName"];
+                    /** @example 我的 DeepSeek */
                     display_name: string;
+                    /**
+                     * @description 协议模板 id，见 GET /model-channel-templates
+                     * @example deepseek
+                     */
+                    template: string;
                     /** @description URL 或 data: URI */
                     icon?: string;
+                    /** @description 留空沿用模板默认地址；模板没有默认地址时必填 */
                     base_url?: string;
                 };
             };
@@ -5075,6 +5123,31 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listModelChannelTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["ModelChannelTemplate"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
         };
     };
     listModelProviderSpecs: {

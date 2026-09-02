@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/marcon0203/agentic-kit/internal/channeltemplates"
+	"github.com/marcon0203/agentic-kit/internal/domain"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcatalog"
 )
 
@@ -30,6 +32,7 @@ type catalogProviderDTO struct {
 	DisplayName   string    `json:"display_name"`
 	Icon          string    `json:"icon,omitempty"`
 	BaseURL       string    `json:"base_url,omitempty"`
+	Template      string    `json:"template,omitempty"`
 	Status        int16     `json:"status"`
 	CreatedAt     time.Time `json:"created_at"`
 	HasCredential bool      `json:"has_credential"`
@@ -38,7 +41,7 @@ type catalogProviderDTO struct {
 func toCatalogProviderDTO(p modelcatalog.Provider) catalogProviderDTO {
 	return catalogProviderDTO{
 		ID: strconv.FormatInt(p.ID, 10), Key: p.Key, DisplayName: p.DisplayName,
-		Icon: p.Icon, BaseURL: p.BaseURL, Status: p.Status, CreatedAt: p.CreatedAt,
+		Icon: p.Icon, BaseURL: p.BaseURL, Template: p.Template, Status: p.Status, CreatedAt: p.CreatedAt,
 		HasCredential: p.HasCredential,
 	}
 }
@@ -104,6 +107,9 @@ type createCatalogProviderRequest struct {
 	DisplayName string `json:"display_name"`
 	Icon        string `json:"icon"`
 	BaseURL     string `json:"base_url"`
+	// Template 是协议模板 id（GET /model-channel-templates）。必填：新建一
+	// 个模型提供商的实质就是"从模板实例化一个可调用的渠道"。
+	Template string `json:"template"`
 }
 
 // CreateProvider handles POST /model-catalog/providers.
@@ -117,7 +123,10 @@ func (h *ModelCatalogAdminHandlers) CreateProvider(w http.ResponseWriter, r *htt
 		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
 		return
 	}
-	created, err := h.svc.CreateProvider(r.Context(), userID, req.Key, req.DisplayName, req.Icon, req.BaseURL)
+	created, err := h.svc.CreateProvider(r.Context(), userID, modelcatalog.NewProvider{
+		Key: req.Key, DisplayName: req.DisplayName, Icon: req.Icon,
+		BaseURL: req.BaseURL, Template: req.Template,
+	})
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return
@@ -289,4 +298,22 @@ func (h *ModelCatalogAdminHandlers) DeleteModel(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, r, http.StatusOK, nil)
+}
+
+// ListChannelTemplates handles GET /model-channel-templates：可选的协议模
+// 板列表。
+//
+// 平台开箱不带任何模型供应商——供应商是部署方的配置，不是平台的产品内容。
+// 但从零写一份渠道描述符对非开发者太难，所以给一组写好线协议的模板：管理
+// 员挑一个、填上自己的 key 和接口地址就能用。
+func (h *ModelCatalogAdminHandlers) ListChannelTemplates(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	items, err := channeltemplates.List()
+	if err != nil {
+		writeDomainErr(w, r, domain.Internal(err))
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{"items": items})
 }

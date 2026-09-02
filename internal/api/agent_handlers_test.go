@@ -147,11 +147,11 @@ func TestCreateAgent_Success201(t *testing.T) {
 
 // Proves the real schema validator is wired through the adapter into the
 // service — a stub validator here would make this test vacuous.
-func TestCreateAgent_RealSchemaRejectsBadProviderAsInvalid400(t *testing.T) {
+func TestCreateAgent_RealSchemaRejectsMalformedProviderKeyAs400(t *testing.T) {
 	h, _ := newAgentHandlersForTest(t)
 
 	def := validAgentDefinition("architect", "1.0")
-	def["model"].(map[string]any)["provider"] = "not-a-provider"
+	def["model"].(map[string]any)["provider"] = "Not A Provider"
 
 	w := doResourceRequest(t, h.Create, http.MethodPost, "/api/v1/agents", 1, createAgentRequest{Definition: def}, nil)
 

@@ -30,6 +30,9 @@ type Querier interface {
 	CreateBundle(ctx context.Context, arg CreateBundleParams) (Bundle, error)
 	CreateBundleRun(ctx context.Context, arg CreateBundleRunParams) (BundleRun, error)
 	CreateCatalogModel(ctx context.Context, arg CreateCatalogModelParams) (CatalogModel, error)
+	// descriptor 是渲染好的渠道描述符快照（见 internal/channeltemplates）。它
+	// 决定这个提供商实际怎么被调用；template 只记录"从哪个模板来的"，供界面
+	// 展示，不参与运行时。
 	CreateCatalogProvider(ctx context.Context, arg CreateCatalogProviderParams) (CreateCatalogProviderRow, error)
 	CreateHumanGate(ctx context.Context, arg CreateHumanGateParams) (HumanGate, error)
 	CreateKnowledgeBase(ctx context.Context, arg CreateKnowledgeBaseParams) (KnowledgeBasis, error)
@@ -231,6 +234,9 @@ type Querier interface {
 	// merge in when a user has no personal credential for that provider.
 	ListCatalogProviderDefaultCredentials(ctx context.Context) ([]ListCatalogProviderDefaultCredentialsRow, error)
 	ListCatalogProviders(ctx context.Context) ([]ListCatalogProvidersRow, error)
+	// 进程启动和每次提供商增删改后，modelgateway 的渠道注册表从这里整体重
+	// 建。停用的提供商不出现——停用就该立刻调不通，而不是等下次重启。
+	ListEnabledChannelDescriptors(ctx context.Context) ([]ListEnabledChannelDescriptorsRow, error)
 	ListHumanGatesForRun(ctx context.Context, runID string) ([]HumanGate, error)
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
 	ListListingVersionHistory(ctx context.Context, listingRef string) ([]ListListingVersionHistoryRow, error)

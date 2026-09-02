@@ -24,6 +24,7 @@ import { Can, useHasPermission } from '@/lib/rbac/usePermissions'
 import type { components } from '@/lib/api/schema'
 
 type CatalogProvider = components['schemas']['CatalogProvider']
+type ChannelTemplate = components['schemas']['ModelChannelTemplate']
 type CatalogModel = components['schemas']['CatalogModel']
 type CatalogModality = components['schemas']['CatalogModality']
 
@@ -127,8 +128,8 @@ export function ModelCatalogAdminPage() {
 
         {providersQuery.isSuccess && providers.length === 0 && (
           <EmptyRail
-            title="还没有登记任何 Provider"
-            description="先新增一个 Provider（如 DeepSeek），再在它下面添加具体模型（如 deepseek-v3）。"
+            title="还没有配置任何模型提供商"
+            description="平台不预置模型供应商——它是你这个部署的配置。挑一个协议模板（DeepSeek、火山方舟、通义千问，或任意 OpenAI 兼容端点），填上你自己的接口地址就能用。"
             action={
               <Can permission="model_catalog.provider.create">
                 <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
@@ -167,6 +168,11 @@ export function ModelCatalogAdminPage() {
                       <span className="flex items-center gap-space-2">
                         <span className="text-body-md text-ink-900">{p.display_name}</span>
                         <Ref tone="muted">{p.key}</Ref>
+                        {p.template && (
+                          <span className="text-caption rounded-full bg-surface-muted px-space-2 py-0.5 text-ink-500">
+                            {p.template}
+                          </span>
+                        )}
                       </span>
                       {p.base_url && <span className="text-caption truncate text-ink-500">{p.base_url}</span>}
                     </span>
@@ -435,6 +441,14 @@ function ProviderModels({ providerId, onError }: { providerId: string; onError: 
   )
 }
 
+/**
+ * 新建模型提供商 = 从一个协议模板实例化一个可调用的渠道。
+ *
+ * 模板挡住的是"要懂厂商的线协议才能接一个模型"这道门槛：管理员只填 key、
+ * 显示名和接口地址，后端把模板渲染成渠道描述符、完整校验并跑一遍回归用例，
+ * 过不了就不落库。选了模板之后接口地址会自动带出模板的默认值，改不改都行
+ * ——中转站和自建服务就是靠改它接进来的。
+ */
 function CreateProviderDialog({
   open,
   onOpenChange,
@@ -444,6 +458,7 @@ function CreateProviderDialog({
   onOpenChange: (v: boolean) => void
   onCreated: () => void
 }) {
+  const [template, setTemplate] = useState('')
   const [key, setKey] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [icon, setIcon] = useState('')
@@ -451,7 +466,29 @@ function CreateProviderDialog({
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
+  const templatesQuery = useQuery({
+    queryKey: ['model-channel-templates'],
+    queryFn: async () =>
+      unwrap<{ items: ChannelTemplate[] }>(await apiClient.GET('/model-channel-templates', {})),
+    enabled: open,
+    staleTime: Infinity, // 模板随二进制发布，一次会话里不会变
+  })
+  const templates = templatesQuery.data?.items ?? []
+  const selected = templates.find((t) => t.id === template)
+
+  // 选模板时把它的默认地址和显示名带出来，但不覆盖用户已经改过的内容。
+  function pickTemplate(id: string) {
+    const t = templates.find((x) => x.id === id)
+    setTemplate(id)
+    setError(null)
+    if (!t) return
+    setBaseUrl(t.base_url ?? '')
+    if (!key) setKey(t.id === 'openai-compatible' ? '' : t.id)
+    if (!displayName) setDisplayName(t.label)
+  }
+
   function reset() {
+    setTemplate('')
     setKey('')
     setDisplayName('')
     setIcon('')
@@ -474,7 +511,7 @@ function CreateProviderDialog({
     try {
       unwrap(
         await apiClient.POST('/model-catalog/providers', {
-          body: { key, display_name: displayName, icon: icon || undefined, base_url: baseUrl || undefined },
+          body: { key, display_name: displayName, template, icon: icon || undefined, base_url: baseUrl || undefined },
         }),
       )
       reset()
@@ -493,12 +530,34 @@ function CreateProviderDialog({
       }}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>新增 Provider</DialogTitle>
-          <DialogDescription>登记后可以在它下面添加具体模型；启用的模型会出现在模型广场。</DialogDescription>
+          <DialogTitle>新增模型提供商</DialogTitle>
+          <DialogDescription>
+            挑一个协议模板，填上你自己的接口地址即可。建好之后就是一个可调用的渠道，
+            Agent 里用 <code className="text-ref">{'{key}/{模型名}'}</code> 引用它，不需要重启服务。
+          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-space-2">
+          <label htmlFor="provider-template" className="text-label-md text-ink-700">
+            协议模板
+          </label>
+          <Select value={template} onValueChange={pickTemplate}>
+            <SelectTrigger id="provider-template" className="h-12 w-full rounded-sm">
+              <SelectValue placeholder={templatesQuery.isLoading ? '加载中…' : '选择一个模板'} />
+            </SelectTrigger>
+            <SelectContent>
+              {templates.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {selected?.description && (
+            <p className="text-caption text-ink-500">{selected.description}</p>
+          )}
+
           <label htmlFor="provider-key" className="text-label-md text-ink-700">
-            Key（英文标识，如 deepseek）
+            Key（Agent 里引用它时用，小写字母开头，如 deepseek）
           </label>
           <Input id="provider-key" value={key} onChange={(e) => setKey(e.target.value)} className="h-12 rounded-sm" />
 
@@ -527,7 +586,7 @@ function CreateProviderDialog({
           </div>
 
           <label htmlFor="provider-base-url" className="text-label-md text-ink-700">
-            Base URL（可选）
+            接口地址{selected && selected.base_url ? '（模板默认已带出，接中转站时改这里）' : ''}
           </label>
           <Input
             id="provider-base-url"
@@ -547,7 +606,7 @@ function CreateProviderDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             取消
           </Button>
-          <Button disabled={pending || !key || !displayName} onClick={submit}>
+          <Button disabled={pending || !template || !key || !displayName || !baseUrl} onClick={submit}>
             {pending ? '保存中…' : '保存'}
           </Button>
         </DialogFooter>

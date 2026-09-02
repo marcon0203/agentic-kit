@@ -51,9 +51,9 @@ func (q *Queries) CreateCatalogModel(ctx context.Context, arg CreateCatalogModel
 }
 
 const createCatalogProvider = `-- name: CreateCatalogProvider :one
-INSERT INTO catalog_providers (provider_key, display_name, icon, base_url)
-VALUES ($1, $2, $3, $4)
-RETURNING id, provider_key, display_name, icon, base_url, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
+INSERT INTO catalog_providers (provider_key, display_name, icon, base_url, template, descriptor)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, provider_key, display_name, icon, base_url, template, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 `
 
 type CreateCatalogProviderParams struct {
@@ -61,6 +61,8 @@ type CreateCatalogProviderParams struct {
 	DisplayName string      `json:"display_name"`
 	Icon        pgtype.Text `json:"icon"`
 	BaseUrl     pgtype.Text `json:"base_url"`
+	Template    pgtype.Text `json:"template"`
+	Descriptor  []byte      `json:"descriptor"`
 }
 
 type CreateCatalogProviderRow struct {
@@ -69,17 +71,23 @@ type CreateCatalogProviderRow struct {
 	DisplayName   string             `json:"display_name"`
 	Icon          pgtype.Text        `json:"icon"`
 	BaseUrl       pgtype.Text        `json:"base_url"`
+	Template      pgtype.Text        `json:"template"`
 	Status        int16              `json:"status"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	HasCredential bool               `json:"has_credential"`
 }
 
+// descriptor 是渲染好的渠道描述符快照（见 internal/channeltemplates）。它
+// 决定这个提供商实际怎么被调用；template 只记录"从哪个模板来的"，供界面
+// 展示，不参与运行时。
 func (q *Queries) CreateCatalogProvider(ctx context.Context, arg CreateCatalogProviderParams) (CreateCatalogProviderRow, error) {
 	row := q.db.QueryRow(ctx, createCatalogProvider,
 		arg.ProviderKey,
 		arg.DisplayName,
 		arg.Icon,
 		arg.BaseUrl,
+		arg.Template,
+		arg.Descriptor,
 	)
 	var i CreateCatalogProviderRow
 	err := row.Scan(
@@ -88,6 +96,7 @@ func (q *Queries) CreateCatalogProvider(ctx context.Context, arg CreateCatalogPr
 		&i.DisplayName,
 		&i.Icon,
 		&i.BaseUrl,
+		&i.Template,
 		&i.Status,
 		&i.CreatedAt,
 		&i.HasCredential,
@@ -114,7 +123,7 @@ func (q *Queries) DeleteCatalogProvider(ctx context.Context, id int64) error {
 }
 
 const getCatalogProvider = `-- name: GetCatalogProvider :one
-SELECT id, provider_key, display_name, icon, base_url, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
+SELECT id, provider_key, display_name, icon, base_url, template, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 FROM catalog_providers
 WHERE id = $1
 `
@@ -125,6 +134,7 @@ type GetCatalogProviderRow struct {
 	DisplayName   string             `json:"display_name"`
 	Icon          pgtype.Text        `json:"icon"`
 	BaseUrl       pgtype.Text        `json:"base_url"`
+	Template      pgtype.Text        `json:"template"`
 	Status        int16              `json:"status"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	HasCredential bool               `json:"has_credential"`
@@ -139,6 +149,7 @@ func (q *Queries) GetCatalogProvider(ctx context.Context, id int64) (GetCatalogP
 		&i.DisplayName,
 		&i.Icon,
 		&i.BaseUrl,
+		&i.Template,
 		&i.Status,
 		&i.CreatedAt,
 		&i.HasCredential,
@@ -271,7 +282,7 @@ func (q *Queries) ListCatalogProviderDefaultCredentials(ctx context.Context) ([]
 }
 
 const listCatalogProviders = `-- name: ListCatalogProviders :many
-SELECT id, provider_key, display_name, icon, base_url, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
+SELECT id, provider_key, display_name, icon, base_url, template, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 FROM catalog_providers
 ORDER BY created_at ASC
 `
@@ -282,6 +293,7 @@ type ListCatalogProvidersRow struct {
 	DisplayName   string             `json:"display_name"`
 	Icon          pgtype.Text        `json:"icon"`
 	BaseUrl       pgtype.Text        `json:"base_url"`
+	Template      pgtype.Text        `json:"template"`
 	Status        int16              `json:"status"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	HasCredential bool               `json:"has_credential"`
@@ -302,10 +314,45 @@ func (q *Queries) ListCatalogProviders(ctx context.Context) ([]ListCatalogProvid
 			&i.DisplayName,
 			&i.Icon,
 			&i.BaseUrl,
+			&i.Template,
 			&i.Status,
 			&i.CreatedAt,
 			&i.HasCredential,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledChannelDescriptors = `-- name: ListEnabledChannelDescriptors :many
+SELECT provider_key, descriptor
+FROM catalog_providers
+WHERE status = 1 AND descriptor IS NOT NULL
+ORDER BY provider_key
+`
+
+type ListEnabledChannelDescriptorsRow struct {
+	ProviderKey string `json:"provider_key"`
+	Descriptor  []byte `json:"descriptor"`
+}
+
+// 进程启动和每次提供商增删改后，modelgateway 的渠道注册表从这里整体重
+// 建。停用的提供商不出现——停用就该立刻调不通，而不是等下次重启。
+func (q *Queries) ListEnabledChannelDescriptors(ctx context.Context) ([]ListEnabledChannelDescriptorsRow, error) {
+	rows, err := q.db.Query(ctx, listEnabledChannelDescriptors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEnabledChannelDescriptorsRow{}
+	for rows.Next() {
+		var i ListEnabledChannelDescriptorsRow
+		if err := rows.Scan(&i.ProviderKey, &i.Descriptor); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

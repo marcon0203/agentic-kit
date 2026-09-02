@@ -8,6 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ResourceMultiSelect } from '@/components/agents/ResourceMultiSelect'
 import { PluginToolMultiSelect } from '@/components/agents/PluginToolMultiSelect'
+import { useProviderSpecs } from '@/lib/models/useProviderSpecs'
 import { cn } from '@/lib/utils'
 import { validateAgentDefinition, type FieldError } from '@/lib/validation/validateAgent'
 import {
@@ -145,6 +146,7 @@ export function AgentForm({
   initial?: FormState
   onSaved: () => void
 }) {
+  const { specs: providerSpecs } = useProviderSpecs()
   const [form, setForm] = useState<FormState>(initial ?? EMPTY_FORM)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -315,11 +317,12 @@ export function AgentForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="deepseek">deepseek</SelectItem>
-              <SelectItem value="volcengine">volcengine</SelectItem>
-              <SelectItem value="qwen">qwen</SelectItem>
-              <SelectItem value="custom">custom</SelectItem>
-              <SelectItem value="google">google</SelectItem>
+              {/* 渠道由管理员在 系统配置 → 模型提供商 里创建，前端不硬编。 */}
+              {providerSpecs.map((spec) => (
+                <SelectItem key={spec.name} value={spec.name}>
+                  {spec.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </Field>
@@ -330,7 +333,7 @@ export function AgentForm({
             onChange={(e) => set('modelName', e.target.value)}
             onBlur={() => validateField('model.name')}
             className={inputClass('model.name')}
-            placeholder="deepseek-chat"
+            placeholder="上游的模型名"
           />
         </Field>
         <Field label="fallback（逗号分隔，格式 provider/name）" htmlFor="agent-fallback" helper="主模型不可用时按顺序降级">
@@ -339,7 +342,7 @@ export function AgentForm({
             value={form.fallback}
             onChange={(e) => set('fallback', e.target.value)}
             className="h-12 rounded-sm"
-            placeholder="volcengine/doubao-seed-1-6, qwen/qwen-plus"
+            placeholder="provider/模型名，例如 deepseek/deepseek-chat"
           />
         </Field>
         <Field label="temperature（可选，0-2）" htmlFor="agent-temperature">

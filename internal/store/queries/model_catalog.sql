@@ -1,15 +1,26 @@
 -- name: CreateCatalogProvider :one
-INSERT INTO catalog_providers (provider_key, display_name, icon, base_url)
-VALUES ($1, $2, $3, $4)
-RETURNING id, provider_key, display_name, icon, base_url, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential;
+-- descriptor 是渲染好的渠道描述符快照（见 internal/channeltemplates）。它
+-- 决定这个提供商实际怎么被调用；template 只记录"从哪个模板来的"，供界面
+-- 展示，不参与运行时。
+INSERT INTO catalog_providers (provider_key, display_name, icon, base_url, template, descriptor)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, provider_key, display_name, icon, base_url, template, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential;
 
 -- name: ListCatalogProviders :many
-SELECT id, provider_key, display_name, icon, base_url, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
+SELECT id, provider_key, display_name, icon, base_url, template, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 FROM catalog_providers
 ORDER BY created_at ASC;
 
+-- name: ListEnabledChannelDescriptors :many
+-- 进程启动和每次提供商增删改后，modelgateway 的渠道注册表从这里整体重
+-- 建。停用的提供商不出现——停用就该立刻调不通，而不是等下次重启。
+SELECT provider_key, descriptor
+FROM catalog_providers
+WHERE status = 1 AND descriptor IS NOT NULL
+ORDER BY provider_key;
+
 -- name: GetCatalogProvider :one
-SELECT id, provider_key, display_name, icon, base_url, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
+SELECT id, provider_key, display_name, icon, base_url, template, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 FROM catalog_providers
 WHERE id = $1;
 

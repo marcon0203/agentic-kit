@@ -98,6 +98,8 @@ type CatalogProvider struct {
 	Status                 int16              `json:"status"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	DefaultApiKeyEncrypted pgtype.Text        `json:"default_api_key_encrypted"`
+	Template               pgtype.Text        `json:"template"`
+	Descriptor             []byte             `json:"descriptor"`
 }
 
 type HumanGate struct {

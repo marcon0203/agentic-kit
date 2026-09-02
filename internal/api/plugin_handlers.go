@@ -274,11 +274,11 @@ func (h *PluginHandlers) ListInstalled(w http.ResponseWriter, r *http.Request) {
 }
 
 type installedToolDTO struct {
-	Ref                string `json:"ref"`
-	PluginID           string `json:"plugin_id"`
-	PluginDisplayName  string `json:"plugin_display_name,omitempty"`
-	ToolName           string `json:"tool_name"`
-	Description        string `json:"description,omitempty"`
+	Ref               string `json:"ref"`
+	PluginID          string `json:"plugin_id"`
+	PluginDisplayName string `json:"plugin_display_name,omitempty"`
+	ToolName          string `json:"tool_name"`
+	Description       string `json:"description,omitempty"`
 }
 
 // ListInstalledTools handles GET /plugins/installed/tools — every

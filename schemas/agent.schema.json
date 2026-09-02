@@ -52,13 +52,8 @@
       "properties": {
         "provider": {
           "type": "string",
-          "enum": [
-            "deepseek",
-            "volcengine",
-            "qwen",
-            "custom",
-            "google"
-          ]
+          "description": "模型提供商的 key，由管理员在 系统配置 → 模型提供商 里从协议模板创建。不是固定枚举——平台开箱不带任何渠道，有哪些取决于这个部署配了什么。",
+          "pattern": "^[a-z][a-z0-9_-]{0,31}$"
         },
         "name": {
           "type": "string",

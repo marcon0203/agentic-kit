@@ -174,32 +174,44 @@ var ErrAllProvidersUnavailable = errors.New("modelgateway: all providers in the 
 
 // Gateway resolves an Agent's model.provider + model.fallback chain into
 // real calls, in order, stopping at the first success.
+//
+// 它不再在构造时把 client 缓存成一张 map：渠道现在是管理员在运行时增删的
+// 配置，缓存下来会让"刚建好的渠道要重启才能用"。descriptorClient 是个很轻
+// 的结构体，每次调用现建一个的代价可以忽略。
 type Gateway struct {
-	clients map[string]Client
-	sink    EventSink
+	sink       EventSink
+	httpClient *http.Client
+	// overrides 非 nil 时完全取代注册表——只有测试用（NewGatewayWithClients）。
+	overrides map[string]Client
 }
 
-// NewGateway builds a Gateway with every provider in the registry
-// (registry.go) — currently Anthropic/OpenAI/DeepSeek/Qwen/Google, plus a
-// slot for a caller-supplied "custom" OpenAI-compatible endpoint. sink may
-// be nil (no fallback events emitted, e.g. in tests that don't care).
+// NewGateway builds a Gateway that resolves channels from the live
+// registry (registry.go). sink may be nil (no fallback events emitted).
 func NewGateway(sink EventSink) *Gateway {
-	return newGatewayWithEndpoints(sink, providerOverrides{})
-}
-
-func newGatewayWithEndpoints(sink EventSink, ep providerOverrides) *Gateway {
-	httpClient := &http.Client{Timeout: completionTimeout}
-	clients := make(map[string]Client, len(providers))
-	for _, def := range providers {
-		clients[def.Name] = def.NewClient(httpClient, ep.baseFor(def))
-	}
-	return &Gateway{sink: sink, clients: clients}
+	return &Gateway{sink: sink, httpClient: &http.Client{Timeout: completionTimeout}}
 }
 
 // NewGatewayWithClients builds a Gateway against caller-supplied Clients —
-// used by tests.
+// used by tests, and by nothing else.
 func NewGatewayWithClients(clients map[string]Client, sink EventSink) *Gateway {
-	return &Gateway{clients: clients, sink: sink}
+	if clients == nil {
+		clients = map[string]Client{}
+	}
+	return &Gateway{sink: sink, overrides: clients, httpClient: &http.Client{Timeout: completionTimeout}}
+}
+
+// clientFor 现取一个 client。找不到渠道 = 这个 provider 名没有被任何已登
+// 记的模型提供商占用（被删了，或者 Agent 里写错了）。
+func (g *Gateway) clientFor(provider string) (Client, bool) {
+	if g.overrides != nil {
+		c, ok := g.overrides[provider]
+		return c, ok
+	}
+	def, ok := providerByName(provider)
+	if !ok {
+		return nil, false
+	}
+	return def.NewClient(g.httpClient, def.DefaultBaseURL), true
 }
 
 // chainStepError names the provider so ErrAllProvidersUnavailable's
@@ -222,7 +234,7 @@ func (e *chainStepError) Unwrap() error { return e.cause }
 // next link; only running out of chain is fatal
 // (ErrAllProvidersUnavailable).
 func (g *Gateway) Complete(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, creds map[string]Credential, req CompletionRequest) (CompletionResult, error) {
-	return g.resolve(ctx, primary, fallbacks, creds, func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error) {
+	return g.resolve(ctx, primary, fallbacks, creds, nil, func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error) {
 		return client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, req)
 	})
 }
@@ -245,6 +257,13 @@ type StreamingClient interface {
 	CompleteStream(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error)
 }
 
+// ErrStreamAlreadyStarted is returned by CompleteStream when a provider
+// failed *after* it had already streamed text to the caller. The HTTP layer
+// treats it like any other completion failure; it exists as its own
+// sentinel so a caller that wants to can tell "nothing was produced" apart
+// from "a partial answer reached the user before this blew up".
+var ErrStreamAlreadyStarted = errors.New("modelgateway: provider failed after streaming had started; not falling back")
+
 // CompleteStream is Complete's streaming sibling: onDelta is called with
 // each text chunk as the resolved provider produces it (real incremental
 // deltas for a Client implementing StreamingClient; one single delta
@@ -253,14 +272,34 @@ type StreamingClient interface {
 // token-level granularity). The final CompletionResult is identical in
 // shape to what Complete would have returned, aggregated across the whole
 // stream.
+//
+// 降级语义和 Complete 不同，这是有意的：**一旦有 delta 推给了调用方，这
+// 一轮就不再降级。** 走 Complete 的降级链会让前端先收到半段来自 A 模型的
+// 文字，再收到一整段来自 B 模型的文字，拼成一段读不通的东西——而且没有任
+// 何提示说中间换过模型。半截答案比一个明确的失败更糟，后者至少可以重试。
+//
+// 代价是：一个在中途断流的渠道不会被兜住，用户会看到一次失败的运行。这
+// 是对的取舍。还没吐出任何 delta 时（连接失败、鉴权失败、模型名不存在），
+// 降级照常进行——那种情况下调用方什么都没看到，换一环是纯赚。
 func (g *Gateway) CompleteStream(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, creds map[string]Credential, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error) {
-	return g.resolve(ctx, primary, fallbacks, creds, func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error) {
+	// onDelta 是在 call 里同步调用的（RunStream 不起 goroutine），所以这
+	// 个标志位不需要加锁。
+	var streamed bool
+	forward := func(d StreamDelta) {
+		streamed = true
+		if onDelta != nil {
+			onDelta(d)
+		}
+	}
+	canFallback := func() bool { return !streamed }
+
+	return g.resolve(ctx, primary, fallbacks, creds, canFallback, func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error) {
 		if sc, ok := client.(StreamingClient); ok {
-			return sc.CompleteStream(ctx, cred.APIKey, cred.BaseURL, spec.Name, req, onDelta)
+			return sc.CompleteStream(ctx, cred.APIKey, cred.BaseURL, spec.Name, req, forward)
 		}
 		result, err := client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, req)
-		if err == nil && result.Content != "" && onDelta != nil {
-			onDelta(StreamDelta{TextDelta: result.Content})
+		if err == nil && result.Content != "" {
+			forward(StreamDelta{TextDelta: result.Content})
 		}
 		return result, err
 	})
@@ -271,7 +310,10 @@ func (g *Gateway) CompleteStream(ctx context.Context, primary ModelSpec, fallbac
 // succeeds. Every failure — network, auth, unknown provider, missing
 // credential — advances to the next link; only running out of chain is
 // fatal (ErrAllProvidersUnavailable).
-func (g *Gateway) resolve(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, creds map[string]Credential, call func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error)) (CompletionResult, error) {
+//
+// canFallback 让调用方在失败后否决降级；nil 表示永远允许。流式路径用它挡
+// 住"已经吐了半段文字才失败"的情况（见 CompleteStream 的注释）。
+func (g *Gateway) resolve(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, creds map[string]Credential, canFallback func() bool, call func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error)) (CompletionResult, error) {
 	chain := make([]ModelSpec, 0, 1+len(fallbacks))
 	chain = append(chain, primary)
 	chain = append(chain, fallbacks...)
@@ -289,7 +331,7 @@ func (g *Gateway) resolve(ctx context.Context, primary ModelSpec, fallbacks []Mo
 			})
 		}
 
-		client, ok := g.clients[spec.Provider]
+		client, ok := g.clientFor(spec.Provider)
 		if !ok {
 			lastErr = &chainStepError{spec.Provider, fmt.Errorf("no client configured")}
 			continue
@@ -303,6 +345,9 @@ func (g *Gateway) resolve(ctx context.Context, primary ModelSpec, fallbacks []Mo
 		result, err := call(client, cred, spec)
 		if err != nil {
 			lastErr = &chainStepError{spec.Provider, err}
+			if canFallback != nil && !canFallback() {
+				return CompletionResult{}, fmt.Errorf("%w: %v", ErrStreamAlreadyStarted, lastErr)
+			}
 			continue
 		}
 		result.Provider, result.Model = spec.Provider, spec.Name
@@ -317,7 +362,7 @@ func (g *Gateway) resolve(ctx context.Context, primary ModelSpec, fallbacks []Mo
 // another (they aren't comparable in the same vector space), unlike a
 // chat completion where any model can plausibly answer.
 func (g *Gateway) Embed(ctx context.Context, spec ModelSpec, creds map[string]Credential, texts []string) ([][]float32, error) {
-	client, ok := g.clients[spec.Provider]
+	client, ok := g.clientFor(spec.Provider)
 	if !ok {
 		return nil, fmt.Errorf("modelgateway: no client configured for provider %q", spec.Provider)
 	}
@@ -344,235 +389,6 @@ func extractSystemPrompt(msgs []Message) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// ── Google ───────────────────────────────────────────────────────────
-
-type googleClient struct {
-	client  *http.Client
-	baseURL string
-}
-
-// googlePart covers the three part shapes this client speaks: plain text,
-// a model-issued function call, and the function's result being replayed
-// back. Gemini correlates a functionResponse to its functionCall by name
-// only — there is no id field in this wire format, unlike Anthropic/OpenAI.
-type googlePart struct {
-	Text             string          `json:"text,omitempty"`
-	FunctionCall     *googleFuncCall `json:"functionCall,omitempty"`
-	FunctionResponse *googleFuncResp `json:"functionResponse,omitempty"`
-}
-type googleFuncCall struct {
-	Name string         `json:"name"`
-	Args map[string]any `json:"args,omitempty"`
-}
-type googleFuncResp struct {
-	Name     string         `json:"name"`
-	Response map[string]any `json:"response,omitempty"`
-}
-type googleContent struct {
-	Role  string       `json:"role,omitempty"`
-	Parts []googlePart `json:"parts"`
-}
-type googleFunctionDeclaration struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
-}
-
-// buildGoogleContents translates the platform's provider-agnostic Messages
-// into Gemini's turn shape. "system" messages are excluded — Gemini takes
-// the system prompt as a separate top-level systemInstruction, never a
-// role inside contents[].
-func buildGoogleContents(msgs []Message) []googleContent {
-	out := make([]googleContent, 0, len(msgs))
-	for _, m := range msgs {
-		switch m.Role {
-		case "system":
-			continue
-		case "tool":
-			out = append(out, googleContent{Role: "user", Parts: []googlePart{{
-				FunctionResponse: &googleFuncResp{Name: m.ToolName, Response: map[string]any{"output": m.Content}},
-			}}})
-		case "assistant":
-			var parts []googlePart
-			if m.Content != "" {
-				parts = append(parts, googlePart{Text: m.Content})
-			}
-			for _, tc := range m.ToolCalls {
-				parts = append(parts, googlePart{FunctionCall: &googleFuncCall{Name: tc.Name, Args: tc.Arguments}})
-			}
-			out = append(out, googleContent{Role: "model", Parts: parts})
-		default:
-			out = append(out, googleContent{Role: "user", Parts: []googlePart{{Text: m.Content}}})
-		}
-	}
-	return out
-}
-
-// googleTool mirrors one entry of Gemini's top-level "tools" array — a
-// named type (rather than the inline anonymous struct Complete used to
-// build ad hoc) so CompleteStream can build the identical request shape
-// without duplicating the field tags.
-type googleTool struct {
-	FunctionDeclarations []googleFunctionDeclaration `json:"functionDeclarations"`
-}
-
-// googleRequestBody builds the request Complete and CompleteStream both
-// send — identical for both; Gemini's streaming endpoint takes the exact
-// same body, just a different URL path (:streamGenerateContent).
-func googleRequestBody(req CompletionRequest) any {
-	body := struct {
-		Contents          []googleContent `json:"contents"`
-		SystemInstruction *googleContent  `json:"systemInstruction,omitempty"`
-		Tools             []googleTool    `json:"tools,omitempty"`
-		GenerationConfig  struct {
-			MaxOutputTokens int     `json:"maxOutputTokens,omitempty"`
-			Temperature     float64 `json:"temperature,omitempty"`
-		} `json:"generationConfig"`
-	}{Contents: buildGoogleContents(req.Messages)}
-	body.GenerationConfig.MaxOutputTokens = req.MaxTokens
-	body.GenerationConfig.Temperature = req.Temperature
-	if sys := extractSystemPrompt(req.Messages); sys != "" {
-		body.SystemInstruction = &googleContent{Parts: []googlePart{{Text: sys}}}
-	}
-	if len(req.Tools) > 0 {
-		decls := make([]googleFunctionDeclaration, 0, len(req.Tools))
-		for _, t := range req.Tools {
-			decls = append(decls, googleFunctionDeclaration{Name: t.Name, Description: t.Description, Parameters: t.InputSchema})
-		}
-		body.Tools = append(body.Tools, googleTool{FunctionDeclarations: decls})
-	}
-	return body
-}
-
-func (c *googleClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
-	base := c.baseURL
-	if baseURL != "" {
-		base = baseURL
-	}
-	body := googleRequestBody(req)
-
-	var out struct {
-		Candidates []struct {
-			Content struct {
-				Parts []googlePart `json:"parts"`
-			} `json:"content"`
-		} `json:"candidates"`
-		UsageMetadata struct {
-			PromptTokenCount     int64 `json:"promptTokenCount"`
-			CandidatesTokenCount int64 `json:"candidatesTokenCount"`
-		} `json:"usageMetadata"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", base, model, apiKey)
-	status, err := postJSON(ctx, c.client, url, nil, body, &out)
-	if err != nil {
-		return CompletionResult{}, err
-	}
-	if out.Error != nil {
-		return CompletionResult{}, errors.New(out.Error.Message)
-	}
-	if status < 200 || status >= 300 {
-		return CompletionResult{}, fmt.Errorf("google: http %d", status)
-	}
-	if len(out.Candidates) == 0 || len(out.Candidates[0].Content.Parts) == 0 {
-		return CompletionResult{}, errors.New("google: no candidates in response")
-	}
-
-	var text strings.Builder
-	var toolCalls []ToolCall
-	for _, p := range out.Candidates[0].Content.Parts {
-		if p.FunctionCall != nil {
-			toolCalls = append(toolCalls, ToolCall{Name: p.FunctionCall.Name, Arguments: p.FunctionCall.Args})
-			continue
-		}
-		text.WriteString(p.Text)
-	}
-	return CompletionResult{
-		Content: text.String(), ToolCalls: toolCalls,
-		InputTokens:  out.UsageMetadata.PromptTokenCount,
-		OutputTokens: out.UsageMetadata.CandidatesTokenCount,
-	}, nil
-}
-
-// CompleteStream implements StreamingClient against Gemini's
-// :streamGenerateContent?alt=sse endpoint — each SSE frame's data payload
-// is one full candidate JSON object (not a raw text delta the way
-// Anthropic/OpenAI frame it), so onDelta is called with each frame's text
-// parts as they arrive; a functionCall part is buffered into the final
-// ToolCalls rather than streamed, matching every other Client here.
-func (c *googleClient) CompleteStream(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error) {
-	base := c.baseURL
-	if baseURL != "" {
-		base = baseURL
-	}
-	body := googleRequestBody(req)
-
-	var text strings.Builder
-	var toolCalls []ToolCall
-	var inputTokens, outputTokens int64
-	var streamErr error
-
-	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", base, model, apiKey)
-	status, err := postSSE(ctx, c.client, url, nil, body, func(_ string, data []byte) {
-		var chunk struct {
-			Candidates []struct {
-				Content struct {
-					Parts []googlePart `json:"parts"`
-				} `json:"content"`
-			} `json:"candidates"`
-			UsageMetadata struct {
-				PromptTokenCount     int64 `json:"promptTokenCount"`
-				CandidatesTokenCount int64 `json:"candidatesTokenCount"`
-			} `json:"usageMetadata"`
-			Error *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if err := json.Unmarshal(data, &chunk); err != nil {
-			return
-		}
-		if chunk.Error != nil {
-			streamErr = errors.New(chunk.Error.Message)
-			return
-		}
-		if chunk.UsageMetadata.PromptTokenCount > 0 {
-			inputTokens = chunk.UsageMetadata.PromptTokenCount
-		}
-		if chunk.UsageMetadata.CandidatesTokenCount > 0 {
-			outputTokens = chunk.UsageMetadata.CandidatesTokenCount
-		}
-		if len(chunk.Candidates) == 0 {
-			return
-		}
-		for _, p := range chunk.Candidates[0].Content.Parts {
-			if p.FunctionCall != nil {
-				toolCalls = append(toolCalls, ToolCall{Name: p.FunctionCall.Name, Arguments: p.FunctionCall.Args})
-				continue
-			}
-			if p.Text != "" {
-				text.WriteString(p.Text)
-				if onDelta != nil {
-					onDelta(StreamDelta{TextDelta: p.Text})
-				}
-			}
-		}
-	})
-	if err != nil {
-		return CompletionResult{}, err
-	}
-	if streamErr != nil {
-		return CompletionResult{}, streamErr
-	}
-	if status < 200 || status >= 300 {
-		return CompletionResult{}, fmt.Errorf("google: http %d", status)
-	}
-	return CompletionResult{Content: text.String(), ToolCalls: toolCalls, InputTokens: inputTokens, OutputTokens: outputTokens}, nil
-}
-
-// postJSON is the shared low-level helper for the two hand-rolled clients
-// (Anthropic, Google) that don't go through the go-openai SDK.
 func postJSON(ctx context.Context, client *http.Client, url string, headers map[string]string, body, out any) (status int, err error) {
 	payload, err := json.Marshal(body)
 	if err != nil {

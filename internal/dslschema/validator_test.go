@@ -80,7 +80,10 @@ func TestAgentValidator_AcceptsAllExampleFixtures(t *testing.T) {
 	}
 }
 
-func TestAgentValidator_RejectsInvalidProvider(t *testing.T) {
+// provider 不再是固定枚举（渠道由管理员在运行时创建），schema 只能管住形
+// 状：小写字母开头的短标识。"这个 provider 存不存在"是注册表的事，schema
+// 管不了也不该管。
+func TestAgentValidator_RejectsMalformedProviderKey(t *testing.T) {
 	validator, err := NewAgentValidator()
 	if err != nil {
 		t.Fatalf("new validator: %v", err)
@@ -89,7 +92,7 @@ func TestAgentValidator_RejectsInvalidProvider(t *testing.T) {
 	doc := loadYAMLAsAny(t, filepath.Join(fixturesDir(t), "architect.agent.yaml"))
 	m := doc.(map[string]any)
 	model := m["model"].(map[string]any)
-	model["provider"] = "not-a-real-provider"
+	model["provider"] = "Not A Provider"
 
 	errs, err := validator.Validate(doc)
 	if err != nil {

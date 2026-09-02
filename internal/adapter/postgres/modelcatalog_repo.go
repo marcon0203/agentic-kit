@@ -20,10 +20,10 @@ func NewModelCatalogRepository(q store.Querier) *ModelCatalogRepository {
 
 var _ modelcatalog.Repository = (*ModelCatalogRepository)(nil)
 
-func toDomainProvider(id int64, key, displayName string, icon, baseURL pgtype.Text, status int16, createdAt pgtype.Timestamptz, hasCredential bool) modelcatalog.Provider {
+func toDomainProvider(id int64, key, displayName string, icon, baseURL, template pgtype.Text, status int16, createdAt pgtype.Timestamptz, hasCredential bool) modelcatalog.Provider {
 	return modelcatalog.Provider{
 		ID: id, Key: key, DisplayName: displayName,
-		Icon: icon.String, BaseURL: baseURL.String,
+		Icon: icon.String, BaseURL: baseURL.String, Template: template.String,
 		Status: status, CreatedAt: createdAt.Time, HasCredential: hasCredential,
 	}
 }
@@ -36,11 +36,13 @@ func toDomainModel(row store.CatalogModel) modelcatalog.Model {
 	}
 }
 
-func (r *ModelCatalogRepository) CreateProvider(ctx context.Context, key, displayName, icon, baseURL string) (modelcatalog.Provider, error) {
+func (r *ModelCatalogRepository) CreateProvider(ctx context.Context, p modelcatalog.NewProvider) (modelcatalog.Provider, error) {
 	row, err := r.q.CreateCatalogProvider(ctx, store.CreateCatalogProviderParams{
-		ProviderKey: key, DisplayName: displayName,
-		Icon:    pgtype.Text{String: icon, Valid: icon != ""},
-		BaseUrl: pgtype.Text{String: baseURL, Valid: baseURL != ""},
+		ProviderKey: p.Key, DisplayName: p.DisplayName,
+		Icon:       pgtype.Text{String: p.Icon, Valid: p.Icon != ""},
+		BaseUrl:    pgtype.Text{String: p.BaseURL, Valid: p.BaseURL != ""},
+		Template:   pgtype.Text{String: p.Template, Valid: p.Template != ""},
+		Descriptor: p.Descriptor,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -48,7 +50,7 @@ func (r *ModelCatalogRepository) CreateProvider(ctx context.Context, key, displa
 		}
 		return modelcatalog.Provider{}, err
 	}
-	return toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Status, row.CreatedAt, row.HasCredential), nil
+	return toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Template, row.Status, row.CreatedAt, row.HasCredential), nil
 }
 
 func (r *ModelCatalogRepository) ListProviders(ctx context.Context) ([]modelcatalog.Provider, error) {
@@ -58,7 +60,7 @@ func (r *ModelCatalogRepository) ListProviders(ctx context.Context) ([]modelcata
 	}
 	out := make([]modelcatalog.Provider, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Status, row.CreatedAt, row.HasCredential))
+		out = append(out, toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Template, row.Status, row.CreatedAt, row.HasCredential))
 	}
 	return out, nil
 }
@@ -71,7 +73,7 @@ func (r *ModelCatalogRepository) GetProvider(ctx context.Context, id int64) (mod
 		}
 		return modelcatalog.Provider{}, err
 	}
-	return toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Status, row.CreatedAt, row.HasCredential), nil
+	return toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Template, row.Status, row.CreatedAt, row.HasCredential), nil
 }
 
 func (r *ModelCatalogRepository) SetProviderStatus(ctx context.Context, id int64, status int16) error {
@@ -146,6 +148,20 @@ func (r *ModelCatalogRepository) ListPublic(ctx context.Context) ([]modelcatalog
 			ProviderKey: row.ProviderKey, ProviderDisplayName: row.ProviderDisplayName,
 			ProviderIcon: row.ProviderIcon.String,
 		})
+	}
+	return out, nil
+}
+
+// ListChannelDescriptors 返回全部启用中的提供商的渠道描述符快照，供
+// modelgateway 重建渠道注册表。停用的不出现——停用就该立刻调不通。
+func (r *ModelCatalogRepository) ListChannelDescriptors(ctx context.Context) ([]modelcatalog.ChannelDescriptor, error) {
+	rows, err := r.q.ListEnabledChannelDescriptors(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]modelcatalog.ChannelDescriptor, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, modelcatalog.ChannelDescriptor{Key: row.ProviderKey, Descriptor: row.Descriptor})
 	}
 	return out, nil
 }

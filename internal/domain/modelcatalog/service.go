@@ -3,6 +3,7 @@ package modelcatalog
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
@@ -15,7 +16,7 @@ var ErrDuplicate = errors.New("modelcatalog: already exists")
 // 系统配置 → 模型提供商 is an admin-only surface, unlike modelcenter's
 // per-user provider credentials.
 type Repository interface {
-	CreateProvider(ctx context.Context, key, displayName, icon, baseURL string) (Provider, error)
+	CreateProvider(ctx context.Context, p NewProvider) (Provider, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	GetProvider(ctx context.Context, id int64) (Provider, error)
 	SetProviderStatus(ctx context.Context, id int64, status int16) error
@@ -30,6 +31,48 @@ type Repository interface {
 	DeleteModel(ctx context.Context, id int64) error
 
 	ListPublic(ctx context.Context) ([]CatalogEntry, error)
+
+	// ListChannelDescriptors 返回全部**启用中**提供商的渠道描述符快照。
+	ListChannelDescriptors(ctx context.Context) ([]ChannelDescriptor, error)
+}
+
+// ChannelDescriptor 是一个提供商的渠道描述符快照。
+type ChannelDescriptor struct {
+	Key        string
+	Descriptor []byte
+}
+
+// Channels 是给渠道注册表重建用的读接口，不做权限判定——它的调用方是进程
+// 自己（启动时和写操作之后），不是某个用户的请求。
+func (s *Service) Channels(ctx context.Context) ([]ChannelDescriptor, error) {
+	return s.repo.ListChannelDescriptors(ctx)
+}
+
+// ChannelTemplates 是协议模板的端口：把一个模板 + 管理员填的
+// key/显示名/接口地址，渲染成一份**已完整校验**的渠道描述符快照。
+//
+// 校验在这一步做而不是等到第一次调用：一个连协议都写不对的提供商存下来，
+// 只会让人在"为什么这个模型调不通"上耗时间。由 internal/channeltemplates
+// 实现。
+type ChannelTemplates interface {
+	Instantiate(templateID, key, label, baseURL string) (descriptorJSON []byte, err error)
+}
+
+// ChannelReloader 让服务在提供商增删改之后重建 modelgateway 的渠道注册
+// 表。整体重建而不是增量同步：每次都从库里读全量，注册表和库不会出现"某次
+// 删除漏掉了"的偏差。
+type ChannelReloader interface {
+	Reload(ctx context.Context) error
+}
+
+// NewProvider 是创建一个模型提供商需要的全部输入。
+type NewProvider struct {
+	Key         string
+	DisplayName string
+	Icon        string
+	BaseURL     string
+	Template    string
+	Descriptor  []byte
 }
 
 type AdminDirectory interface {
@@ -60,13 +103,30 @@ const (
 )
 
 type Service struct {
-	repo   Repository
-	admins AdminDirectory
-	cipher Cipher
+	repo      Repository
+	admins    AdminDirectory
+	cipher    Cipher
+	templates ChannelTemplates
+	channels  ChannelReloader
 }
 
-func NewService(repo Repository, admins AdminDirectory, cipher Cipher) *Service {
-	return &Service{repo: repo, admins: admins, cipher: cipher}
+func NewService(repo Repository, admins AdminDirectory, cipher Cipher, templates ChannelTemplates, channels ChannelReloader) *Service {
+	return &Service{repo: repo, admins: admins, cipher: cipher, templates: templates, channels: channels}
+}
+
+// SetChannelReloader 回填渠道注册表的重建器。它和 Service 互相需要（重建
+// 器要从 Service 读描述符），所以在构造之后回填，而不是在 NewService 里传
+// ——为了避开这个循环把"读描述符"复制一份到别处，才是更差的选择。
+func (s *Service) SetChannelReloader(r ChannelReloader) { s.channels = r }
+
+// reloadChannels 在提供商增删改之后重建渠道注册表。失败只记在返回值上由调
+// 用方决定——写已经落库了，这里再报错会让管理员以为操作没成功、然后重试一
+// 次撞上"key 已存在"。
+func (s *Service) reloadChannels(ctx context.Context) {
+	if s.channels == nil {
+		return
+	}
+	_ = s.channels.Reload(ctx)
 }
 
 // List is the public read for 模型广场 — every logged-in user, not just
@@ -79,32 +139,66 @@ func (s *Service) List(ctx context.Context) ([]CatalogEntry, error) {
 	return entries, nil
 }
 
-// CreateProvider registers a new catalog provider. Admin only.
-func (s *Service) CreateProvider(ctx context.Context, userID int64, key, displayName, icon, baseURL string) (Provider, error) {
+// providerKeyPattern 约束 provider key：它会作为 Agent DSL 里
+// `model.provider` 的取值（schemas/agent.schema.json 的同一条 pattern），
+// 也会作为凭据表的 provider 列。放开成自由文本的话，一个带斜杠的 key 会让
+// "provider/model" 这个引用格式直接失去意义。
+var providerKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+
+// CreateProvider 登记一个模型提供商——同时也就是一个可调用的渠道。
+//
+// 必须挑一个协议模板：平台开箱不带任何渠道，"新建一个提供商"这个动作的实
+// 质就是"从模板实例化一个渠道"。模板渲染出的描述符会被完整校验并跑一遍
+// fixtures，过不了就不落库。
+func (s *Service) CreateProvider(ctx context.Context, userID int64, in NewProvider) (Provider, error) {
 	if err := s.requireAccess(ctx, userID, PermProviderCreate); err != nil {
 		return Provider{}, err
 	}
 
-	key = strings.TrimSpace(key)
-	displayName = strings.TrimSpace(displayName)
+	in.Key = strings.TrimSpace(in.Key)
+	in.DisplayName = strings.TrimSpace(in.DisplayName)
+	in.BaseURL = strings.TrimSpace(in.BaseURL)
+	in.Template = strings.TrimSpace(in.Template)
+
 	var fields []domain.FieldError
-	if key == "" {
+	if in.Key == "" {
 		fields = append(fields, domain.FieldError{Field: "key", Reason: "required"})
+	} else if !providerKeyPattern.MatchString(in.Key) {
+		fields = append(fields, domain.FieldError{
+			Field:  "key",
+			Reason: "只能用小写字母开头，后面接小写字母、数字、下划线或短横线，最长 32 个字符",
+		})
 	}
-	if displayName == "" {
+	if in.DisplayName == "" {
 		fields = append(fields, domain.FieldError{Field: "display_name", Reason: "required"})
+	}
+	if in.Template == "" {
+		fields = append(fields, domain.FieldError{Field: "template", Reason: "required"})
 	}
 	if len(fields) > 0 {
 		return Provider{}, domain.Invalid(domain.CodeValidationFailed, "validation failed").WithDetails(fields...)
 	}
 
-	created, err := s.repo.CreateProvider(ctx, key, displayName, icon, baseURL)
+	if s.templates == nil {
+		return Provider{}, domain.Internal(errors.New("modelcatalog: 没有配置协议模板"))
+	}
+	rendered, err := s.templates.Instantiate(in.Template, in.Key, in.DisplayName, in.BaseURL)
+	if err != nil {
+		// 模板名写错、接口地址缺失、渲染出的描述符校验不过——都是管理员填
+		// 错了东西，原样把理由说清楚，不要包成一句"创建失败"。
+		return Provider{}, domain.Invalid(domain.CodeValidationFailed, err.Error()).
+			WithDetails(domain.FieldError{Field: "template", Reason: err.Error()})
+	}
+	in.Descriptor = rendered
+
+	created, err := s.repo.CreateProvider(ctx, in)
 	if err != nil {
 		if errors.Is(err, ErrDuplicate) {
 			return Provider{}, domain.Conflict(domain.CodeCatalogProviderKeyDup, "该 provider key 已存在")
 		}
 		return Provider{}, domain.Internal(err)
 	}
+	s.reloadChannels(ctx)
 	return created, nil
 }
 
@@ -140,6 +234,8 @@ func (s *Service) SetProviderStatus(ctx context.Context, userID, providerID int6
 	if err := s.repo.SetProviderStatus(ctx, providerID, status); err != nil {
 		return domain.Internal(err)
 	}
+	// 停用要立刻调不通，而不是等下次重启。
+	s.reloadChannels(ctx)
 	return nil
 }
 
@@ -159,6 +255,7 @@ func (s *Service) DeleteProvider(ctx context.Context, userID, providerID int64) 
 	if err := s.repo.DeleteProvider(ctx, providerID); err != nil {
 		return domain.Internal(err)
 	}
+	s.reloadChannels(ctx)
 	return nil
 }
 

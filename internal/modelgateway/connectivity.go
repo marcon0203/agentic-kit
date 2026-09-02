@@ -26,10 +26,10 @@ type Validator interface {
 	Validate(ctx context.Context, apiKey string) error
 }
 
-// NewValidator returns the Validator for a components.schemas.ProviderName
-// value ("deepseek", "volcengine", "qwen", "custom", "google", or any
-// provider appended to registry.go's providers / added as a channel
-// descriptor), or nil if the name isn't registered. baseURL overrides the provider's documented default
+// NewValidator returns the Validator for a registered channel name, or nil
+// if no channel by that name exists. 渠道由管理员从协议模板创建（见
+// registry.go 的 SetChannels），所以这里返回 nil 的常见原因是"这个渠道被
+// 删了"或"名字写错了"，而不是"平台不支持这家厂商"。 baseURL overrides the provider's documented default
 // endpoint; for "custom" there is no default, so an empty baseURL there
 // yields a Validator whose Validate call always fails (the domain Service
 // is expected to reject a base_url-less "custom" registration before ever
@@ -48,21 +48,6 @@ func newValidatorWithEndpoints(provider, baseURL string, ep providerOverrides) V
 		base = baseURL
 	}
 	return def.NewValidator(&http.Client{Timeout: connectivityTimeout}, base)
-}
-
-// googleValidator probes GET /v1beta/models with the key as a query
-// parameter, per the Generative Language API's auth scheme.
-type googleValidator struct {
-	client  *http.Client
-	baseURL string
-}
-
-func (v *googleValidator) Validate(ctx context.Context, apiKey string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, v.baseURL+"/v1beta/models?key="+apiKey, nil)
-	if err != nil {
-		return err
-	}
-	return doAuthProbe(v.client, req)
 }
 
 // ErrCredentialsInvalid is returned when the Provider reached us and

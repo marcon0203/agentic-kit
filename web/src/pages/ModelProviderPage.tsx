@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { ListSkeleton, ErrorPanel } from '@/components/common/EmptyState'
 import { SectionSidebar, type SectionSidebarItem } from '@/components/layout/SectionSidebar'
+import { useProviderSpecs } from '@/lib/models/useProviderSpecs'
 import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
@@ -24,42 +25,8 @@ type ModelCatalogEntry = components['schemas']['ModelCatalogEntry']
 type ProviderName = components['schemas']['ProviderName']
 type Modality = ModelCatalogEntry['modality']
 
-type ProviderSpec = components['schemas']['ModelProviderSpec']
-
-/**
- * 渠道列表来自后端的 GET /model-provider-specs（后端的渠道注册表：内置的
- * 声明式渠道描述符 + 少数手写 client）。前端不再抄第二份——抄了的下场是每
- * 加一个渠道就有一处忘了改。
- *
- * 下面这份是加载中/请求失败时的兜底，只保证下拉框不是空的。
- */
-const FALLBACK_SPECS: ProviderSpec[] = [
-  { name: 'deepseek', label: 'DeepSeek', credentials: [] },
-  { name: 'volcengine', label: '火山引擎方舟', credentials: [] },
-  { name: 'qwen', label: '通义千问', credentials: [] },
-  { name: 'custom', label: '自定义（OpenAI 兼容）', credentials: [] },
-  { name: 'google', label: 'Google Gemini', credentials: [] },
-]
-
-function useProviderSpecs(): ProviderSpec[] {
-  const query = useQuery({
-    queryKey: ['model-provider-specs'],
-    queryFn: async () =>
-      unwrap<{ items: ProviderSpec[] }>(await apiClient.GET('/model-provider-specs', {})),
-    staleTime: Infinity, // 渠道列表随二进制发布，一次会话里不会变
-  })
-  return query.data?.items?.length ? query.data.items : FALLBACK_SPECS
-}
-
-const KNOWN_PROVIDER_NAMES: ProviderName[] = FALLBACK_SPECS.map((s) => s.name)
-
-// A catalog entry's provider is now a free-text key from 系统配置 → 模型
-// 提供商 — an admin can register one that isn't among the 6 credentials
-// modelcenter's connectivity probe knows how to validate. Falling back to
-// 'custom' lets the connect dialog still open (with its base-url field)
-// instead of crashing on an unrecognized key.
-function toProviderName(key: string): ProviderName {
-  return (KNOWN_PROVIDER_NAMES as string[]).includes(key) ? (key as ProviderName) : 'custom'
+function toProviderName(key: string, known: string[]): ProviderName {
+  return known.includes(key) ? (key as ProviderName) : (known[0] ?? key)
 }
 
 const MODALITIES: SectionSidebarItem[] = [
@@ -85,6 +52,7 @@ export function ModelProviderPage() {
   const [providerFilter, setProviderFilter] = useState('all')
   const [tab, setTab] = useState<'featured' | 'all'>('featured')
   const [connecting, setConnecting] = useState<ProviderName | null>(null)
+  const { specs } = useProviderSpecs()
 
   const providersQuery = useQuery({
     queryKey: ['model-providers'],
@@ -158,8 +126,15 @@ export function ModelProviderPage() {
                   </SelectContent>
                 </Select>
               )}
-              <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setConnecting('deepseek')}>
-                新增模型
+              {/* 一个渠道都没有时点开弹窗只会得到一个空下拉框——直接禁掉并
+                  说清楚该去哪配。 */}
+              <Button
+                className="bg-gradient-cta text-white hover:opacity-90"
+                disabled={specs.length === 0}
+                title={specs.length === 0 ? '还没有模型提供商，先去 系统配置 → 模型提供商 配一个' : undefined}
+                onClick={() => specs[0] && setConnecting(specs[0].name)}
+              >
+                接入模型
               </Button>
             </div>
           </div>
@@ -183,7 +158,7 @@ export function ModelProviderPage() {
                   </h3>
                   <div className="grid grid-cols-1 gap-space-3 md:grid-cols-2 xl:grid-cols-3">
                     {group.items.map((entry) => {
-                      const providerName = toProviderName(entry.provider)
+                      const providerName = toProviderName(entry.provider, specs.map((s) => s.name))
                       const isConnected = connected.has(providerName)
                       return (
                         <button
@@ -244,7 +219,7 @@ function ConnectProviderDialog({
   onOpenChange: (v: boolean) => void
   onConnected: () => void
 }) {
-  const specs = useProviderSpecs()
+  const { specs } = useProviderSpecs()
   const [selectedProvider, setSelectedProvider] = useState(provider)
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('')

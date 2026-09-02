@@ -24,8 +24,11 @@ describe('validateAgentDefinition', () => {
     expect(errors.some((e) => e.field === 'persona')).toBe(true)
   })
 
-  it('flags an invalid model.provider enum value at the nested field path', () => {
-    const errors = validateAgentDefinition({ ...VALID_AGENT, model: { ...VALID_AGENT.model, provider: 'bogus' } })
+  // provider 不再是固定枚举：渠道由管理员在 系统配置 → 模型提供商 里创建，
+  // schema 只能管住形状（小写字母开头的短标识）。"这个 provider 存不存在"
+  // 是注册表的事。
+  it('flags a malformed model.provider key at the nested field path', () => {
+    const errors = validateAgentDefinition({ ...VALID_AGENT, model: { ...VALID_AGENT.model, provider: 'Not A Provider' } })
     expect(errors.some((e) => e.field === 'model.provider')).toBe(true)
   })
 

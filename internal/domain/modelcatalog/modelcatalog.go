@@ -39,11 +39,15 @@ func (m Modality) Valid() bool {
 // encrypted value itself never leaves the postgres adapter, so this is only
 // ever a boolean flag, never the key.
 type Provider struct {
-	ID            int64
-	Key           string
-	DisplayName   string
-	Icon          string
-	BaseURL       string
+	ID          int64
+	Key         string
+	DisplayName string
+	Icon        string
+	BaseURL     string
+	// Template 记录这个提供商是从哪个协议模板建出来的，只供界面展示。真正
+	// 决定怎么调用的是落库的描述符快照——模板以后改了，已经建好的提供商不
+	// 受影响。
+	Template      string
 	Status        int16
 	CreatedAt     time.Time
 	HasCredential bool

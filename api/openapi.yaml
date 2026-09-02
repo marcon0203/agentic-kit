@@ -2230,7 +2230,11 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [ModelCatalogAdmin]
-      summary: 新增目录 Provider，管理员
+      summary: 新增模型提供商，管理员
+      description: >-
+        建出来的提供商同时也是一个可调用的渠道：必须挑一个协议模板
+        （GET /model-channel-templates），后端据此渲染渠道描述符、完整校验并
+        跑一遍回归用例，过不了就不落库。创建成功后渠道立刻可用，不需要重启。
       operationId: createCatalogProvider
       requestBody:
         required: true
@@ -2238,12 +2242,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [key, display_name]
+              required: [key, display_name, template]
               properties:
-                key: { type: string, examples: ['deepseek'] }
-                display_name: { type: string, examples: ['DeepSeek'] }
+                key: { $ref: '#/components/schemas/ProviderName' }
+                display_name: { type: string, examples: ['我的 DeepSeek'] }
+                template:
+                  type: string
+                  description: 协议模板 id，见 GET /model-channel-templates
+                  examples: ['deepseek']
                 icon: { type: string, description: 'URL 或 data: URI' }
-                base_url: { type: string }
+                base_url:
+                  type: string
+                  description: 留空沿用模板默认地址；模板没有默认地址时必填
       responses:
         '201':
           description: 创建成功
@@ -2754,6 +2764,34 @@ paths:
   # ────────────────────────── Skill 源 ──────────────────────────
   # 系统配置 → Skill 源：管理员登记公开 Skill 市场（如 https://clawhub.ai/），
   # 同步后的公开 Skill 出现在 Skill 管理 → 市场视图（GET /skill-market）。
+  /model-channel-templates:
+    get:
+      tags: [ModelProviders]
+      summary: 可选的协议模板
+      description: >-
+        新建模型提供商时挑一个模板。模板是一份写好了某家厂商线协议怎么调的
+        渠道描述符骨架——管理员只需要填 key、显示名和接口地址，不用懂描述符
+        本身。实例化出来的描述符是快照，以后模板改了不影响已建好的提供商。
+      operationId: listModelChannelTemplates
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/ModelChannelTemplate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /model-provider-specs:
     get:
       tags: [ModelProviders]
@@ -3176,6 +3214,30 @@ components:
       type: string
       enum: [tool, skill, mcp, knowledge_base, memory]
 
+    ModelChannelTemplate:
+      type: object
+      required: [id, label, wire, capabilities, credentials]
+      properties:
+        id: { type: string, description: 模板 id，创建提供商时回传 }
+        label: { type: string }
+        description: { type: string }
+        wire: { type: string, description: 线协议族标识，同族模板共用一套回归用例 }
+        base_url:
+          type: string
+          description: 模板的默认接口地址；为空表示必须自己填（如 openai-compatible）
+        capabilities:
+          type: array
+          items: { type: string, enum: [text, tools, stream, embed] }
+        credentials:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              type: { type: string, enum: [secret, text, url] }
+              label: { type: string }
+              required: { type: boolean }
+
     ModelProviderSpec:
       type: object
       required: [name, label, credentials]
@@ -3198,7 +3260,11 @@ components:
 
     ProviderName:
       type: string
-      enum: [deepseek, volcengine, qwen, custom, google]
+      description: >-
+        模型提供商（= 可调用的渠道）的 key，由管理员在 系统配置 → 模型提供商
+        里从协议模板创建。不是固定枚举：平台开箱不带任何渠道，有哪些取决于
+        这个部署配了什么。可选值见 GET /model-provider-specs。
+      pattern: '^[a-z][a-z0-9_-]{0,31}$'
 
     RunStatus:
       type: string
@@ -3707,6 +3773,9 @@ components:
         display_name: { type: string, examples: ['DeepSeek'] }
         icon: { type: string, description: 'URL 或 data: URI' }
         base_url: { type: string }
+        template:
+          type: string
+          description: 从哪个协议模板建出来的，仅供展示；实际行为由落库的描述符快照决定
         status: { $ref: '#/components/schemas/Status' }
         created_at: { type: string, format: date-time }
         has_credential:

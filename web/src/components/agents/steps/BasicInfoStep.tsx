@@ -4,12 +4,14 @@ import { FallbackMultiSelect } from '@/components/agents/FallbackMultiSelect'
 import { TemperatureSlider } from '@/components/agents/TemperatureSlider'
 import { Field } from '@/components/agents/WizardField'
 import type { FormState } from '@/lib/agents/definition'
+import { useProviderSpecs } from '@/lib/models/useProviderSpecs'
 import type { components } from '@/lib/api/schema'
 
 type ProviderName = components['schemas']['ProviderName']
 type ModelCatalogEntry = components['schemas']['ModelCatalogEntry']
 
-const PROVIDERS: ProviderName[] = ['deepseek', 'volcengine', 'qwen', 'custom', 'google']
+// 渠道由管理员在 系统配置 → 模型提供商 里创建，前端不硬编——一个部署有哪
+// 些渠道只有后端知道。
 
 interface BasicInfoStepProps {
   form: FormState
@@ -20,6 +22,7 @@ interface BasicInfoStepProps {
 }
 
 export function BasicInfoStep({ form, set, modelsForProvider, catalog, isEdit }: BasicInfoStepProps) {
+  const { specs } = useProviderSpecs()
   return (
     <div className="flex flex-col gap-space-6">
       <div className="grid grid-cols-1 gap-space-6 md:grid-cols-2">
@@ -49,9 +52,9 @@ export function BasicInfoStep({ form, set, modelsForProvider, catalog, isEdit }:
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {PROVIDERS.map((p) => (
-              <SelectItem key={p} value={p}>
-                {p}
+            {specs.map((spec) => (
+              <SelectItem key={spec.name} value={spec.name}>
+                {spec.label}
               </SelectItem>
             ))}
           </SelectContent>

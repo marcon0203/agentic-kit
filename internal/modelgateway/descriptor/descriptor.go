@@ -12,12 +12,15 @@ const Version = 1
 
 // Descriptor 是一个模型渠道的完整声明。
 type Descriptor struct {
-	DescriptorVersion int      `json:"descriptor_version"`
-	ID                string   `json:"id"`
-	Label             string   `json:"label"`
-	Wire              string   `json:"wire"`
-	Capabilities      []string `json:"capabilities"`
-	BaseURL           string   `json:"base_url"`
+	DescriptorVersion int    `json:"descriptor_version"`
+	ID                string `json:"id"`
+	Label             string `json:"label"`
+	Wire              string `json:"wire"`
+	// Description 是给管理员看的说明（协议模板选择器里显示），不参与任何
+	// 运行时行为。
+	Description  string   `json:"description"`
+	Capabilities []string `json:"capabilities"`
+	BaseURL      string   `json:"base_url"`
 
 	Credentials []CredentialField     `json:"credentials"`
 	Auth        Auth                  `json:"auth"`

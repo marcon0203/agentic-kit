@@ -22,6 +22,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/adapter/extism"
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
 	"github.com/marcon0203/agentic-kit/internal/adapter/milvus"
+	"github.com/marcon0203/agentic-kit/internal/adapter/modelchannels"
 	adaptermodelgateway "github.com/marcon0203/agentic-kit/internal/adapter/modelgateway"
 	adapteropenapi "github.com/marcon0203/agentic-kit/internal/adapter/openapi"
 	"github.com/marcon0203/agentic-kit/internal/adapter/orchestrator"
@@ -40,13 +41,13 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/knowledgebase"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcatalog"
-	"github.com/marcon0203/agentic-kit/internal/domain/skillsource"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 	"github.com/marcon0203/agentic-kit/internal/domain/operation"
 	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
 	"github.com/marcon0203/agentic-kit/internal/domain/rbac"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	domainrun "github.com/marcon0203/agentic-kit/internal/domain/run"
+	"github.com/marcon0203/agentic-kit/internal/domain/skillsource"
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
 	"github.com/marcon0203/agentic-kit/internal/modelgateway"
 	"github.com/marcon0203/agentic-kit/internal/observability"
@@ -265,9 +266,24 @@ func run() error {
 		postgres.NewUsageRepository(queries),
 	)
 
-	// 系统配置 → 模型提供商: admin-managed catalog (Provider + its Models),
-	// distinct from modelCenter's per-user connected credentials above.
-	modelCatalog := modelcatalog.NewService(postgres.NewModelCatalogRepository(queries), adminDirectory, adaptercrypto.NewCipher(aesKey))
+	// 系统配置 → 模型提供商: 管理员登记的模型提供商，同时也就是可调用的渠
+	// 道——建的时候选一个协议模板，渲染出的渠道描述符落库，由 channelReloader
+	// 装进 modelgateway 的注册表。平台开箱不带任何渠道。
+	//
+	// 这里有个先有鸡还是先有蛋：Service 要 reloader，reloader 要从 Service
+	// 读数据。先建 Service（reloader 传 nil），再回填——比为了避开循环把读
+	// 数据那一步复制一份要好。
+	modelCatalog := modelcatalog.NewService(
+		postgres.NewModelCatalogRepository(queries), adminDirectory,
+		adaptercrypto.NewCipher(aesKey), modelchannels.NewTemplates(), nil,
+	)
+	channelReloader := modelchannels.NewReloader(catalogChannelSource{modelCatalog})
+	modelCatalog.SetChannelReloader(channelReloader)
+	// 启动时先装一遍。失败不阻止启动——一个渠道都没有的实例仍然能进后台把
+	// 提供商配好，比整个服务起不来强。
+	if err := channelReloader.Reload(ctx); err != nil {
+		slog.Error("initial_model_channel_load_failed", "err", err)
+	}
 
 	// 系统配置 → 用户管理 / 角色权限: roles/permissions engine. adminDirectory
 	// doubles as its AdminDirectory too — role/permission administration
@@ -326,11 +342,11 @@ func run() error {
 			adapterclawhub.NewFetcher(),
 			resourceService,
 		)),
-		Usage:             api.NewUsageHandlers(modelCenter),
-		Runs:              api.NewRunHandlers(runService),
-		RBAC:              api.NewRBACHandlers(rbacService),
-		Plugins:           api.NewPluginHandlers(pluginService, skillObjectStore),
-		Features:          api.FeaturesConfig{KnowledgeBaseEnabled: cfg.KBEnabled, SkillUploadEnabled: cfg.OSSEnabled()},
+		Usage:    api.NewUsageHandlers(modelCenter),
+		Runs:     api.NewRunHandlers(runService),
+		RBAC:     api.NewRBACHandlers(rbacService),
+		Plugins:  api.NewPluginHandlers(pluginService, skillObjectStore),
+		Features: api.FeaturesConfig{KnowledgeBaseEnabled: cfg.KBEnabled, SkillUploadEnabled: cfg.OSSEnabled()},
 		Operations: api.NewOperationHandlers(operation.NewService(
 			postgres.NewReportRepository(queries),
 			postgres.NewAuditLogReader(queries),
@@ -392,4 +408,21 @@ func splitAndTrim(csv string) []string {
 		}
 	}
 	return out
+}
+
+// catalogChannelSource 把 modelcatalog.Service 的读方法适配成
+// modelchannels.ChannelSource——两边的行类型同形，只是各自声明在自己的包
+// 里，不互相 import。
+type catalogChannelSource struct{ svc *modelcatalog.Service }
+
+func (s catalogChannelSource) Channels(ctx context.Context) ([]modelchannels.ChannelRow, error) {
+	rows, err := s.svc.Channels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]modelchannels.ChannelRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, modelchannels.ChannelRow{Key: row.Key, Descriptor: row.Descriptor})
+	}
+	return out, nil
 }

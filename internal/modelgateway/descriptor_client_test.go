@@ -206,8 +206,10 @@ func TestProviderSpecs_DescribeCredentialFields(t *testing.T) {
 	}
 }
 
-func TestProviderNames_MatchesTheShippedChannels(t *testing.T) {
-	want := map[string]bool{"deepseek": true, "volcengine": true, "qwen": true, "custom": true, "google": true}
+// 平台开箱不带渠道；这里的四个是 TestMain 按协议模板建出来的，等价于管理
+// 员在 系统配置 → 模型提供商 里建了它们。
+func TestProviderNames_MatchesTheTestChannels(t *testing.T) {
+	want := map[string]bool{"deepseek": true, "volcengine": true, "qwen": true, "custom": true}
 	got := ProviderNames()
 	if len(got) != len(want) {
 		t.Fatalf("期望 %d 个渠道，得到 %d 个: %v", len(want), len(got), got)
