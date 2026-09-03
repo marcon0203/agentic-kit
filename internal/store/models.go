@@ -208,13 +208,16 @@ type McpServer struct {
 }
 
 type McpSource struct {
-	ID            int64              `json:"id"`
-	Name          string             `json:"name"`
-	BaseUrl       string             `json:"base_url"`
-	Status        int16              `json:"status"`
-	LastSyncedAt  pgtype.Timestamptz `json:"last_synced_at"`
-	LastSyncError pgtype.Text        `json:"last_sync_error"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ID              int64              `json:"id"`
+	Name            string             `json:"name"`
+	BaseUrl         string             `json:"base_url"`
+	Status          int16              `json:"status"`
+	LastSyncedAt    pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError   pgtype.Text        `json:"last_sync_error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	Protocol        string             `json:"protocol"`
+	ApiPrefix       string             `json:"api_prefix"`
+	ApiKeyEncrypted pgtype.Text        `json:"api_key_encrypted"`
 }
 
 type Memory struct {

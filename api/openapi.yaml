@@ -3236,6 +3236,35 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /mcp-source-protocols:
+    get:
+      tags: [MCPSources]
+      summary: 本部署认识的 MCP 源协议
+      description: >-
+        新建源时挑一个协议。MCP 生态收敛出了一份公共的注册中心接口约定，官方
+        和各家子注册中心说的是同一套（mcp-registry），差别只在版本前缀，所以
+        它们共用一个协议、靠 api_prefix 区分；自成一套的（如 Smithery）才各有
+        一个协议。前端按这份清单渲染预设与表单，不要在前端再抄一份协议列表。
+      operationId: listMCPSourceProtocols
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/MCPSourceProtocol' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /mcp-sources:
     get:
       tags: [MCPSources]
@@ -3272,7 +3301,23 @@ paths:
               required: [name, base_url]
               properties:
                 name: { type: string, maxLength: 64 }
-                base_url: { type: string, format: uri }
+                base_url:
+                  type: string
+                  format: uri
+                  description: 站点根地址，不带路径；版本前缀走 api_prefix
+                protocol:
+                  $ref: '#/components/schemas/MCPSourceProtocolID'
+                api_prefix:
+                  type: string
+                  description: >-
+                    接口版本前缀（如 /v0、/v0.1）。留空走该协议的默认值。
+                  example: '/v0'
+                api_key:
+                  type: string
+                  description: >-
+                    该源要求的 API Key（见协议的 requires_api_key）。加密落库，
+                    任何响应都不会带出来；要求密钥的协议不填则拒绝登记——建出
+                    来也只会是一个一同步就 401 的空源。
       responses:
         '201':
           description: 登记成功
@@ -3307,6 +3352,34 @@ paths:
       operationId: deleteMCPSource
       responses:
         '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /mcp-sources/{id}/api-key:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      tags: [MCPSources]
+      summary: 更换该源的 API Key，管理员
+      description: |
+        单独一个动作而不是删掉重建：重建会把这个源下面所有条目的审核结论一起
+        丢掉。密钥加密落库，不会出现在任何响应里。
+      operationId: setMCPSourceAPIKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [api_key]
+              properties:
+                api_key: { type: string }
+      responses:
+        '204': { description: 已更新 }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
@@ -4300,15 +4373,52 @@ components:
               type: array
               items: { $ref: '#/components/schemas/MarketSkillVersion' }
     # ── MCP 源 ──────────────────────────────────────────────────────
+    MCPSourceProtocolID:
+      type: string
+      description: >-
+        源协议。mcp-registry 是官方注册中心的公开规范，各家子注册中心与自建注
+        册中心实现的是同一套，靠 api_prefix 区分版本；smithery 自成一套且要
+        API Key。
+      enum: [mcp-registry, smithery]
+
+    MCPSourceProtocol:
+      type: object
+      required: [id, label, requires_api_key]
+      properties:
+        id: { $ref: '#/components/schemas/MCPSourceProtocolID' }
+        label: { type: string }
+        description: { type: string }
+        default_base_url:
+          type: string
+          description: 该协议的公认站点；为空表示得管理员自己填
+        default_api_prefix:
+          type: string
+          description: 该协议的默认接口版本前缀
+          example: '/v0'
+        requires_api_key:
+          type: boolean
+          description: 为真时登记该源必须给 API Key
+        docs_url:
+          type: string
+          description: 对方的接口文档，供管理员核对地址与版本前缀
+
     MCPSource:
       type: object
-      required: [id, name, base_url, status, server_count]
+      required: [id, name, base_url, protocol, has_api_key, status, server_count]
       properties:
         id: { type: string }
         name: { type: string }
         base_url:
           type: string
           description: 注册中心根地址，不带路径与尾斜杠
+        protocol: { $ref: '#/components/schemas/MCPSourceProtocolID' }
+        api_prefix:
+          type: string
+          description: 接口版本前缀，实际请求 base_url + api_prefix + /servers
+        has_api_key:
+          type: boolean
+          description: >-
+            该源是否已配置 API Key。密钥本身加密落库，任何响应都不带出来。
         status: { $ref: '#/components/schemas/Status' }
         last_synced_at:
           type: [string, 'null']

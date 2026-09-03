@@ -72,18 +72,27 @@ func (q *Queries) CountMarketMCPServersForReview(ctx context.Context, arg CountM
 }
 
 const createMCPSource = `-- name: CreateMCPSource :one
-INSERT INTO mcp_sources (name, base_url)
-VALUES ($1, $2)
-RETURNING id, name, base_url, status, last_synced_at, last_sync_error, created_at
+INSERT INTO mcp_sources (name, base_url, protocol, api_prefix, api_key_encrypted)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, name, base_url, status, last_synced_at, last_sync_error, created_at, protocol, api_prefix, api_key_encrypted
 `
 
 type CreateMCPSourceParams struct {
-	Name    string `json:"name"`
-	BaseUrl string `json:"base_url"`
+	Name            string      `json:"name"`
+	BaseUrl         string      `json:"base_url"`
+	Protocol        string      `json:"protocol"`
+	ApiPrefix       string      `json:"api_prefix"`
+	ApiKeyEncrypted pgtype.Text `json:"api_key_encrypted"`
 }
 
 func (q *Queries) CreateMCPSource(ctx context.Context, arg CreateMCPSourceParams) (McpSource, error) {
-	row := q.db.QueryRow(ctx, createMCPSource, arg.Name, arg.BaseUrl)
+	row := q.db.QueryRow(ctx, createMCPSource,
+		arg.Name,
+		arg.BaseUrl,
+		arg.Protocol,
+		arg.ApiPrefix,
+		arg.ApiKeyEncrypted,
+	)
 	var i McpSource
 	err := row.Scan(
 		&i.ID,
@@ -93,6 +102,9 @@ func (q *Queries) CreateMCPSource(ctx context.Context, arg CreateMCPSourceParams
 		&i.LastSyncedAt,
 		&i.LastSyncError,
 		&i.CreatedAt,
+		&i.Protocol,
+		&i.ApiPrefix,
+		&i.ApiKeyEncrypted,
 	)
 	return i, err
 }
@@ -128,7 +140,7 @@ func (q *Queries) DeleteStaleMarketMCPServers(ctx context.Context, arg DeleteSta
 }
 
 const getMCPSource = `-- name: GetMCPSource :one
-SELECT id, name, base_url, status, last_synced_at, last_sync_error, created_at FROM mcp_sources WHERE id = $1
+SELECT id, name, base_url, status, last_synced_at, last_sync_error, created_at, protocol, api_prefix, api_key_encrypted FROM mcp_sources WHERE id = $1
 `
 
 func (q *Queries) GetMCPSource(ctx context.Context, id int64) (McpSource, error) {
@@ -142,12 +154,15 @@ func (q *Queries) GetMCPSource(ctx context.Context, id int64) (McpSource, error)
 		&i.LastSyncedAt,
 		&i.LastSyncError,
 		&i.CreatedAt,
+		&i.Protocol,
+		&i.ApiPrefix,
+		&i.ApiKeyEncrypted,
 	)
 	return i, err
 }
 
 const getMCPSourceByURL = `-- name: GetMCPSourceByURL :one
-SELECT id, name, base_url, status, last_synced_at, last_sync_error, created_at FROM mcp_sources WHERE base_url = $1
+SELECT id, name, base_url, status, last_synced_at, last_sync_error, created_at, protocol, api_prefix, api_key_encrypted FROM mcp_sources WHERE base_url = $1
 `
 
 func (q *Queries) GetMCPSourceByURL(ctx context.Context, baseUrl string) (McpSource, error) {
@@ -161,6 +176,9 @@ func (q *Queries) GetMCPSourceByURL(ctx context.Context, baseUrl string) (McpSou
 		&i.LastSyncedAt,
 		&i.LastSyncError,
 		&i.CreatedAt,
+		&i.Protocol,
+		&i.ApiPrefix,
+		&i.ApiKeyEncrypted,
 	)
 	return i, err
 }
@@ -225,7 +243,7 @@ func (q *Queries) GetMarketMCPServer(ctx context.Context, id int64) (GetMarketMC
 }
 
 const listMCPSources = `-- name: ListMCPSources :many
-SELECT s.id, s.name, s.base_url, s.status, s.last_synced_at, s.last_sync_error, s.created_at, COUNT(m.id)::bigint AS server_count
+SELECT s.id, s.name, s.base_url, s.status, s.last_synced_at, s.last_sync_error, s.created_at, s.protocol, s.api_prefix, s.api_key_encrypted, COUNT(m.id)::bigint AS server_count
 FROM mcp_sources s
 LEFT JOIN market_mcp_servers m ON m.source_id = s.id
 GROUP BY s.id
@@ -233,14 +251,17 @@ ORDER BY s.created_at DESC
 `
 
 type ListMCPSourcesRow struct {
-	ID            int64              `json:"id"`
-	Name          string             `json:"name"`
-	BaseUrl       string             `json:"base_url"`
-	Status        int16              `json:"status"`
-	LastSyncedAt  pgtype.Timestamptz `json:"last_synced_at"`
-	LastSyncError pgtype.Text        `json:"last_sync_error"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	ServerCount   int64              `json:"server_count"`
+	ID              int64              `json:"id"`
+	Name            string             `json:"name"`
+	BaseUrl         string             `json:"base_url"`
+	Status          int16              `json:"status"`
+	LastSyncedAt    pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError   pgtype.Text        `json:"last_sync_error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	Protocol        string             `json:"protocol"`
+	ApiPrefix       string             `json:"api_prefix"`
+	ApiKeyEncrypted pgtype.Text        `json:"api_key_encrypted"`
+	ServerCount     int64              `json:"server_count"`
 }
 
 // 左联 market_mcp_servers 只为拿每个源的条目数，设置页直接展示。
@@ -261,6 +282,9 @@ func (q *Queries) ListMCPSources(ctx context.Context) ([]ListMCPSourcesRow, erro
 			&i.LastSyncedAt,
 			&i.LastSyncError,
 			&i.CreatedAt,
+			&i.Protocol,
+			&i.ApiPrefix,
+			&i.ApiKeyEncrypted,
 			&i.ServerCount,
 		); err != nil {
 			return nil, err
@@ -445,7 +469,7 @@ const markMCPSourceSyncError = `-- name: MarkMCPSourceSyncError :one
 UPDATE mcp_sources
 SET last_synced_at = now(), last_sync_error = $2
 WHERE id = $1
-RETURNING id, name, base_url, status, last_synced_at, last_sync_error, created_at
+RETURNING id, name, base_url, status, last_synced_at, last_sync_error, created_at, protocol, api_prefix, api_key_encrypted
 `
 
 type MarkMCPSourceSyncErrorParams struct {
@@ -464,6 +488,9 @@ func (q *Queries) MarkMCPSourceSyncError(ctx context.Context, arg MarkMCPSourceS
 		&i.LastSyncedAt,
 		&i.LastSyncError,
 		&i.CreatedAt,
+		&i.Protocol,
+		&i.ApiPrefix,
+		&i.ApiKeyEncrypted,
 	)
 	return i, err
 }
@@ -472,7 +499,7 @@ const markMCPSourceSynced = `-- name: MarkMCPSourceSynced :one
 UPDATE mcp_sources
 SET last_synced_at = now(), last_sync_error = NULL
 WHERE id = $1
-RETURNING id, name, base_url, status, last_synced_at, last_sync_error, created_at
+RETURNING id, name, base_url, status, last_synced_at, last_sync_error, created_at, protocol, api_prefix, api_key_encrypted
 `
 
 func (q *Queries) MarkMCPSourceSynced(ctx context.Context, id int64) (McpSource, error) {
@@ -486,8 +513,29 @@ func (q *Queries) MarkMCPSourceSynced(ctx context.Context, id int64) (McpSource,
 		&i.LastSyncedAt,
 		&i.LastSyncError,
 		&i.CreatedAt,
+		&i.Protocol,
+		&i.ApiPrefix,
+		&i.ApiKeyEncrypted,
 	)
 	return i, err
+}
+
+const setMCPSourceAPIKey = `-- name: SetMCPSourceAPIKey :execrows
+UPDATE mcp_sources SET api_key_encrypted = $2 WHERE id = $1
+`
+
+type SetMCPSourceAPIKeyParams struct {
+	ID              int64       `json:"id"`
+	ApiKeyEncrypted pgtype.Text `json:"api_key_encrypted"`
+}
+
+// 单独换密钥：密钥过期时不必删掉源再重建（那会连审核结论一起丢掉）。
+func (q *Queries) SetMCPSourceAPIKey(ctx context.Context, arg SetMCPSourceAPIKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setMCPSourceAPIKey, arg.ID, arg.ApiKeyEncrypted)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setMarketMCPServerReview = `-- name: SetMarketMCPServerReview :execrows

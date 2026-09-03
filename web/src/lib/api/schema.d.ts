@@ -1615,6 +1615,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp-source-protocols": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 本部署认识的 MCP 源协议
+         * @description 新建源时挑一个协议。MCP 生态收敛出了一份公共的注册中心接口约定，官方 和各家子注册中心说的是同一套（mcp-registry），差别只在版本前缀，所以 它们共用一个协议、靠 api_prefix 区分；自成一套的（如 Smithery）才各有 一个协议。前端按这份清单渲染预设与表单，不要在前端再抄一份协议列表。
+         */
+        get: operations["listMCPSourceProtocols"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mcp-sources": {
         parameters: {
             query?: never;
@@ -1651,6 +1671,29 @@ export interface paths {
          *     源，不是这个源的副本。
          */
         delete: operations["deleteMCPSource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-sources/{id}/api-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 更换该源的 API Key，管理员
+         * @description 单独一个动作而不是删掉重建：重建会把这个源下面所有条目的审核结论一起
+         *     丢掉。密钥加密落库，不会出现在任何响应里。
+         */
+        put: operations["setMCPSourceAPIKey"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2375,11 +2418,37 @@ export interface components {
             upstream_url?: string;
             versions: components["schemas"]["MarketSkillVersion"][];
         };
+        /**
+         * @description 源协议。mcp-registry 是官方注册中心的公开规范，各家子注册中心与自建注 册中心实现的是同一套，靠 api_prefix 区分版本；smithery 自成一套且要 API Key。
+         * @enum {string}
+         */
+        MCPSourceProtocolID: "mcp-registry" | "smithery";
+        MCPSourceProtocol: {
+            id: components["schemas"]["MCPSourceProtocolID"];
+            label: string;
+            description?: string;
+            /** @description 该协议的公认站点；为空表示得管理员自己填 */
+            default_base_url?: string;
+            /**
+             * @description 该协议的默认接口版本前缀
+             * @example /v0
+             */
+            default_api_prefix?: string;
+            /** @description 为真时登记该源必须给 API Key */
+            requires_api_key: boolean;
+            /** @description 对方的接口文档，供管理员核对地址与版本前缀 */
+            docs_url?: string;
+        };
         MCPSource: {
             id: string;
             name: string;
             /** @description 注册中心根地址，不带路径与尾斜杠 */
             base_url: string;
+            protocol: components["schemas"]["MCPSourceProtocolID"];
+            /** @description 接口版本前缀，实际请求 base_url + api_prefix + /servers */
+            api_prefix?: string;
+            /** @description 该源是否已配置 API Key。密钥本身加密落库，任何响应都不带出来。 */
+            has_api_key: boolean;
             status: components["schemas"]["Status"];
             /**
              * Format: date-time
@@ -5787,6 +5856,31 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    listMCPSourceProtocols: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["MCPSourceProtocol"][];
+                        };
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     listMCPSources: {
         parameters: {
             query?: never;
@@ -5823,8 +5917,19 @@ export interface operations {
             content: {
                 "application/json": {
                     name: string;
-                    /** Format: uri */
+                    /**
+                     * Format: uri
+                     * @description 站点根地址，不带路径；版本前缀走 api_prefix
+                     */
                     base_url: string;
+                    protocol?: components["schemas"]["MCPSourceProtocolID"];
+                    /**
+                     * @description 接口版本前缀（如 /v0、/v0.1）。留空走该协议的默认值。
+                     * @example /v0
+                     */
+                    api_prefix?: string;
+                    /** @description 该源要求的 API Key（见协议的 requires_api_key）。加密落库， 任何响应都不会带出来；要求密钥的协议不填则拒绝登记——建出 来也只会是一个一同步就 401 的空源。 */
+                    api_key?: string;
                 };
             };
         };
@@ -5871,6 +5976,35 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setMCPSourceAPIKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    api_key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已更新 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
         };

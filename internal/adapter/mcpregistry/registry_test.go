@@ -4,10 +4,17 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcpregistry"
+	"github.com/marcon0203/agentic-kit/internal/domain/mcpsource"
 )
+
+// target 是官方那套的默认形状：/v0 前缀、不带密钥。
+func target(baseURL string) mcpsource.FetchTarget {
+	return mcpsource.FetchTarget{BaseURL: baseURL, APIPrefix: "/v0"}
+}
 
 // 注册中心的响应换过一次形状：早期条目平铺，后来包进 {"server": …} 并把
 // 发布元数据挪进 _meta。自建注册中心的版本参差不齐，两种都得认——认错一
@@ -29,7 +36,7 @@ func TestFetchList_AcceptsBothEntryShapes(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := mcpregistry.NewFetcher().FetchList(context.Background(), srv.URL)
+	got, err := mcpregistry.NewRegistryFetcher().FetchList(context.Background(), target(srv.URL))
 	if err != nil {
 		t.Fatalf("拉取失败: %v", err)
 	}
@@ -67,7 +74,7 @@ func TestFetchList_DedupesAndSkipsInactive(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := mcpregistry.NewFetcher().FetchList(context.Background(), srv.URL)
+	got, err := mcpregistry.NewRegistryFetcher().FetchList(context.Background(), target(srv.URL))
 	if err != nil {
 		t.Fatalf("拉取失败: %v", err)
 	}
@@ -89,7 +96,7 @@ func TestFetchList_PrefersStreamableHTTP(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, _ := mcpregistry.NewFetcher().FetchList(context.Background(), srv.URL)
+	got, _ := mcpregistry.NewRegistryFetcher().FetchList(context.Background(), target(srv.URL))
 	if len(got) != 1 || got[0].RemoteURL != "https://a.example.com/mcp" {
 		t.Fatalf("应优先选 streamable-http，得到 %+v", got)
 	}
@@ -104,7 +111,7 @@ func TestFetchList_KeepsLocalOnlyServersWithoutRemote(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, _ := mcpregistry.NewFetcher().FetchList(context.Background(), srv.URL)
+	got, _ := mcpregistry.NewRegistryFetcher().FetchList(context.Background(), target(srv.URL))
 	if len(got) != 1 {
 		t.Fatalf("期望 1 条，得到 %d 条", len(got))
 	}
@@ -133,7 +140,7 @@ func TestFetchList_FollowsCursor(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := mcpregistry.NewFetcher().FetchList(context.Background(), srv.URL)
+	got, err := mcpregistry.NewRegistryFetcher().FetchList(context.Background(), target(srv.URL))
 	if err != nil {
 		t.Fatalf("拉取失败: %v", err)
 	}
@@ -150,7 +157,92 @@ func TestFetchList_SurfacesUpstreamError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := mcpregistry.NewFetcher().FetchList(context.Background(), srv.URL); err == nil {
+	if _, err := mcpregistry.NewRegistryFetcher().FetchList(context.Background(), target(srv.URL)); err == nil {
 		t.Fatal("上游 502 必须变成错误")
+	}
+}
+
+// 前缀可配是"接第三方子注册中心"的全部机关：各家实现的是同一套规范，只是
+// 停在不同版本上。这条盯住 prefix 真的进了请求路径——写死 /v0 的话，接
+// PulseMCP 这类停在 /v0.1 的源会一路 404。
+func TestFetchList_UsesConfiguredAPIPrefix(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"servers":[{"name":"io.github.a/x"}],"metadata":{}}`))
+	}))
+	defer srv.Close()
+
+	got, err := mcpregistry.NewRegistryFetcher().FetchList(context.Background(),
+		mcpsource.FetchTarget{BaseURL: srv.URL, APIPrefix: "/v0.1"})
+	if err != nil {
+		t.Fatalf("拉取失败: %v", err)
+	}
+	if gotPath != "/v0.1/servers" {
+		t.Errorf("前缀没进请求路径: %s", gotPath)
+	}
+	if len(got) != 1 {
+		t.Errorf("期望 1 条，得到 %d 条", len(got))
+	}
+}
+
+// 有的子注册中心要密钥才给读，官方不要。配了就带上，没配就不带——不能因
+// 为空密钥而发一个 "Bearer " 的空头出去。
+func TestFetchList_SendsBearerOnlyWhenKeyConfigured(t *testing.T) {
+	for _, tc := range []struct{ key, wantAuth string }{
+		{"", ""},
+		{"sk-1", "Bearer sk-1"},
+	} {
+		var gotAuth string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotAuth = r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{"servers":[],"metadata":{}}`))
+		}))
+		_, err := mcpregistry.NewRegistryFetcher().FetchList(context.Background(),
+			mcpsource.FetchTarget{BaseURL: srv.URL, APIPrefix: "/v0", APIKey: tc.key})
+		srv.Close()
+		if err != nil {
+			t.Fatalf("拉取失败: %v", err)
+		}
+		if gotAuth != tc.wantAuth {
+			t.Errorf("密钥 %q 时鉴权头应为 %q，得到 %q", tc.key, tc.wantAuth, gotAuth)
+		}
+	}
+}
+
+// 404 在这套东西里九成是前缀填错了，401/403 九成是密钥问题。错误信息得直
+// 说，否则管理员会去排查一个根本没坏的上游。
+func TestFetchList_ErrorMessagesPointAtTheLikelyCause(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		want   string
+	}{
+		{http.StatusNotFound, "版本前缀"},
+		{http.StatusUnauthorized, "API Key"},
+		{http.StatusForbidden, "API Key"},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tc.status)
+		}))
+		_, err := mcpregistry.NewRegistryFetcher().FetchList(context.Background(), target(srv.URL))
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%d 的错误信息里应提到 %q，得到 %v", tc.status, tc.want, err)
+		}
+	}
+}
+
+// 上游的错误正文要带出来一截：只回一个状态码的话，"key 过期了"和"这个源
+// 下线了"看起来一模一样。
+func TestFetchList_IncludesUpstreamErrorBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"database is down"}`))
+	}))
+	defer srv.Close()
+
+	_, err := mcpregistry.NewRegistryFetcher().FetchList(context.Background(), target(srv.URL))
+	if err == nil || !strings.Contains(err.Error(), "database is down") {
+		t.Fatalf("上游的错误正文必须带出来，得到 %v", err)
 	}
 }

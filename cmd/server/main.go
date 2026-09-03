@@ -348,7 +348,8 @@ func run() error {
 		MCPSources: api.NewMCPSourceHandlers(mcpsource.NewService(
 			postgres.NewMCPSourceRepository(queries, pool),
 			adminDirectory,
-			adaptermcpregistry.NewFetcher(),
+			adaptermcpregistry.NewRegistry(),
+			adaptercrypto.NewCipher(aesKey),
 			resourceService,
 		)),
 		Usage:    api.NewUsageHandlers(modelCenter),

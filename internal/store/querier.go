@@ -331,6 +331,8 @@ type Querier interface {
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
 	SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerDisplayMetaParams) error
 	SetMCPServerStatusByID(ctx context.Context, arg SetMCPServerStatusByIDParams) error
+	// 单独换密钥：密钥过期时不必删掉源再重建（那会连审核结论一起丢掉）。
+	SetMCPSourceAPIKey(ctx context.Context, arg SetMCPSourceAPIKeyParams) (int64, error)
 	SetMarketMCPServerReview(ctx context.Context, arg SetMarketMCPServerReviewParams) (int64, error)
 	SetMarketSkillReview(ctx context.Context, arg SetMarketSkillReviewParams) (int64, error)
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error

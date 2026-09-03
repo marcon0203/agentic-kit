@@ -1,7 +1,11 @@
 -- name: CreateMCPSource :one
-INSERT INTO mcp_sources (name, base_url)
-VALUES ($1, $2)
+INSERT INTO mcp_sources (name, base_url, protocol, api_prefix, api_key_encrypted)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
+
+-- name: SetMCPSourceAPIKey :execrows
+-- 单独换密钥：密钥过期时不必删掉源再重建（那会连审核结论一起丢掉）。
+UPDATE mcp_sources SET api_key_encrypted = $2 WHERE id = $1;
 
 -- name: ListMCPSources :many
 -- 左联 market_mcp_servers 只为拿每个源的条目数，设置页直接展示。

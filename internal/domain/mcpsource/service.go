@@ -32,6 +32,8 @@ const (
 	CodeReviewStatusInvalid = 111008
 	CodeMarketMCPNotRemote  = 111009
 	CodeMCPAlreadyInstalled = 111010
+	CodeMCPProtocolUnknown  = 111011
+	CodeMCPAPIKeyRequired   = 111012
 )
 
 // ReviewStatus 是一条同步条目的本地审核结论。同步进来的条目默认 pending，
@@ -50,10 +52,18 @@ func (r ReviewStatus) valid() bool {
 }
 
 // Source 是一个已登记的公开 MCP 注册中心。
+//
+// APIKey 刻意不在这里：它加密落库，只在 Sync 的那一刻解密并直接交给
+// fetcher。领域对象上不放明文密钥，就没有哪条路径能把它顺手序列化出去。
 type Source struct {
-	ID            int64     `json:"id"`
-	Name          string    `json:"name"`
-	BaseURL       string    `json:"base_url"`
+	ID       int64    `json:"id"`
+	Name     string   `json:"name"`
+	BaseURL  string   `json:"base_url"`
+	Protocol Protocol `json:"protocol"`
+	// APIPrefix 是接口的版本前缀（如 /v0）；实际请求 base_url + 它 + /servers。
+	APIPrefix string `json:"api_prefix,omitempty"`
+	// HasAPIKey 只报告"配没配"，永远不带出密钥本身。
+	HasAPIKey     bool      `json:"has_api_key"`
 	Status        int16     `json:"status"`
 	LastSyncedAt  time.Time `json:"last_synced_at"` // zero = 从未同步
 	LastSyncError string    `json:"last_sync_error,omitempty"`
@@ -110,18 +120,22 @@ type FetchedServer struct {
 // Fetcher 是同步器面对的抽象。默认实现按官方 MCP Registry 的 /v0/servers
 // 协议拉取；将来接入协议不同的源时换一个 Fetcher，Service 不用动。
 type Fetcher interface {
-	FetchList(ctx context.Context, baseURL string) ([]FetchedServer, error)
+	FetchList(ctx context.Context, target FetchTarget) ([]FetchedServer, error)
 }
 
 // Repository 是 mcp_sources / market_mcp_servers 两张表的持久化抽象。
 type Repository interface {
-	Create(ctx context.Context, name, baseURL string) (Source, error)
+	Create(ctx context.Context, params CreateParams) (Source, error)
 	List(ctx context.Context) ([]Source, error)
 	Get(ctx context.Context, id int64) (Source, error)
 	GetByURL(ctx context.Context, baseURL string) (Source, error)
 	Delete(ctx context.Context, id int64) error
 	MarkSynced(ctx context.Context, id int64) error
 	MarkSyncError(ctx context.Context, id int64, msg string) error
+	// EncryptedAPIKey 单独取密文，而不是挂在 Source 上跟着每次列表查询到
+	// 处跑——只有同步那一条路径需要它。
+	EncryptedAPIKey(ctx context.Context, id int64) (string, error)
+	SetEncryptedAPIKey(ctx context.Context, id int64, encrypted string) error
 	ReplaceServers(ctx context.Context, sourceID int64, servers []FetchedServer) error
 	ListMarketServers(ctx context.Context) ([]MarketServer, error)
 	GetMarketServer(ctx context.Context, id int64) (MarketServer, error)
@@ -140,16 +154,39 @@ type AdminDirectory interface {
 	IsAdmin(ctx context.Context, userID int64) (bool, error)
 }
 
+// Cipher 加解密源的 API Key。与模型提供商的组织级凭据共用同一把 AES-256
+// 密钥，两边在密钥轮换上是同一个故事。
+type Cipher interface {
+	Encrypt(plaintext string) (string, error)
+	Decrypt(ciphertext string) (string, error)
+}
+
 // Service 是 MCP 源的应用服务。
 type Service struct {
 	repo      Repository
 	admins    AdminDirectory
-	fetch     Fetcher
+	fetchers  FetcherRegistry
+	cipher    Cipher
 	installer ServerInstaller
 }
 
-func NewService(repo Repository, admins AdminDirectory, fetch Fetcher, installer ServerInstaller) *Service {
-	return &Service{repo: repo, admins: admins, fetch: fetch, installer: installer}
+func NewService(repo Repository, admins AdminDirectory, fetchers FetcherRegistry, cipher Cipher, installer ServerInstaller) *Service {
+	return &Service{repo: repo, admins: admins, fetchers: fetchers, cipher: cipher, installer: installer}
+}
+
+// Protocols 列出本部署认识的源协议，供新建源的表单渲染预设。不需要管理员
+// 权限：这是一张静态能力清单，没有任何部署信息在里面。
+func (s *Service) Protocols() []ProtocolSpec { return s.fetchers.Protocols() }
+
+// specFor 找协议描述符；未知协议在这里就被挡下，不会带着一个空 fetcher 走
+// 到同步那一步。
+func (s *Service) specFor(p Protocol) (ProtocolSpec, error) {
+	for _, spec := range s.fetchers.Protocols() {
+		if spec.ID == p {
+			return spec, nil
+		}
+	}
+	return ProtocolSpec{}, domain.Invalid(CodeMCPProtocolUnknown, "不认识这个源协议："+string(p))
 }
 
 func (s *Service) requireAdmin(ctx context.Context, userID int64) error {
@@ -176,23 +213,96 @@ func normalizeBaseURL(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
+// CreateParams 是登记一个源要填的全部内容。APIKey 是明文，进 Create 后立
+// 刻加密，不会原样传给仓储。
+type CreateParams struct {
+	Name      string
+	BaseURL   string
+	Protocol  Protocol
+	APIPrefix string
+	APIKey    string
+	// EncryptedAPIKey 由 Service 填好后交给仓储，调用方不要设置。
+	EncryptedAPIKey string
+}
+
 // Create 登记一个新源（管理员）。
-func (s *Service) Create(ctx context.Context, userID int64, name, baseURL string) (Source, error) {
+//
+// 协议决定了后面两个字段怎么校验：要密钥的协议（Smithery）缺密钥直接打
+// 回，因为它连列表都读不了，建出来只会是一个一同步就报 401 的空源；不填
+// 前缀的走协议的默认值，管理员不用去记 /v0 还是 /v0.1。
+func (s *Service) Create(ctx context.Context, userID int64, p CreateParams) (Source, error) {
 	if err := s.requireAdmin(ctx, userID); err != nil {
 		return Source{}, err
 	}
-	name = strings.TrimSpace(name)
-	if name == "" {
+	p.Name = strings.TrimSpace(p.Name)
+	if p.Name == "" {
 		return Source{}, domain.Invalid(CodeMCPSourceURLBad, "源名称不能为空")
 	}
-	normalized, err := normalizeBaseURL(baseURL)
+	if p.Protocol == "" {
+		p.Protocol = ProtocolMCPRegistry
+	}
+	spec, err := s.specFor(p.Protocol)
 	if err != nil {
 		return Source{}, err
 	}
+
+	normalized, err := normalizeBaseURL(p.BaseURL)
+	if err != nil {
+		return Source{}, err
+	}
+	p.BaseURL = normalized
+
+	if strings.TrimSpace(p.APIPrefix) == "" {
+		p.APIPrefix = spec.DefaultPrefix
+	}
+	p.APIPrefix = normalizeAPIPrefix(p.APIPrefix)
+
+	p.APIKey = strings.TrimSpace(p.APIKey)
+	if spec.RequiresAPIKey && p.APIKey == "" {
+		return Source{}, domain.Invalid(CodeMCPAPIKeyRequired, spec.Label+" 要求 API Key，不填的话同步只会拿到 401").
+			WithDetails(domain.FieldError{Field: "api_key", Reason: "required"})
+	}
+	if p.APIKey != "" {
+		if s.cipher == nil {
+			return Source{}, domain.Invalid(CodeMCPSourceUpstream, "这个部署没有配置加密密钥，无法保存 API Key")
+		}
+		encrypted, cerr := s.cipher.Encrypt(p.APIKey)
+		if cerr != nil {
+			return Source{}, domain.Internal(cerr)
+		}
+		p.EncryptedAPIKey = encrypted
+	}
+	// 明文用完即弃：往下只走密文，避免它跟着参数结构体流进仓储或日志。
+	p.APIKey = ""
+
 	if _, err := s.repo.GetByURL(ctx, normalized); err == nil {
 		return Source{}, domain.Conflict(CodeMCPSourceURLDup, "这个源已经登记过了")
 	}
-	return s.repo.Create(ctx, name, normalized)
+	return s.repo.Create(ctx, p)
+}
+
+// SetAPIKey 换密钥（管理员）。单独一个动作而不是让管理员删掉重建：重建会
+// 把这个源下面所有条目的审核结论一起丢掉。
+func (s *Service) SetAPIKey(ctx context.Context, userID, id int64, apiKey string) error {
+	if err := s.requireAdmin(ctx, userID); err != nil {
+		return err
+	}
+	if _, err := s.repo.Get(ctx, id); err != nil {
+		return err
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return domain.Invalid(CodeMCPAPIKeyRequired, "API Key 不能为空").
+			WithDetails(domain.FieldError{Field: "api_key", Reason: "required"})
+	}
+	if s.cipher == nil {
+		return domain.Invalid(CodeMCPSourceUpstream, "这个部署没有配置加密密钥，无法保存 API Key")
+	}
+	encrypted, err := s.cipher.Encrypt(apiKey)
+	if err != nil {
+		return domain.Internal(err)
+	}
+	return s.repo.SetEncryptedAPIKey(ctx, id, encrypted)
 }
 
 // List 列出全部源（管理员）。
@@ -215,8 +325,8 @@ func (s *Service) Delete(ctx context.Context, userID, id int64) error {
 	return s.repo.Delete(ctx, id)
 }
 
-// Sync 同步一个源：拉全量列表、整体替换缓存。失败写进 last_sync_error，
-// 下次设置页直接可见，不静默。
+// Sync 同步一个源：按它的协议选 fetcher、拉全量列表、整体替换缓存。失败
+// 写进 last_sync_error，下次设置页直接可见，不静默。
 func (s *Service) Sync(ctx context.Context, userID, id int64) (Source, error) {
 	if err := s.requireAdmin(ctx, userID); err != nil {
 		return Source{}, err
@@ -225,7 +335,37 @@ func (s *Service) Sync(ctx context.Context, userID, id int64) (Source, error) {
 	if err != nil {
 		return Source{}, err
 	}
-	servers, err := s.fetch.FetchList(ctx, src.BaseURL)
+	fetcher, err := s.fetchers.FetcherFor(src.Protocol)
+	if err != nil {
+		// 协议不认识也算一次同步失败：写进 last_sync_error，管理员在页面上
+		// 看得到原因（多半是降级部署后留下的老数据）。
+		_ = s.repo.MarkSyncError(ctx, id, err.Error())
+		return Source{}, err
+	}
+
+	target := FetchTarget{BaseURL: src.BaseURL, APIPrefix: src.APIPrefix}
+	if src.HasAPIKey {
+		encrypted, kerr := s.repo.EncryptedAPIKey(ctx, id)
+		if kerr != nil {
+			return Source{}, kerr
+		}
+		if encrypted != "" {
+			if s.cipher == nil {
+				return Source{}, domain.Invalid(CodeMCPSourceUpstream, "这个部署没有配置加密密钥，无法读出该源的 API Key")
+			}
+			plain, derr := s.cipher.Decrypt(encrypted)
+			if derr != nil {
+				// 密钥换过之后旧密文解不开。说清楚是密钥的问题，不然管理员
+				// 会一直以为是对方接口挂了。
+				msg := "存的 API Key 解不开（加密密钥换过？），重新填一次"
+				_ = s.repo.MarkSyncError(ctx, id, msg)
+				return Source{}, domain.Invalid(CodeMCPSourceUpstream, msg)
+			}
+			target.APIKey = plain
+		}
+	}
+
+	servers, err := fetcher.FetchList(ctx, target)
 	if err != nil {
 		_ = s.repo.MarkSyncError(ctx, id, err.Error())
 		if updated, getErr := s.repo.Get(ctx, id); getErr == nil {

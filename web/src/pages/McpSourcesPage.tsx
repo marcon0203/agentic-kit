@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Server, Trash2 } from 'lucide-react'
+import { KeyRound, RefreshCw, Server, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -17,13 +17,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 
 type MCPSource = components['schemas']['MCPSource']
-
-/** 官方注册中心。新建弹窗直接填好，省得管理员去查地址。 */
-const OFFICIAL_REGISTRY = 'https://registry.modelcontextprotocol.io'
+type MCPSourceProtocol = components['schemas']['MCPSourceProtocol']
+type ProtocolID = components['schemas']['MCPSourceProtocolID']
 
 function formatSyncedAt(iso: string | null): string {
   if (!iso) return '从未同步'
@@ -46,26 +46,65 @@ export function McpSourcesPage() {
   const [addOpen, setAddOpen] = useState(false)
   const [name, setName] = useState('')
   const [baseUrl, setBaseUrl] = useState('')
+  const [protocol, setProtocol] = useState<ProtocolID>('mcp-registry')
+  const [apiPrefix, setApiPrefix] = useState('')
+  const [apiKey, setApiKey] = useState('')
   const [syncingId, setSyncingId] = useState<number | null>(null)
   const [deleting, setDeleting] = useState<MCPSource | null>(null)
+  const [rekeying, setRekeying] = useState<MCPSource | null>(null)
+  const [newKey, setNewKey] = useState('')
 
   const query = useQuery({
     queryKey: ['mcp-sources'],
     queryFn: async () => unwrap<{ items: MCPSource[] }>(await apiClient.GET('/mcp-sources', {})),
   })
 
+  // 协议清单来自后端（默认地址、默认前缀、要不要密钥都在里面），前端不再
+  // 抄第二份——加一家源只改后端那张表。
+  const protocolsQuery = useQuery({
+    queryKey: ['mcp-source-protocols'],
+    queryFn: async () =>
+      unwrap<{ items: MCPSourceProtocol[] }>(await apiClient.GET('/mcp-source-protocols', {})),
+  })
+  const protocols = protocolsQuery.data?.items ?? []
+  const activeProtocol = protocols.find((p) => p.id === protocol)
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['mcp-sources'] })
+
+  // 换协议就把地址和前缀重填成该协议的默认值：这两项跟着协议走，留着上一
+  // 个协议的地址只会让人以为填过了。
+  function pickProtocol(p: MCPSourceProtocol) {
+    setProtocol(p.id)
+    setBaseUrl(p.default_base_url ?? '')
+    setApiPrefix(p.default_api_prefix ?? '')
+    setApiKey('')
+  }
 
   function openAdd() {
     setName('')
-    setBaseUrl(OFFICIAL_REGISTRY)
+    setApiKey('')
+    const first = protocols[0]
+    if (first) pickProtocol(first)
+    else {
+      setProtocol('mcp-registry')
+      setBaseUrl('')
+      setApiPrefix('')
+    }
     setAddOpen(true)
   }
 
   const createMutation = useMutation({
     mutationFn: async () =>
       unwrap<MCPSource>(
-        await apiClient.POST('/mcp-sources', { body: { name: name.trim(), base_url: baseUrl.trim() } }),
+        await apiClient.POST('/mcp-sources', {
+          body: {
+            name: name.trim(),
+            base_url: baseUrl.trim(),
+            protocol,
+            api_prefix: apiPrefix.trim(),
+            ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+          },
+        }),
       ),
     onSuccess: (src) => {
       toast.success(`已登记 ${src.name}，点"同步"拉取它的公开 MCP Server`)
@@ -103,7 +142,26 @@ export function McpSourcesPage() {
     onError: (err) => toast.error(err instanceof ApiError ? err.message : '删除没能完成，请再试一次'),
   })
 
+  const rekeyMutation = useMutation({
+    mutationFn: async ({ id, key }: { id: number; key: string }) => {
+      unwrap(
+        await apiClient.PUT('/mcp-sources/{id}/api-key', {
+          params: { path: { id: String(id) } },
+          body: { api_key: key },
+        }),
+      )
+    },
+    onSuccess: () => {
+      toast.success('已更新 API Key，重新同步一次试试')
+      setRekeying(null)
+      setNewKey('')
+      invalidate()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : '更新没能完成，请再试一次'),
+  })
+
   const items = query.data?.items ?? []
+  const labelOfProtocol = (id: string) => protocols.find((p) => p.id === id)?.label ?? id
 
   return (
     <Section
@@ -162,8 +220,13 @@ export function McpSourcesPage() {
                   </a>
                 </span>
                 <span className="text-caption flex flex-wrap items-center gap-space-3 text-ink-500">
+                  <span className="rounded-full bg-surface-muted px-space-2 py-0.5 text-ink-700">
+                    {labelOfProtocol(s.protocol)}
+                  </span>
+                  {s.api_prefix && <span className="text-ref">{s.api_prefix}</span>}
                   <span className="tabular">{s.server_count} 个 Server</span>
                   <span>{formatSyncedAt(s.last_synced_at ?? null)}</span>
+                  {s.has_api_key && <span className="text-moss">已配 API Key</span>}
                 </span>
                 {s.last_sync_error && (
                   <span role="alert" className="text-caption text-rust">
@@ -175,6 +238,19 @@ export function McpSourcesPage() {
                 <Button variant="outline" size="sm" onClick={() => navigate(`/settings/mcp-sources/${s.id}`)}>
                   审核 Server
                 </Button>
+                {s.has_api_key && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setNewKey('')
+                      setRekeying(s)
+                    }}
+                  >
+                    <KeyRound aria-hidden />
+                    换密钥
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -206,14 +282,78 @@ export function McpSourcesPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-space-4">
+            {/* 先选协议：地址、前缀、要不要密钥都跟着它变。 */}
+            <div className="flex flex-col gap-space-2">
+              <span className="text-label-md text-ink-900">协议</span>
+              <div className="flex flex-col gap-space-2">
+                {protocols.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => pickProtocol(p)}
+                    className={cn(
+                      'flex flex-col items-start gap-0.5 rounded-md border px-space-3 py-space-2 text-left transition-colors',
+                      p.id === protocol
+                        ? 'border-blueprint bg-blueprint-tint'
+                        : 'border-border hover:border-border-strong',
+                    )}
+                  >
+                    <span className="text-body-sm font-medium text-ink-900">{p.label}</span>
+                    {p.description && <span className="text-caption text-ink-500">{p.description}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <label className="flex flex-col gap-space-2">
               <span className="text-label-md text-ink-900">名称</span>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="官方 MCP Registry" />
             </label>
+
             <label className="flex flex-col gap-space-2">
               <span className="text-label-md text-ink-900">地址</span>
-              <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={OFFICIAL_REGISTRY} />
+              <Input
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder="https://registry.example.com"
+              />
             </label>
+
+            <label className="flex flex-col gap-space-2">
+              <span className="text-label-md text-ink-900">接口版本前缀</span>
+              <Input value={apiPrefix} onChange={(e) => setApiPrefix(e.target.value)} placeholder="/v0" />
+              {/* 前缀填错是这套东西最常见的故障，所以把最终请求路径直接摆出
+                  来给管理员对，而不是等同步失败了再去猜。 */}
+              <span className="text-caption text-ink-500">
+                实际会请求 <span className="text-ref">{(baseUrl || 'https://…') + apiPrefix + '/servers'}</span>
+                {activeProtocol?.docs_url && (
+                  <>
+                    ，对不上就查{' '}
+                    <a
+                      href={activeProtocol.docs_url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-blueprint hover:underline"
+                    >
+                      对方文档
+                    </a>
+                  </>
+                )}
+              </span>
+            </label>
+
+            {activeProtocol?.requires_api_key && (
+              <label className="flex flex-col gap-space-2">
+                <span className="text-label-md text-ink-900">API Key</span>
+                <Input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="在对方站点申请"
+                />
+                <span className="text-caption text-ink-500">加密保存，任何页面和接口都不会再显示出来。</span>
+              </label>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>
@@ -221,10 +361,45 @@ export function McpSourcesPage() {
             </Button>
             <Button
               className="bg-gradient-cta text-white hover:opacity-90"
-              disabled={createMutation.isPending || !name.trim() || !baseUrl.trim()}
+              disabled={
+                createMutation.isPending ||
+                !name.trim() ||
+                !baseUrl.trim() ||
+                (activeProtocol?.requires_api_key === true && !apiKey.trim())
+              }
               onClick={() => createMutation.mutate()}
             >
               登记
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rekeying !== null} onOpenChange={(open) => !open && setRekeying(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>更换 API Key</DialogTitle>
+            <DialogDescription>
+              {rekeying && (
+                <>
+                  给 <Ref>{rekeying.name}</Ref> 换一个新密钥。已同步的条目和审核结论都不受影响。
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <label className="flex flex-col gap-space-2">
+            <span className="text-label-md text-ink-900">新的 API Key</span>
+            <Input type="password" value={newKey} onChange={(e) => setNewKey(e.target.value)} />
+          </label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRekeying(null)}>
+              取消
+            </Button>
+            <Button
+              disabled={rekeyMutation.isPending || !newKey.trim()}
+              onClick={() => rekeying && rekeyMutation.mutate({ id: Number(rekeying.id), key: newKey.trim() })}
+            >
+              保存
             </Button>
           </DialogFooter>
         </DialogContent>

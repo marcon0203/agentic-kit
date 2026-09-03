@@ -25,9 +25,16 @@ func NewMCPSourceHandlers(svc *mcpsource.Service) *MCPSourceHandlers {
 }
 
 type mcpSourceDTO struct {
-	ID            int64  `json:"id"`
-	Name          string `json:"name"`
-	BaseURL       string `json:"base_url"`
+	ID       int64  `json:"id"`
+	Name     string `json:"name"`
+	BaseURL  string `json:"base_url"`
+	Protocol string `json:"protocol"`
+	// APIPrefix 是接口版本前缀。露出来是有意的：填错它是这套东西最常见的
+	// 故障，管理员得看得到自己填的是什么才好改。
+	APIPrefix string `json:"api_prefix,omitempty"`
+	// HasAPIKey 只说"配没配"。密钥本身加密落库，任何响应都不带出来——和
+	// 资源中心的凭据是同一条规矩。
+	HasAPIKey     bool   `json:"has_api_key"`
 	Status        int16  `json:"status"`
 	LastSyncedAt  string `json:"last_synced_at,omitempty"` // RFC3339；空 = 从未同步
 	LastSyncError string `json:"last_sync_error,omitempty"`
@@ -36,8 +43,9 @@ type mcpSourceDTO struct {
 
 func toMCPSourceDTO(s mcpsource.Source) mcpSourceDTO {
 	dto := mcpSourceDTO{
-		ID: s.ID, Name: s.Name, BaseURL: s.BaseURL, Status: s.Status,
-		LastSyncError: s.LastSyncError, ServerCount: s.ServerCount,
+		ID: s.ID, Name: s.Name, BaseURL: s.BaseURL,
+		Protocol: string(s.Protocol), APIPrefix: s.APIPrefix, HasAPIKey: s.HasAPIKey,
+		Status: s.Status, LastSyncError: s.LastSyncError, ServerCount: s.ServerCount,
 	}
 	if !s.LastSyncedAt.IsZero() {
 		dto.LastSyncedAt = s.LastSyncedAt.Format(rfc3339Layout)
@@ -117,14 +125,23 @@ func (h *MCPSourceHandlers) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name    string `json:"name"`
-		BaseURL string `json:"base_url"`
+		Name      string `json:"name"`
+		BaseURL   string `json:"base_url"`
+		Protocol  string `json:"protocol"`
+		APIPrefix string `json:"api_prefix"`
+		APIKey    string `json:"api_key"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "请求体不是合法 JSON")
 		return
 	}
-	src, err := h.svc.Create(r.Context(), userID, req.Name, req.BaseURL)
+	src, err := h.svc.Create(r.Context(), userID, mcpsource.CreateParams{
+		Name:      req.Name,
+		BaseURL:   req.BaseURL,
+		Protocol:  mcpsource.Protocol(req.Protocol),
+		APIPrefix: req.APIPrefix,
+		APIKey:    req.APIKey,
+	})
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return
@@ -295,4 +312,40 @@ func (h *MCPSourceHandlers) ReviewServers(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, r, http.StatusOK, map[string]any{"reviewed": len(req.IDs)})
+}
+
+// ListProtocols handles GET /mcp-source-protocols：本部署认识的源协议及其
+// 默认地址/前缀/要不要密钥。新建源的表单按它渲染预设，前端不再抄第二份协
+// 议清单——和 /model-provider-specs 是同一个约定。
+func (h *MCPSourceHandlers) ListProtocols(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	writeJSON(w, r, http.StatusOK, map[string]any{"items": h.svc.Protocols()})
+}
+
+// SetAPIKey handles PUT /mcp-sources/{id}/api-key (admin)：换密钥。单独一
+// 个动作而不是让管理员删掉重建——重建会把这个源下面所有条目的审核结论一起
+// 丢掉。
+func (h *MCPSourceHandlers) SetAPIKey(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	id, ok := parseIDParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var req struct {
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "请求体不是合法 JSON")
+		return
+	}
+	if err := h.svc.SetAPIKey(r.Context(), userID, id, req.APIKey); err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

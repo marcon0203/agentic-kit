@@ -181,10 +181,12 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Post("/skill-market/{source_id}/{slug}/install", cfg.SkillSources.MarketInstall)
 			}
 			if cfg.MCPSources != nil {
+				r.Get("/mcp-source-protocols", cfg.MCPSources.ListProtocols)
 				r.Get("/mcp-sources", cfg.MCPSources.List)
 				r.Post("/mcp-sources", cfg.MCPSources.Create)
 				r.Post("/mcp-sources/{id}/sync", cfg.MCPSources.Sync)
 				r.Delete("/mcp-sources/{id}", cfg.MCPSources.Delete)
+				r.Put("/mcp-sources/{id}/api-key", cfg.MCPSources.SetAPIKey)
 				r.Get("/mcp-sources/servers", cfg.MCPSources.ListForReview)
 				r.Post("/mcp-sources/servers/review", cfg.MCPSources.ReviewServers)
 				r.Get("/mcp-market", cfg.MCPSources.ListMarket)

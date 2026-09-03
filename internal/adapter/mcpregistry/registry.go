@@ -1,62 +1,39 @@
-// Package mcpregistry 实现按官方 MCP Registry 协议拉取的 Fetcher
-// （GET /v0/servers，游标翻页）。它住在 adapter 层是因为 domain 不允许碰
-// net/http（见 domain/layering_test）——协议细节全部藏在这里，
-// mcpsource.Service 只面对 Fetcher 接口。
+// Package mcpregistry 实现 MCP 源的各家上游协议。它住在 adapter 层是因为
+// domain 不允许碰 net/http（见 domain/layering_test）——协议细节全部藏在这
+// 里，mcpsource.Service 只面对 Fetcher / FetcherRegistry 两个接口。
+//
+// 目前两套：
+//
+//   - RegistryFetcher（本文件）：官方 MCP Registry 规范。MCP 生态收敛出了
+//     一份公共的注册中心接口约定（server.json + remotes/packages），官方和
+//     各家子注册中心说的是同一套，差别只在版本前缀，所以它们共用这一个实
+//     现，前缀由源自己带（FetchTarget.APIPrefix）。
+//   - SmitheryFetcher（smithery.go）：Smithery 自成一套，且要 API Key。
 package mcpregistry
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/marcon0203/agentic-kit/internal/domain/mcpsource"
 )
 
-// Fetcher 按 registry.modelcontextprotocol.io 的公开协议拉取。字段宽进严
-// 出：缺 description、缺 repository 都不报错，落库时留空。
-type Fetcher struct {
-	client *http.Client
+// RegistryFetcher 按官方 MCP Registry 规范拉取。字段宽进严出：缺
+// description、缺 repository 都不报错，落库时留空。
+type RegistryFetcher struct {
+	http *httpGetter
 	// maxPages 限制单次同步的分页深度，防止一个异常源把同步挂死。
 	maxPages int
 	pageSize int
 }
 
-var _ mcpsource.Fetcher = (*Fetcher)(nil)
+var _ mcpsource.Fetcher = (*RegistryFetcher)(nil)
 
-func NewFetcher() *Fetcher {
-	return &Fetcher{
-		client:   &http.Client{Timeout: 20 * time.Second},
-		maxPages: 40,
-		pageSize: 100,
-	}
-}
-
-func (f *Fetcher) getJSON(ctx context.Context, u string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("连不上源：%w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("源返回 %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("源的响应不是合法 JSON：%w", err)
-	}
-	return nil
+func NewRegistryFetcher() *RegistryFetcher {
+	return &RegistryFetcher{http: newHTTPGetter(), maxPages: 40, pageSize: 100}
 }
 
 // ── 上游 wire 结构 ────────────────────────────────────────────────────
@@ -179,17 +156,22 @@ func topicsOf(s wireServer, remoteType string) []string {
 }
 
 // FetchList 翻页拉全量，直到没有 next cursor 或达到分页上限。
-func (f *Fetcher) FetchList(ctx context.Context, baseURL string) ([]mcpsource.FetchedServer, error) {
+//
+// 接口路径由源自己的前缀拼出来（{base}{prefix}/servers）：官方停在 /v0，
+// 子注册中心各自停在别的版本上。写死前缀等于每接一家改一次代码。
+func (f *RegistryFetcher) FetchList(ctx context.Context, target mcpsource.FetchTarget) ([]mcpsource.FetchedServer, error) {
 	var all []mcpsource.FetchedServer
 	seen := make(map[string]bool)
 	cursor := ""
 	for page := 0; page < f.maxPages; page++ {
-		u := fmt.Sprintf("%s/v0/servers?limit=%d", baseURL, f.pageSize)
+		u := fmt.Sprintf("%s%s/servers?limit=%d", target.BaseURL, target.APIPrefix, f.pageSize)
 		if cursor != "" {
 			u += "&cursor=" + url.QueryEscape(cursor)
 		}
 		var resp wireListResp
-		if err := f.getJSON(ctx, u, &resp); err != nil {
+		// 有的子注册中心要密钥才给读，官方不要。带上就是了——没配的时候
+		// APIKey 是空串，httpGetter 不会加那个头。
+		if err := f.http.getJSON(ctx, u, target.APIKey, &resp); err != nil {
 			return nil, err
 		}
 		for _, entry := range resp.Servers {

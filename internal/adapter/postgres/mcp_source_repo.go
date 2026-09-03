@@ -27,15 +27,59 @@ var _ mcpsource.Repository = (*MCPSourceRepository)(nil)
 var errMCPSourceNotFound = domain.NotFound(mcpsource.CodeMCPSourceNotFound, "MCP 源不存在")
 var errMarketMCPNotFound = domain.NotFound(mcpsource.CodeMarketMCPNotFound, "市场里没有这个 MCP Server")
 
-func (r *MCPSourceRepository) Create(ctx context.Context, name, baseURL string) (mcpsource.Source, error) {
-	row, err := r.q.CreateMCPSource(ctx, store.CreateMCPSourceParams{Name: name, BaseUrl: baseURL})
+// sourceFromRow 把一行 mcp_sources 转成领域对象。密钥只转成"配没配"这一
+// 个布尔值——密文不进领域对象，就没有哪条路径能把它顺手序列化出去。
+func sourceFromMCPRow(row store.McpSource) mcpsource.Source {
+	src := mcpsource.Source{
+		ID: row.ID, Name: row.Name, BaseURL: row.BaseUrl,
+		Protocol: mcpsource.Protocol(row.Protocol), APIPrefix: row.ApiPrefix,
+		HasAPIKey: row.ApiKeyEncrypted.Valid && row.ApiKeyEncrypted.String != "",
+		Status:    row.Status, LastSyncError: textOrEmpty(row.LastSyncError),
+	}
+	if row.LastSyncedAt.Valid {
+		src.LastSyncedAt = row.LastSyncedAt.Time
+	}
+	return src
+}
+
+func (r *MCPSourceRepository) Create(ctx context.Context, p mcpsource.CreateParams) (mcpsource.Source, error) {
+	row, err := r.q.CreateMCPSource(ctx, store.CreateMCPSourceParams{
+		Name:            p.Name,
+		BaseUrl:         p.BaseURL,
+		Protocol:        string(p.Protocol),
+		ApiPrefix:       p.APIPrefix,
+		ApiKeyEncrypted: pgtype.Text{String: p.EncryptedAPIKey, Valid: p.EncryptedAPIKey != ""},
+	})
 	if err != nil {
 		return mcpsource.Source{}, err
 	}
-	return mcpsource.Source{
-		ID: row.ID, Name: row.Name, BaseURL: row.BaseUrl, Status: row.Status,
-		LastSyncError: textOrEmpty(row.LastSyncError),
-	}, nil
+	return sourceFromMCPRow(row), nil
+}
+
+// EncryptedAPIKey 只取密文这一列。单独一条查询而不是挂在 Source 上：只有
+// 同步那一条路径需要它，列表和详情都不该把密文捞出来。
+func (r *MCPSourceRepository) EncryptedAPIKey(ctx context.Context, id int64) (string, error) {
+	row, err := r.q.GetMCPSource(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", errMCPSourceNotFound
+		}
+		return "", err
+	}
+	return textOrEmpty(row.ApiKeyEncrypted), nil
+}
+
+func (r *MCPSourceRepository) SetEncryptedAPIKey(ctx context.Context, id int64, encrypted string) error {
+	n, err := r.q.SetMCPSourceAPIKey(ctx, store.SetMCPSourceAPIKeyParams{
+		ID: id, ApiKeyEncrypted: pgtype.Text{String: encrypted, Valid: encrypted != ""},
+	})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errMCPSourceNotFound
+	}
+	return nil
 }
 
 func (r *MCPSourceRepository) List(ctx context.Context) ([]mcpsource.Source, error) {
@@ -45,13 +89,12 @@ func (r *MCPSourceRepository) List(ctx context.Context) ([]mcpsource.Source, err
 	}
 	out := make([]mcpsource.Source, 0, len(rows))
 	for _, row := range rows {
-		src := mcpsource.Source{
-			ID: row.ID, Name: row.Name, BaseURL: row.BaseUrl, Status: row.Status,
-			LastSyncError: textOrEmpty(row.LastSyncError), ServerCount: row.ServerCount,
-		}
-		if row.LastSyncedAt.Valid {
-			src.LastSyncedAt = row.LastSyncedAt.Time
-		}
+		src := sourceFromMCPRow(store.McpSource{
+			ID: row.ID, Name: row.Name, BaseUrl: row.BaseUrl,
+			Protocol: row.Protocol, ApiPrefix: row.ApiPrefix, ApiKeyEncrypted: row.ApiKeyEncrypted,
+			Status: row.Status, LastSyncedAt: row.LastSyncedAt, LastSyncError: row.LastSyncError,
+		})
+		src.ServerCount = row.ServerCount
 		out = append(out, src)
 	}
 	return out, nil
@@ -65,14 +108,7 @@ func (r *MCPSourceRepository) Get(ctx context.Context, id int64) (mcpsource.Sour
 		}
 		return mcpsource.Source{}, err
 	}
-	src := mcpsource.Source{
-		ID: row.ID, Name: row.Name, BaseURL: row.BaseUrl, Status: row.Status,
-		LastSyncError: textOrEmpty(row.LastSyncError),
-	}
-	if row.LastSyncedAt.Valid {
-		src.LastSyncedAt = row.LastSyncedAt.Time
-	}
-	return src, nil
+	return sourceFromMCPRow(row), nil
 }
 
 func (r *MCPSourceRepository) GetByURL(ctx context.Context, baseURL string) (mcpsource.Source, error) {
@@ -83,10 +119,7 @@ func (r *MCPSourceRepository) GetByURL(ctx context.Context, baseURL string) (mcp
 		}
 		return mcpsource.Source{}, err
 	}
-	return mcpsource.Source{
-		ID: row.ID, Name: row.Name, BaseURL: row.BaseUrl, Status: row.Status,
-		LastSyncError: textOrEmpty(row.LastSyncError),
-	}, nil
+	return sourceFromMCPRow(row), nil
 }
 
 func (r *MCPSourceRepository) Delete(ctx context.Context, id int64) error {
