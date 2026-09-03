@@ -2274,7 +2274,7 @@ paths:
                   type: string
                   description: 协议模板 id，见 GET /model-channel-templates
                   examples: ['deepseek']
-                icon: { type: string, description: 'URL 或 data: URI' }
+                icon: { type: string, description: 'lobehub 图标名（如 kimi、zhipu）、http(s) URL 或 data: URI' }
                 base_url:
                   type: string
                   description: 留空沿用模板默认地址；模板没有默认地址时必填
@@ -4193,7 +4193,8 @@ components:
       properties:
         provider: { type: string, examples: ['deepseek'] }
         provider_display_name: { type: string, examples: ['DeepSeek'] }
-        provider_icon: { type: string, description: 'URL 或 data: URI' }
+        provider_icon: { type: string, description: 'lobehub 图标名（如 kimi、zhipu）、http(s) URL 或 data: URI' }
+        provider_template: { type: string, description: '建这个 Provider 用的协议模板名；icon 为空时前端拿它当图标名兜底' }
         model: { type: string, examples: ['deepseek-v3'] }
         display_name: { type: string }
         description: { type: string }
@@ -4213,7 +4214,7 @@ components:
         id: { type: string }
         key: { type: string, examples: ['deepseek'] }
         display_name: { type: string, examples: ['DeepSeek'] }
-        icon: { type: string, description: 'URL 或 data: URI' }
+        icon: { type: string, description: 'lobehub 图标名（如 kimi、zhipu）、http(s) URL 或 data: URI' }
         base_url: { type: string }
         template:
           type: string

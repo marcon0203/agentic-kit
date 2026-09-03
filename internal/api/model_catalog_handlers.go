@@ -23,6 +23,7 @@ type modelCatalogEntryDTO struct {
 	Provider            string `json:"provider"`
 	ProviderDisplayName string `json:"provider_display_name"`
 	ProviderIcon        string `json:"provider_icon,omitempty"`
+	ProviderTemplate    string `json:"provider_template,omitempty"`
 	Model               string `json:"model"`
 	DisplayName         string `json:"display_name"`
 	Description         string `json:"description"`
@@ -41,7 +42,8 @@ func (h *ModelCatalogHandlers) List(w http.ResponseWriter, r *http.Request) {
 	for _, e := range entries {
 		items = append(items, modelCatalogEntryDTO{
 			Provider: e.ProviderKey, ProviderDisplayName: e.ProviderDisplayName, ProviderIcon: e.ProviderIcon,
-			Model: e.Model, DisplayName: e.DisplayName, Description: e.Description,
+			ProviderTemplate: e.ProviderTemplate,
+			Model:            e.Model, DisplayName: e.DisplayName, Description: e.Description,
 			Modality: string(e.Modality), Featured: e.Featured,
 		})
 	}

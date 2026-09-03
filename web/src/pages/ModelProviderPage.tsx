@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import { ListSkeleton, ErrorPanel } from '@/components/common/EmptyState'
 import { SectionSidebar, type SectionSidebarItem } from '@/components/layout/SectionSidebar'
+import { ProviderIcon } from '@/components/models/ProviderIcon'
 import { useProviderSpecs } from '@/lib/models/useProviderSpecs'
 import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
@@ -76,9 +77,17 @@ export function ModelProviderPage() {
       .filter((e) => tab === 'all' || e.featured)
       .filter((e) => modality === 'all' || e.modality === (modality as Modality))
       .filter((e) => providerFilter === 'all' || e.provider === providerFilter)
-    const byProvider = new Map<string, { displayName: string; icon?: string; items: ModelCatalogEntry[] }>()
+    const byProvider = new Map<
+      string,
+      { displayName: string; icon?: string; template?: string; items: ModelCatalogEntry[] }
+    >()
     for (const e of items) {
-      const bucket = byProvider.get(e.provider) ?? { displayName: e.provider_display_name, icon: e.provider_icon, items: [] }
+      const bucket = byProvider.get(e.provider) ?? {
+        displayName: e.provider_display_name,
+        icon: e.provider_icon,
+        template: e.provider_template,
+        items: [],
+      }
       bucket.items.push(e)
       byProvider.set(e.provider, bucket)
     }
@@ -170,7 +179,12 @@ export function ModelProviderPage() {
               {grouped.map(([providerKey, group]) => (
                 <div key={providerKey} className="flex flex-col gap-space-3">
                   <h3 className="text-label-md flex items-center gap-space-2 text-ink-900">
-                    {group.icon && <img src={group.icon} alt="" className="size-5 rounded-sm object-cover" />}
+                    <ProviderIcon
+                      icon={group.icon}
+                      template={group.template}
+                      name={group.displayName}
+                      className="size-5"
+                    />
                     {group.displayName}
                   </h3>
                   <div className="grid grid-cols-1 gap-space-3 md:grid-cols-2 xl:grid-cols-3">

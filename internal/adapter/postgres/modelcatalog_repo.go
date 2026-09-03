@@ -192,7 +192,7 @@ func (r *ModelCatalogRepository) ListPublic(ctx context.Context) ([]modelcatalog
 			Model: row.Model, DisplayName: row.DisplayName, Description: row.Description,
 			Modality: modelcatalog.Modality(row.Modality), Featured: row.Featured,
 			ProviderKey: row.ProviderKey, ProviderDisplayName: row.ProviderDisplayName,
-			ProviderIcon: row.ProviderIcon.String,
+			ProviderIcon: row.ProviderIcon.String, ProviderTemplate: row.ProviderTemplate.String,
 		})
 	}
 	return out, nil

@@ -2248,8 +2248,10 @@ export interface components {
             provider: string;
             /** @example DeepSeek */
             provider_display_name: string;
-            /** @description URL 或 data: URI */
+            /** @description lobehub 图标名（如 kimi、zhipu）、http(s) URL 或 data: URI */
             provider_icon?: string;
+            /** @description 建这个 Provider 用的协议模板名；icon 为空时前端拿它当图标名兜底 */
+            provider_template?: string;
             /** @example deepseek-v3 */
             model: string;
             display_name: string;
@@ -2269,7 +2271,7 @@ export interface components {
             key: string;
             /** @example DeepSeek */
             display_name: string;
-            /** @description URL 或 data: URI */
+            /** @description lobehub 图标名（如 kimi、zhipu）、http(s) URL 或 data: URI */
             icon?: string;
             base_url?: string;
             /** @description 从哪个协议模板建出来的，仅供展示；实际行为由落库的描述符快照决定 */

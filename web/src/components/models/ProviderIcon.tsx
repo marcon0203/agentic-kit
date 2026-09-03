@@ -9,90 +9,69 @@ import { cn } from '@/lib/utils'
  * 赖。不用 @lobehub/icons 是因为后者是 antd + React 组件包，会把 antd 和
  * @lobehub/ui 拖进这个 Tailwind + shadcn 的项目。
  *
- * 900 多个图标**按需加载**：eager 的话 Vite 会把小 SVG 内联进 JS，几百 KB
- * 全压在首屏上，而一次只用得到一两个。这里 glob 出来的是一组 import 函数，
- * 真正引用到哪个才去取哪个。
+ * glob 是 **eager** 的，拿到的是一张「文件名 → 资源 URL」的表。配合
+ * vite.config.ts 里对这些图标关掉内联，表里存的是 "/assets/kimi-color-xxx.svg"
+ * 这样的短字符串，而不是 data URI——整张表约 130KB 纯文本，gzip 后很小，
+ * 图标本身是 900 个静态文件，用到哪个浏览器取哪个。
+ *
+ * 这里**不能**用 lazy glob：那样每个图标会变成一个独立的 JS chunk，运行时
+ * 动态 import，取不到就静默什么都不显示。之前"选了图标没加载出来"就是这么
+ * 来的。
  */
-const ICON_LOADERS = import.meta.glob<string>('/node_modules/@lobehub/icons-static-svg/icons/*.svg', {
+const ICON_URLS = import.meta.glob<string>('/node_modules/@lobehub/icons-static-svg/icons/*.svg', {
   query: '?url',
   import: 'default',
+  eager: true,
 })
 
-/** 从 glob 的路径键里取出图标名：".../icons/kimi-color.svg" → "kimi-color"。 */
+/** ".../icons/kimi-color.svg" → "kimi-color" */
 function baseNameOf(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1).replace(/\.svg$/, '')
 }
 
+/** 文件名 → URL，查表用，省得每次去扫 900 条路径。 */
+const BY_BASENAME: Record<string, string> = Object.fromEntries(
+  Object.entries(ICON_URLS).map(([p, url]) => [baseNameOf(p), url]),
+)
+
 /**
- * 可填的图标名清单（去掉 -color/-text 后缀、去重、排序），给输入框做补全。
- *
- * 只用到 glob 的**键**，不加载任何资源，所以这份清单本身是免费的。
+ * 可填的图标名清单（去掉 -color/-text/-brand 后缀、去重、排序），给输入框
+ * 做补全。
  */
 export const LOBEHUB_ICON_NAMES: string[] = Array.from(
-  new Set(Object.keys(ICON_LOADERS).map((p) => baseNameOf(p).replace(/-(color|text|brand)$/, ''))),
+  new Set(Object.keys(BY_BASENAME).map((n) => n.replace(/-(color|text|brand)$/, ''))),
 ).sort()
 
-/** 同一个名字优先取彩色版，没有再退回单色版。 */
-function loaderFor(name: string): (() => Promise<string>) | undefined {
-  const wanted = name.trim().toLowerCase()
+/** 同名优先取彩色版，没有再退回单色版。 */
+export function lobehubIconURL(name: string | null | undefined): string | undefined {
+  const wanted = (name ?? '').trim().toLowerCase()
   if (!wanted) return undefined
   for (const suffix of ['-color', '', '-brand', '-text']) {
-    const hit = Object.keys(ICON_LOADERS).find((p) => baseNameOf(p) === wanted + suffix)
-    if (hit) return ICON_LOADERS[hit]
+    const hit = BY_BASENAME[wanted + suffix]
+    if (hit) return hit
   }
   return undefined
 }
 
-/** 已解析过的图标，避免同一个名字在列表里反复触发动态 import。 */
-const resolved = new Map<string, string>()
-
 export function isLobehubIconName(value: string): boolean {
-  return loaderFor(value) !== undefined
+  return lobehubIconURL(value) !== undefined
 }
 
 /**
- * 把 icon 字段解析成一个能直接放进 <img src> 的地址。
+ * 把 icon 字段解析成能直接放进 <img src> 的地址。
  *
- * icon 可以是三种东西：一个 http(s)/data: 地址（管理员自己的图）、一个
- * lobehub 图标名（"kimi"、"zhipu"），或者空——空时退回按协议模板猜。
+ * icon 有三种可能：一个 http(s)/data: 地址（管理员自己的图）、一个 lobehub
+ * 图标名（"kimi"、"zhipu"），或者空——空时按协议模板名再试一次，deepseek
+ * 模板正好配上 deepseek 图标。
  */
-function useIconSrc(icon: string | null | undefined, template: string | null | undefined): string | undefined {
+export function resolveIconSrc(
+  icon: string | null | undefined,
+  template: string | null | undefined,
+): string | undefined {
   const raw = (icon ?? '').trim()
-  const isURL = /^(https?:|data:|\/)/.test(raw)
-  // 没填就按模板名当图标名试一次：deepseek 模板配 deepseek 图标，正好对得上。
-  const name = raw && !isURL ? raw : raw ? '' : (template ?? '')
-
-  const [src, setSrc] = React.useState<string | undefined>(() =>
-    isURL ? raw : resolved.get(name.trim().toLowerCase()),
-  )
-
-  React.useEffect(() => {
-    if (isURL) {
-      setSrc(raw)
-      return
-    }
-    const key = name.trim().toLowerCase()
-    const cached = resolved.get(key)
-    if (cached) {
-      setSrc(cached)
-      return
-    }
-    const load = loaderFor(key)
-    if (!load) {
-      setSrc(undefined)
-      return
-    }
-    let alive = true
-    void load().then((url) => {
-      resolved.set(key, url)
-      if (alive) setSrc(url)
-    })
-    return () => {
-      alive = false
-    }
-  }, [raw, isURL, name])
-
-  return src
+  if (/^(https?:|data:|\/)/.test(raw)) return raw
+  if (raw) return lobehubIconURL(raw)
+  return lobehubIconURL(template)
 }
 
 export function ProviderIcon({
@@ -109,9 +88,20 @@ export function ProviderIcon({
   name: string
   className?: string
 }) {
-  const src = useIconSrc(icon, template)
-  if (src) {
-    return <img src={src} alt="" className={cn('size-8 shrink-0 rounded-sm object-contain', className)} />
+  const src = resolveIconSrc(icon, template)
+  // 图挂了（外链失效、资源没部署上）也要退回首字母，不留一个碎图标。
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => setFailed(false), [src])
+
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        onError={() => setFailed(true)}
+        className={cn('size-8 shrink-0 rounded-sm object-contain', className)}
+      />
+    )
   }
   return (
     <span

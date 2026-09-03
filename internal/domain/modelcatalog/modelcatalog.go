@@ -103,4 +103,7 @@ type CatalogEntry struct {
 	ProviderKey         string
 	ProviderDisplayName string
 	ProviderIcon        string
+	// ProviderTemplate 是建这个 Provider 用的协议模板名，图标没填时前端拿它
+	// 当图标名再试一次（deepseek 模板正好配 deepseek 图标）。
+	ProviderTemplate string
 }

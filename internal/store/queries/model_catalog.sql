@@ -95,7 +95,8 @@ ORDER BY cp.provider_key, cm.model;
 -- surfaces near the top instead of at the bottom of an ORDER BY id.
 SELECT
     cm.model, cm.display_name, cm.description, cm.modality, cm.featured,
-    cp.provider_key, cp.display_name AS provider_display_name, cp.icon AS provider_icon
+    cp.provider_key, cp.display_name AS provider_display_name, cp.icon AS provider_icon,
+    cp.template AS provider_template
 FROM catalog_models cm
 JOIN catalog_providers cp ON cp.id = cm.provider_id
 WHERE cm.status = 1 AND cp.status = 1

@@ -268,7 +268,8 @@ func (q *Queries) ListCatalogModelsForProvider(ctx context.Context, providerID i
 const listCatalogModelsPublic = `-- name: ListCatalogModelsPublic :many
 SELECT
     cm.model, cm.display_name, cm.description, cm.modality, cm.featured,
-    cp.provider_key, cp.display_name AS provider_display_name, cp.icon AS provider_icon
+    cp.provider_key, cp.display_name AS provider_display_name, cp.icon AS provider_icon,
+    cp.template AS provider_template
 FROM catalog_models cm
 JOIN catalog_providers cp ON cp.id = cm.provider_id
 WHERE cm.status = 1 AND cp.status = 1
@@ -284,6 +285,7 @@ type ListCatalogModelsPublicRow struct {
 	ProviderKey         string      `json:"provider_key"`
 	ProviderDisplayName string      `json:"provider_display_name"`
 	ProviderIcon        pgtype.Text `json:"provider_icon"`
+	ProviderTemplate    pgtype.Text `json:"provider_template"`
 }
 
 // Joined read for 模型广场 (GET /model-catalog): only enabled models under
@@ -307,6 +309,7 @@ func (q *Queries) ListCatalogModelsPublic(ctx context.Context) ([]ListCatalogMod
 			&i.ProviderKey,
 			&i.ProviderDisplayName,
 			&i.ProviderIcon,
+			&i.ProviderTemplate,
 		); err != nil {
 			return nil, err
 		}
