@@ -567,3 +567,159 @@ func TestList_MergedAcrossKindsHasNoCursor(t *testing.T) {
 		t.Fatalf("a merged page has no single keyset to resume from, got %q", page.NextCursor)
 	}
 }
+
+// ── 编辑资源时凭据的去向 ──────────────────────────────────────────────
+//
+// 这几条走的是 Update 的完整链路（解密存量 → 与提交合并 → 重新加密），而
+// 不是 Config 上那几个纯函数。真正保护用户的是这条链路：合并逻辑对了但接
+// 线错了，照样会把密钥弄丢。
+
+// 编辑页最常见的一次提交：读回来的 config 不含密钥，用户只改了别的字段。
+// 密钥必须原封不动地留在库里。
+func TestUpdate_RedactedConfigRoundTripKeepsCredential(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSvc(repo, stubProbe{})
+	created, err := svc.Create(context.Background(), 1, resource.CreateCommand{
+		Kind: "tool", Ref: "my-tool",
+		Config: resource.Config{"endpoint": "https://api.example.com", "api_key": "sk-live-123"},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// created.Config 就是前端拿到的那份——api_key 根本不在里面。
+	if _, leaked := created.Config["api_key"]; leaked {
+		t.Fatal("创建响应里不该有凭据")
+	}
+
+	edited := resource.Config{}
+	for k, v := range created.Config {
+		edited[k] = v
+	}
+	edited["endpoint"] = "https://api.example.com/v2"
+
+	if _, err := svc.Update(context.Background(), 1, resource.KindTool, created.ID,
+		resource.UpdateCommand{Config: edited}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	stored := repo.byKind[resource.KindTool][1]
+	if stored.Config["api_key"] != reverse("sk-live-123") {
+		t.Fatalf("改别的字段不该动到密钥，库里现在是 %v", stored.Config["api_key"])
+	}
+	if stored.Config["endpoint"] != "https://api.example.com/v2" {
+		t.Fatalf("普通字段应已更新，得到 %v", stored.Config["endpoint"])
+	}
+}
+
+// 换密钥：给了新值就该换掉，而且落库的是密文。
+func TestUpdate_NewCredentialIsStoredEncrypted(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSvc(repo, stubProbe{})
+	created, _ := svc.Create(context.Background(), 1, resource.CreateCommand{
+		Kind: "tool", Ref: "my-tool",
+		Config: resource.Config{"endpoint": "https://x", "api_key": "sk-old"},
+	})
+
+	if _, err := svc.Update(context.Background(), 1, resource.KindTool, created.ID,
+		resource.UpdateCommand{Config: resource.Config{"endpoint": "https://x", "api_key": "sk-new"}}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	stored := repo.byKind[resource.KindTool][1]
+	if stored.Config["api_key"] != reverse("sk-new") {
+		t.Fatalf("密钥应换成新值的密文，得到 %v", stored.Config["api_key"])
+	}
+}
+
+// 显式给空串 = 清除。得留这条路，否则密钥只能加不能删。
+func TestUpdate_ExplicitEmptyClearsCredential(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSvc(repo, stubProbe{})
+	created, _ := svc.Create(context.Background(), 1, resource.CreateCommand{
+		Kind: "tool", Ref: "my-tool",
+		Config: resource.Config{"endpoint": "https://x", "api_key": "sk-old"},
+	})
+
+	if _, err := svc.Update(context.Background(), 1, resource.KindTool, created.ID,
+		resource.UpdateCommand{Config: resource.Config{"endpoint": "https://x", "api_key": ""}}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	stored := repo.byKind[resource.KindTool][1]
+	if stored.Config["api_key"] != reverse("") {
+		t.Fatalf("显式清空应当照办，得到 %v", stored.Config["api_key"])
+	}
+}
+
+// 原来没有密钥的组件后来要加一个：新键照样要加密落库。
+func TestUpdate_AddingACredentialLaterEncryptsIt(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSvc(repo, stubProbe{})
+	created, _ := svc.Create(context.Background(), 1, resource.CreateCommand{
+		Kind: "tool", Ref: "my-tool", Config: resource.Config{"endpoint": "https://x"},
+	})
+
+	if _, err := svc.Update(context.Background(), 1, resource.KindTool, created.ID,
+		resource.UpdateCommand{Config: resource.Config{"endpoint": "https://x", "api_key": "sk-fresh"}}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	stored := repo.byKind[resource.KindTool][1]
+	if stored.Config["api_key"] != reverse("sk-fresh") {
+		t.Fatalf("后加的密钥也要加密，得到 %v", stored.Config["api_key"])
+	}
+}
+
+// 读回来的资源要报告有哪几个凭据字段——界面靠它渲染"换密钥"的位置，但值
+// 一个字节都不能跟着出来。
+func TestUpdate_ResponseReportsCredentialNamesNotValues(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSvc(repo, stubProbe{})
+	created, _ := svc.Create(context.Background(), 1, resource.CreateCommand{
+		Kind: "tool", Ref: "my-tool",
+		Config: resource.Config{"endpoint": "https://x", "api_key": "sk-live-123"},
+	})
+
+	got, err := svc.Get(context.Background(), 1, resource.KindTool, created.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.CredentialKeys) != 1 || got.CredentialKeys[0] != "api_key" {
+		t.Fatalf("应报告凭据字段名，得到 %v", got.CredentialKeys)
+	}
+	if _, leaked := got.Config["api_key"]; leaked {
+		t.Fatal("凭据的值不该出现在响应里")
+	}
+}
+
+// MCP 的头列表走的是同一条链路：值被 Redact 抹成空，原样存回来时要按名字
+// 补回去，而不是把 Authorization 写成空字符串。
+func TestUpdate_HeaderValuesSurviveARedactedRoundTrip(t *testing.T) {
+	repo := newFakeRepo()
+	svc := newSvc(repo, stubProbe{})
+	created, err := svc.Create(context.Background(), 1, resource.CreateCommand{
+		Kind: "mcp", Ref: "my-mcp",
+		Config: resource.Config{
+			"endpoint": "https://mcp.example.com",
+			"headers":  []any{map[string]any{"key": "Authorization", "value": "Bearer secret"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// created.Config 里头的值已经被抹空了，原样存回去。
+	if _, err := svc.Update(context.Background(), 1, resource.KindMCP, created.ID,
+		resource.UpdateCommand{Config: created.Config}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+
+	stored := repo.byKind[resource.KindMCP][1]
+	list, ok := stored.Config["headers"].([]any)
+	if !ok || len(list) != 1 {
+		t.Fatalf("头列表形状不对: %v", stored.Config["headers"])
+	}
+	if list[0].(map[string]any)["value"] != reverse("Bearer secret") {
+		t.Fatalf("头的值应原封不动地留着（密文），得到 %v", list[0])
+	}
+}

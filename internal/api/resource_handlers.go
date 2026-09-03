@@ -32,9 +32,13 @@ type resourceDTO struct {
 	Ref         string         `json:"ref"`
 	DisplayName string         `json:"display_name,omitempty"`
 	Config      map[string]any `json:"config"`
-	Status      int16          `json:"status"`
-	Health      string         `json:"health,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
+	// CredentialKeys 是这个资源有哪几个凭据字段的名字，值一概不在响应里。
+	// 编辑界面据此渲染"换密钥"的输入框——没有它，被 Redact 抹掉的凭据既
+	// 看不见也改不了。
+	CredentialKeys []string  `json:"credential_keys"`
+	Status         int16     `json:"status"`
+	Health         string    `json:"health,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func toResourceDTO(r resource.Resource) resourceDTO {
@@ -43,14 +47,15 @@ func toResourceDTO(r resource.Resource) resourceDTO {
 		config = map[string]any{}
 	}
 	return resourceDTO{
-		ID:          encodeResourceID(r.Kind, r.ID),
-		Type:        string(r.Kind),
-		Ref:         r.Ref,
-		DisplayName: r.DisplayName,
-		Config:      config,
-		Status:      int16(r.Status),
-		Health:      string(r.Health),
-		CreatedAt:   r.CreatedAt,
+		ID:             encodeResourceID(r.Kind, r.ID),
+		Type:           string(r.Kind),
+		Ref:            r.Ref,
+		DisplayName:    r.DisplayName,
+		Config:         config,
+		CredentialKeys: append([]string{}, r.CredentialKeys...),
+		Status:         int16(r.Status),
+		Health:         string(r.Health),
+		CreatedAt:      r.CreatedAt,
 	}
 }
 

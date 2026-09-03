@@ -3678,7 +3678,16 @@ components:
         type: { $ref: '#/components/schemas/ResourceType' }
         ref: { type: string }
         display_name: { type: string }
-        config: { type: object, additionalProperties: true }
+        config:
+          type: object
+          additionalProperties: true
+          description: 凭证字段不出现在这里（见 credential_keys）
+        credential_keys:
+          type: array
+          items: { type: string }
+          description: >-
+            这个资源有哪几个凭证字段的**名字**，值一概不返回。编辑界面据此渲
+            染换密钥的输入框：留空表示不改，给新值表示替换，给空串表示清除。
         status: { $ref: '#/components/schemas/Status' }
         health:
           type: string

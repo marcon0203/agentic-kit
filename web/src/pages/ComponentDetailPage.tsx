@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, KeyRound, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -64,6 +64,14 @@ export function ComponentDetailPage() {
   const queryClient = useQueryClient()
 
   const [form, setForm] = useState<FormState | null>(null)
+  /**
+   * 凭据输入框的内容。只装"用户真的动过"的键——这一点是有讲究的：后端把
+   * 空串当作"清除这个密钥"，所以绝不能因为输入框留空就把它塞进提交里，
+   * 否则点一次保存就把密钥抹了（正是上一版修掉的那个坑的翻版）。
+   */
+  const [credDrafts, setCredDrafts] = useState<Record<string, string>>({})
+  const [newCredKey, setNewCredKey] = useState('')
+  const [newCredValue, setNewCredValue] = useState('')
 
   const query = useQuery({
     queryKey: ['resource', id],
@@ -79,6 +87,7 @@ export function ComponentDetailPage() {
     if (resource) setForm(formOf(resource))
   }, [resource])
 
+  const credentialKeys = resource?.credential_keys ?? []
   const shape = resource ? componentShape(componentConfig(resource.config)) : 'http'
   const shapeMeta = COMPONENT_SHAPE_META[shape]
 
@@ -94,8 +103,10 @@ export function ComponentDetailPage() {
 
   const dirty = useMemo(() => {
     if (!resource || !form) return false
+    if (Object.keys(credDrafts).length > 0) return true
+    if (newCredKey.trim() && newCredValue) return true
     return JSON.stringify(form) !== JSON.stringify(formOf(resource))
-  }, [resource, form])
+  }, [resource, form, credDrafts, newCredKey, newCredValue])
 
   const saveMutation = useMutation({
     mutationFn: async (f: FormState) => {
@@ -112,6 +123,15 @@ export function ComponentDetailPage() {
       put('path', f.path)
       put('base_url', f.baseURL)
 
+      // 只提交动过的凭据键。留空 = 没动 = 根本不出现在 config 里，后端据
+      // 此保留库里已存的值。要清除得走"清除"按钮，那会显式提交空串。
+      for (const [k, v] of Object.entries(credDrafts)) {
+        config[k] = v
+      }
+      if (newCredKey.trim() && newCredValue) {
+        config[newCredKey.trim()] = newCredValue
+      }
+
       return unwrap<Resource>(
         await apiClient.PATCH('/resources/{id}', {
           params: { path: { id: id! } },
@@ -121,6 +141,9 @@ export function ComponentDetailPage() {
     },
     onSuccess: (updated) => {
       toast.success('已保存')
+      setCredDrafts({})
+      setNewCredKey('')
+      setNewCredValue('')
       queryClient.setQueryData(['resource', id], updated)
       queryClient.invalidateQueries({ queryKey: ['resources', 'tool'] })
     },
@@ -238,6 +261,89 @@ export function ComponentDetailPage() {
           </>
         )}
 
+        {/* 凭据。值从来不回显（响应里根本没有），这里只按名字给出可以换
+            的位置：留空 = 不改，填了 = 换成新的，清除 = 显式抹掉。 */}
+        <div className="flex flex-col gap-space-3 rounded-md border border-border bg-surface-muted/40 p-space-4">
+          <span className="text-label-md flex items-center gap-space-2 text-ink-900">
+            <KeyRound className="size-4 text-ink-500" aria-hidden />
+            凭证
+          </span>
+
+          {credentialKeys.length === 0 && (
+            <p className="text-caption text-ink-500">这个组件还没有配置凭证。需要的话在下面加一个。</p>
+          )}
+
+          {credentialKeys.map((k) => {
+            const touched = k in credDrafts
+            return (
+              <div key={k} className="flex flex-wrap items-end gap-space-2">
+                <label className="flex min-w-0 flex-1 flex-col gap-space-2">
+                  <span className="text-body-sm text-ink-700">
+                    <span className="text-ref">{k}</span>
+                    <span className="text-caption ml-space-2 text-ink-500">
+                      {touched && credDrafts[k] === '' ? '保存后清除' : '已配置，留空表示不改'}
+                    </span>
+                  </span>
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="••••••••（不改就别填）"
+                    value={credDrafts[k] ?? ''}
+                    onChange={(e) => setCredDrafts({ ...credDrafts, [k]: e.target.value })}
+                  />
+                </label>
+                {touched ? (
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      const next = { ...credDrafts }
+                      delete next[k]
+                      setCredDrafts(next)
+                    }}
+                  >
+                    撤销
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    className="text-ink-500 hover:text-rust"
+                    title={`清除 ${k}`}
+                    onClick={() => setCredDrafts({ ...credDrafts, [k]: '' })}
+                  >
+                    <Trash2 className="size-4" aria-hidden />
+                  </Button>
+                )}
+              </div>
+            )
+          })}
+
+          {/* 加一个新的凭据字段：组件建的时候没填、后来接口开始要鉴权，
+              总得有地方补上，不然只能删掉重建。 */}
+          <div className="flex flex-wrap items-end gap-space-2">
+            <label className="flex w-44 flex-col gap-space-2">
+              <span className="text-body-sm text-ink-700">新增字段名</span>
+              <Input
+                value={newCredKey}
+                onChange={(e) => setNewCredKey(e.target.value)}
+                placeholder="api_key"
+              />
+            </label>
+            <label className="flex min-w-0 flex-1 flex-col gap-space-2">
+              <span className="text-body-sm text-ink-700">值</span>
+              <Input
+                type="password"
+                autoComplete="new-password"
+                value={newCredValue}
+                onChange={(e) => setNewCredValue(e.target.value)}
+              />
+            </label>
+          </div>
+          <span className="text-caption text-ink-500">
+            <Plus className="mr-1 inline size-3" aria-hidden />
+            字段名里带 key / token / secret / password 的会被当作凭证加密保存，且此后不再出现在任何响应里。
+          </span>
+        </div>
+
         <div className="flex items-center gap-space-3">
           <Button
             className="bg-gradient-cta text-white hover:opacity-90"
@@ -247,7 +353,15 @@ export function ComponentDetailPage() {
             保存
           </Button>
           {dirty && (
-            <Button variant="ghost" onClick={() => setForm(formOf(resource))}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setForm(formOf(resource))
+                setCredDrafts({})
+                setNewCredKey('')
+                setNewCredValue('')
+              }}
+            >
               放弃修改
             </Button>
           )}
@@ -262,7 +376,7 @@ export function ComponentDetailPage() {
           {JSON.stringify(resource.config, null, 2)}
         </pre>
         <p className="text-caption mt-space-2 text-ink-500">
-          凭证字段不会出现在这里（也不会出现在任何接口响应里）。保存时不填即表示不改。
+          凭证字段不会出现在这里，也不会出现在任何接口响应里——上面的凭证区按字段名列出可以更换的位置。
         </p>
       </details>
     </div>

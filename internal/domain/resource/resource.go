@@ -9,6 +9,7 @@
 package resource
 
 import (
+	"sort"
 	"strings"
 	"time"
 )
@@ -71,6 +72,23 @@ type Resource struct {
 	Status      Status
 	Health      Health
 	CreatedAt   time.Time
+	// CredentialKeys 是这个资源身上有哪几个凭据字段的**名字**，值一概不
+	// 在这里。
+	//
+	// 没有它，编辑界面就走进一个死胡同：凭据字段被 Redact 抹得一干二净，
+	// 前端既看不到值、也不知道有没有、更不知道叫什么，于是连"换一下
+	// api_key"这个动作都渲染不出来。名字本身不是秘密，泄露的是值。
+	CredentialKeys []string
+}
+
+// redactConfig 记下凭据键的名字，再把值抹掉。
+//
+// 两件事必须绑在一起做，而且顺序不能反：名字得在抹掉之前取。所有对外返回
+// 资源的路径都走这一个方法，避免哪天新加一条读路径时只记得 Redact、忘了
+// 带上名字——那样表现为"这个资源的密钥换不了"，而且不报错。
+func (r *Resource) redactConfig() {
+	r.CredentialKeys = r.Config.CredentialKeys()
+	r.Config = r.Config.Redact()
 }
 
 // Config is a resource's configuration document. Some of its values are
@@ -96,6 +114,22 @@ func IsCredentialKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// CredentialKeys 返回这份 config 里凭据字段的名字，排序后返回（顺序稳定，
+// 界面上的字段不会每次刷新换位置）。
+//
+// headers 不在其中：头列表经 Redact 之后头的名字本来就还在，界面照着那份
+// 列表渲染即可，不需要再单独报一次。
+func (c Config) CredentialKeys() []string {
+	keys := make([]string, 0, len(c))
+	for k := range c {
+		if k != headersConfigKey && IsCredentialKey(k) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Redact returns a copy with every credential field *removed*. spec-05's

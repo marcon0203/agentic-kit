@@ -260,7 +260,7 @@ func (s *Service) List(ctx context.Context, ownerID int64, q ListQuery) (domain.
 			rows = rows[:limit]
 		}
 		for _, row := range rows {
-			row.Config = row.Config.Redact()
+			row.redactConfig()
 			items = append(items, row)
 		}
 		// A cursor is only meaningful for a single-kind page; a merged page
@@ -288,7 +288,7 @@ func (s *Service) Get(ctx context.Context, ownerID int64, kind Kind, id int64) (
 		}
 		return Resource{}, domain.Internal(err)
 	}
-	res.Config = res.Config.Redact()
+	res.redactConfig()
 	return res, nil
 }
 
@@ -345,7 +345,7 @@ func (s *Service) Create(ctx context.Context, ownerID int64, cmd CreateCommand) 
 		created.Health = health
 	}
 
-	created.Config = created.Config.Redact()
+	created.redactConfig()
 	return created, nil
 }
 
@@ -393,7 +393,7 @@ func (s *Service) Update(ctx context.Context, ownerID int64, kind Kind, id int64
 	if err != nil {
 		return Resource{}, domain.Internal(err)
 	}
-	updated.Config = updated.Config.Redact()
+	updated.redactConfig()
 	return updated, nil
 }
 

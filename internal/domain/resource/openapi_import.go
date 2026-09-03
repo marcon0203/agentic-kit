@@ -150,7 +150,7 @@ func (s *Service) CreateComponentsBatch(ctx context.Context, ownerID int64, cmd 
 		return nil, domain.Internal(err)
 	}
 	for i := range created {
-		created[i].Config = created[i].Config.Redact()
+		created[i].redactConfig()
 	}
 	return created, nil
 }

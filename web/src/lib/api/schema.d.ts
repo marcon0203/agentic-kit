@@ -1867,9 +1867,12 @@ export interface components {
             type: components["schemas"]["ResourceType"];
             ref: string;
             display_name?: string;
+            /** @description 凭证字段不出现在这里（见 credential_keys） */
             config?: {
                 [key: string]: unknown;
             };
+            /** @description 这个资源有哪几个凭证字段的**名字**，值一概不返回。编辑界面据此渲 染换密钥的输入框：留空表示不改，给新值表示替换，给空串表示清除。 */
+            credential_keys?: string[];
             status: components["schemas"]["Status"];
             /**
              * @description MCP Server 等外部资源的健康状态

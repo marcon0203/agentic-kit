@@ -130,3 +130,67 @@ func TestMerge_RedactRoundTripLosesNothing(t *testing.T) {
 		t.Errorf("普通字段也该原样在: %v", roundTripped["endpoint"])
 	}
 }
+
+// ── 凭据字段的名字要露出来，值不能 ────────────────────────────────────
+
+// 编辑界面得知道"这个资源有哪几个密钥可以换"，否则被 Redact 抹掉的凭据既
+// 看不见也改不了——用户只能删掉重建。名字不是秘密，值才是。
+func TestCredentialKeys_ListsNamesNotValues(t *testing.T) {
+	cfg := resource.Config{
+		"endpoint":   "https://api.example.com",
+		"api_key":    "sk-live-123",
+		"auth_token": "t-456",
+		"timeout":    30,
+	}
+
+	keys := cfg.CredentialKeys()
+
+	if len(keys) != 2 {
+		t.Fatalf("期望 2 个凭据字段，得到 %v", keys)
+	}
+	// 排序返回，界面上的字段不会每次刷新换位置。
+	if keys[0] != "api_key" || keys[1] != "auth_token" {
+		t.Errorf("凭据名不对或没排序: %v", keys)
+	}
+	for _, k := range keys {
+		if k == "endpoint" || k == "timeout" {
+			t.Errorf("普通字段不该被当成凭据: %s", k)
+		}
+	}
+}
+
+// headers 不进这个清单：头列表经 Redact 之后头的名字本来就还在，界面照那
+// 份列表渲染即可，不必再报一次。
+func TestCredentialKeys_ExcludesHeaders(t *testing.T) {
+	cfg := resource.Config{
+		"headers": []any{map[string]any{"key": "Authorization", "value": "Bearer x"}},
+		"api_key": "sk-1",
+	}
+	keys := cfg.CredentialKeys()
+	for _, k := range keys {
+		if k == "headers" {
+			t.Fatalf("headers 不该出现在凭据名清单里: %v", keys)
+		}
+	}
+	if len(keys) != 1 || keys[0] != "api_key" {
+		t.Errorf("期望只有 api_key，得到 %v", keys)
+	}
+}
+
+// 名字露出来之后仍然必须走一遍：值一个字节都不能跟着出去。
+func TestCredentialKeys_RedactStillDropsEveryValue(t *testing.T) {
+	cfg := resource.Config{"api_key": "sk-live-123", "endpoint": "https://x"}
+
+	keys := cfg.CredentialKeys()
+	redacted := cfg.Redact()
+
+	if len(keys) != 1 {
+		t.Fatalf("应报告一个凭据字段: %v", keys)
+	}
+	if _, present := redacted["api_key"]; present {
+		t.Error("凭据的值不该出现在 Redact 之后的 config 里")
+	}
+	if redacted["endpoint"] != "https://x" {
+		t.Errorf("普通字段该原样保留: %v", redacted["endpoint"])
+	}
+}

@@ -150,7 +150,7 @@ func (s *Service) UploadSkill(ctx context.Context, ownerID int64, cmd UploadSkil
 		return Resource{}, domain.Internal(err)
 	}
 
-	created.Config = created.Config.Redact()
+	created.redactConfig()
 	return created, nil
 }
 
