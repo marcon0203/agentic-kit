@@ -437,15 +437,23 @@ func (x *execution) emitRenderIfMatched(ctx context.Context, ev adk.Event) {
 	}
 }
 
+// finish 收尾一次运行。**顺序有意为之：先落终态事件，再改运行状态。**
+//
+// 反过来写会漏事件。NDJSON 流（GET /runs/{id}/stream）判完的依据是运行
+// 状态，读到终态就收线；要是状态先翻、事件后写，正好卡在这中间的一次轮询
+// 就会看见"已完成"而 bundle.finished 还没落库，于是连接断在终态事件之
+// 前——前端既拿不到完成状态，也永远等不来那一行，输入框就一直卡在"运行
+// 中"。按现在这个顺序，"状态是终态"就蕴含"终态事件已经在库里"，配合流
+// 处理器的先读状态后读事件，两边合起来才关得住这个缝。
 func (x *execution) finish(ctx context.Context, status run.Status, errMsg string) {
-	_ = x.engine.runs.UpdateStatus(ctx, x.runID, status, errMsg)
-
 	eventType := run.EventBundleFinished
 	var payload map[string]any
 	if errMsg != "" {
 		eventType, payload = run.EventBundleFailed, map[string]any{"error": errMsg}
 	}
 	_ = x.engine.events.Append(ctx, run.Event{RunID: x.runID, Type: eventType, Payload: payload})
+
+	_ = x.engine.runs.UpdateStatus(ctx, x.runID, status, errMsg)
 }
 
 // sanitizeRunError strips anything that might name a private resource from

@@ -223,15 +223,20 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 		afterID, _ = strconv.ParseInt(v, 10, 64)
 	}
 
-	// The first fetch happens before any header is written, so an
-	// unauthorized or missing run still gets a normal error envelope
-	// rather than a 200 with an error line inside the stream.
-	events, err := h.svc.EventsAfter(r.Context(), userID, id, afterID)
+	// 状态在事件之前读。engine.finish 先写终态事件再改状态，所以"读到的
+	// 状态是终态"就意味着终态事件在这次读取之前已经落库，紧接着的事件查
+	// 询一定带得上它。反过来先读事件再读状态，就会在两次读取之间漏掉刚写
+	// 进去的 bundle.finished，连接断在终态事件之前——前端只能判成"意外断
+	// 流"，永远等不到完成。
+	//
+	// 第一次读取都在写任何响应头之前，所以越权或运行不存在还能正常返回错
+	// 误信封，而不是先 200 再在流里塞一行错误。
+	status, err := h.svc.Status(r.Context(), id)
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return
 	}
-	status, err := h.svc.Status(r.Context(), id)
+	events, err := h.svc.EventsAfter(r.Context(), userID, id, afterID)
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return
@@ -268,11 +273,12 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 		case <-time.After(streamPollInterval):
 		}
 
-		if events, err = h.svc.EventsAfter(r.Context(), userID, id, afterID); err != nil {
-			_ = writeNDJSONLine(w, runEventDTO{Type: "stream.error", RunID: id, Timestamp: h.now()})
+		// 同样先状态后事件，理由见上面第一次读取处。
+		if status, err = h.svc.Status(r.Context(), id); err != nil {
 			return
 		}
-		if status, err = h.svc.Status(r.Context(), id); err != nil {
+		if events, err = h.svc.EventsAfter(r.Context(), userID, id, afterID); err != nil {
+			_ = writeNDJSONLine(w, runEventDTO{Type: "stream.error", RunID: id, Timestamp: h.now()})
 			return
 		}
 	}

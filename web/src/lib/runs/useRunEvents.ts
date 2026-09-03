@@ -33,6 +33,27 @@ export function useRunEvents(runId: string | undefined): UseRunEventsResult {
   const [reconnectNonce, setReconnectNonce] = useState(0)
   const lastIdRef = useRef(0)
 
+  // 换一次运行就把累积状态清干净。不清的话上一次的 bundle.finished 还留在
+  // events 里，下一次运行刚开始就被判成"已完成"——试运行面板第二条消息发
+  // 出去就秒回上一条的答案，压根没跑；lastIdRef 也一样，带着上一轮的游标去
+  // 请求下一轮的流是没道理的。
+  //
+  // 在渲染期直接改而不放进 effect：effect 要等这一次渲染提交完才跑，中间
+  // 那一帧消费方仍会拿旧 events 算出旧状态，误判就发生在那一帧。渲染期
+  // setState 会让 React 丢掉这次渲染结果重来，旧值不会外泄——这正是官方
+  // 「props 变了顺手调整 state」的用法。
+  const seenRunRef = useRef<string | undefined>(undefined)
+  if (seenRunRef.current !== runId) {
+    seenRunRef.current = runId
+    lastIdRef.current = 0
+    if (events.length > 0) setEvents([])
+    // status 同理：上一次运行断在 'error' 上，下一次运行刚挂上来就会被消费
+    // 方当成"这次也断了"。没有 runId 时归到 'closed'——那是"没有在看任何
+    // 运行"，不是"连接出问题了"。
+    const fresh: StreamStatus = runId ? 'connecting' : 'closed'
+    if (status !== fresh) setStatus(fresh)
+  }
+
   useEffect(() => {
     if (!runId) return
     const controller = new AbortController()

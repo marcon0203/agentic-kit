@@ -429,3 +429,57 @@ func TestCreateAgentTest_MalformedBodyReturns400(t *testing.T) {
 		t.Fatalf("status = %d, want 400", w.Code)
 	}
 }
+
+// racingRunRepo 复现 engine.finish 的真实时序：运行先是 running，等到某一
+// 次状态查询时才翻成 finished——**而 bundle.finished 事件在翻状态之前就已
+// 经落库**（finish 就是这个顺序）。
+type racingRunRepo struct {
+	*stubRunRepo
+	events    *stubEventStore
+	getCalls  int
+	flipAfter int
+}
+
+func (s *racingRunRepo) Get(ctx context.Context, runID string) (run.Run, error) {
+	s.getCalls++
+	if s.getCalls >= s.flipAfter {
+		// 事件先落库，再对外表现为终态——顺序同 engine.finish。
+		if len(s.events.events) == 1 {
+			s.events.events = append(s.events.events,
+				run.Event{ID: 2, RunID: runID, Type: run.EventBundleFinished})
+		}
+		r := s.runs[runID]
+		r.Status = run.StatusFinished
+		s.runs[runID] = r
+	}
+	return s.stubRunRepo.Get(ctx, runID)
+}
+
+// 流处理器必须先读状态再读事件。反过来的话，两次读取之间落库的
+// bundle.finished 就会被漏掉：处理器看见终态直接收线，而那一行永远没发出
+// 去，前端只能判成"意外断流"——试运行面板于是一直卡在"运行中"，输入框跟着
+// 锁死。这是"试运行一下就中断、后面再也发不出去"的根因。
+func TestStream_DoesNotLoseTerminalEventWrittenJustBeforeStatusFlip(t *testing.T) {
+	f := newRunFixture()
+	finishedRunWithEvents(f, 5, 5, []run.Event{{ID: 1, RunID: "run-1", Type: "node.start", Node: "writer"}})
+	// finishedRunWithEvents 把运行直接设成终态，这里退回运行中，让它在流的
+	// 第二次轮询时才结束。
+	r := f.runs.runs["run-1"]
+	r.Status = run.StatusRunning
+	f.runs.runs["run-1"] = r
+
+	racing := &racingRunRepo{stubRunRepo: f.runs, events: f.events, flipAfter: 2}
+	svc := run.NewService(racing, f.events, f.resolver, stubDeps{}, stubOrchestrator{}, stubGates{}, stubNotifier{}, stubAudit{}, stubIDs{})
+	h := NewRunHandlers(svc)
+
+	w := httptest.NewRecorder()
+	h.Stream(w, runRequest(http.MethodGet, "/runs/run-1/stream", "run-1", 5, nil))
+
+	events := decodeNDJSONLines(t, w.Body.Bytes())
+	if len(events) != 2 {
+		t.Fatalf("期望两条事件（含终态那条），实际 %d 条：%+v", len(events), events)
+	}
+	if events[1].Type != run.EventBundleFinished {
+		t.Fatalf("最后一条应当是 %s，实际是 %s——终态事件被漏掉了", run.EventBundleFinished, events[1].Type)
+	}
+}

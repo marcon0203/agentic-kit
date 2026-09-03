@@ -429,9 +429,11 @@ function TestPanel({ form, problems }: { form: FormState; problems: string[] }) 
   const [pending, setPending] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** 断流时记下是哪一次运行、问的什么，好让「重连」能续上同一次。 */
+  const [interrupted, setInterrupted] = useState<{ runId: string; question: string } | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const { events } = useRunEvents(runId)
+  const { events, status: streamStatus, reconnect } = useRunEvents(runId)
   const timeline = useMemo(() => buildTimeline(events), [events])
   const liveText = Object.values(timeline.bubbles)
     .map((b) => b.text)
@@ -456,6 +458,23 @@ function TestPanel({ form, problems }: { form: FormState; problems: string[] }) 
     setRunId(undefined)
   }, [timeline.runStatus, timeline.runError, runId, pending, liveText, liveRenders])
 
+  // 流断在终态事件之前时的兜底。后端那条竞态已经修掉（engine 先写终态事
+  // 件再改状态，流处理器先读状态再读事件），但网络抖动、代理超时这些外部
+  // 原因还是会断流；一旦断了又没人收尾，pending 就永远挂着，输入框跟着一
+  // 直禁用——用户看到的就是"发了一次之后再也发不出去"。这里把它落成一条
+  // 失败记录并放开输入，同时留一个「重试」让人能续上同一次运行。
+  useEffect(() => {
+    if (!runId || pending === null || streamStatus !== 'error') return
+    setHistory((h) => [
+      ...h,
+      { question: pending, answer: liveText || '连接中断，没有收到运行结果', failed: true, renders: liveRenders },
+    ])
+    setError('运行事件流中断了')
+    setInterrupted({ runId, question: pending })
+    setPending(null)
+    setRunId(undefined)
+  }, [streamStatus, runId, pending, liveText, liveRenders])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [history.length, liveText])
@@ -468,6 +487,7 @@ function TestPanel({ form, problems }: { form: FormState; problems: string[] }) 
     if (!question || blocked || busy) return
     setDraft('')
     setError(null)
+    setInterrupted(null)
     setStarting(true)
     try {
       const created = unwrap<RunSummary>(
@@ -546,8 +566,25 @@ function TestPanel({ form, problems }: { form: FormState; problems: string[] }) 
         </p>
       )}
       {error && (
-        <p role="alert" className="text-caption border-t border-border px-space-4 py-space-2 text-rust">
-          {error}
+        <p role="alert" className="text-caption flex items-center gap-space-2 border-t border-border px-space-4 py-space-2 text-rust">
+          <span>{error}</span>
+          {interrupted && (
+            <button
+              type="button"
+              className="underline underline-offset-2"
+              onClick={() => {
+                // 运行本身可能还在服务端跑着，重新订阅同一个 run 就能接上；
+                // 上面那条失败记录留着，作为"这里断过一次"的痕迹。
+                setError(null)
+                setPending(interrupted.question)
+                setRunId(interrupted.runId)
+                setInterrupted(null)
+                reconnect()
+              }}
+            >
+              重连
+            </button>
+          )}
         </p>
       )}
 
