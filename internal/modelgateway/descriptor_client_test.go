@@ -206,10 +206,12 @@ func TestProviderSpecs_DescribeCredentialFields(t *testing.T) {
 	}
 }
 
-// 平台开箱不带渠道；这里的四个是 TestMain 按协议模板建出来的，等价于管理
-// 员在 系统配置 → 模型提供商 里建了它们。
+// 平台开箱不带渠道；这几个是 TestMain 按协议模板建出来的，等价于管理员在
+// 系统配置 → 模型提供商 里建了它们。
 func TestProviderNames_MatchesTheTestChannels(t *testing.T) {
-	want := map[string]bool{"deepseek": true, "volcengine": true, "qwen": true, "custom": true}
+	want := map[string]bool{
+		"deepseek": true, "volcengine": true, "qwen": true, "zhipu": true, "custom": true,
+	}
 	got := ProviderNames()
 	if len(got) != len(want) {
 		t.Fatalf("期望 %d 个渠道，得到 %d 个: %v", len(want), len(got), got)
@@ -218,5 +220,100 @@ func TestProviderNames_MatchesTheTestChannels(t *testing.T) {
 		if !want[name] {
 			t.Errorf("意料之外的渠道 %q", name)
 		}
+	}
+}
+
+// 智谱的接口前缀是 /api/paas/v4，不是 /v1。这是接智谱最常见的一个坑——很
+// 多客户端会自作主张往 base_url 后面拼 /v1，于是一路 404。这条盯住模板里
+// 的 base_url 原样进请求、路径就是 base_url + /chat/completions。
+func TestZhipu_UsesTheV4PrefixVerbatim(t *testing.T) {
+	def, ok := providerByName("zhipu")
+	if !ok {
+		t.Fatal("智谱渠道没注册")
+	}
+	if def.DefaultBaseURL != "https://open.bigmodel.cn/api/paas/v4" {
+		t.Errorf("默认接口地址不对（智谱用 /api/paas/v4 而不是 /v1）: %s", def.DefaultBaseURL)
+	}
+
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"你好"}}],
+		                       "usage":{"prompt_tokens":5,"completion_tokens":2}}`))
+	}))
+	defer srv.Close()
+
+	result, err := def.NewClient(srv.Client(), srv.URL).
+		Complete(context.Background(), "sk-zhipu", "", "glm-4.6", CompletionRequest{
+			Messages: []Message{{Role: "user", Content: "hi"}},
+		})
+	if err != nil {
+		t.Fatalf("调用失败: %v", err)
+	}
+	if gotPath != "/chat/completions" {
+		t.Errorf("路径不对: %s", gotPath)
+	}
+	// 智谱的 v4 接口直接收 API Key 作 bearer，不需要 JWT 签名——所以它能走
+	// 现成的 bearer 驱动，不必为它开一个签名驱动。
+	if gotAuth != "Bearer sk-zhipu" {
+		t.Errorf("鉴权头不对: %q", gotAuth)
+	}
+	if result.Content != "你好" || result.InputTokens != 5 || result.OutputTokens != 2 {
+		t.Errorf("结果不对: %+v", result)
+	}
+}
+
+// GLM 的思考型号会额外返回 reasoning_content，这条盯住它被怎么处理。
+//
+// 现状是**有意为之**的（见 descriptorClient.CompleteStream）：StreamDelta
+// 只有 TextDelta 一个通道，思维链也照文字往外推——吞掉的话前端在模型思考
+// 期间完全静止。但最终结果里 Content 只能是答案，思维链归 reasoning 槽，
+// 否则它会被当成正文写进对话记录、并跟着进下一轮上下文。
+//
+// 两半都钉住：哪天给 StreamDelta 加了 reasoning 通道，上半条会红，提醒改
+// 的人来看这段说明；而下半条无论如何都不该红。
+func TestZhipu_StreamsReasoningAsTextButKeepsItOutOfTheFinalContent(t *testing.T) {
+	def, _ := providerByName("zhipu")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, chunk := range []string{
+			`{"choices":[{"delta":{"reasoning_content":"先想一下"}}]}`,
+			`{"choices":[{"delta":{"content":"答案是"}}]}`,
+			`{"choices":[{"delta":{"content":"42"}}],"usage":{"prompt_tokens":3,"completion_tokens":4}}`,
+			`[DONE]`,
+		} {
+			_, _ = w.Write([]byte("data: " + chunk + "\n\n"))
+		}
+	}))
+	defer srv.Close()
+
+	sc, ok := def.NewClient(srv.Client(), srv.URL).(StreamingClient)
+	if !ok {
+		t.Fatal("智谱渠道必须实现 StreamingClient")
+	}
+	var streamed string
+	result, err := sc.CompleteStream(context.Background(), "sk-zhipu", "", "glm-4.6",
+		CompletionRequest{Messages: []Message{{Role: "user", Content: "hi"}}},
+		func(d StreamDelta) { streamed += d.TextDelta })
+	if err != nil {
+		t.Fatalf("流式调用失败: %v", err)
+	}
+	// 思考期间也要有东西往外冒，不能静止。
+	if !strings.Contains(streamed, "先想一下") {
+		t.Errorf("思维链应照文字推出去（否则思考期间前端是静止的）: %q", streamed)
+	}
+	// 但它不能进最终正文——那会被写进对话记录并带进下一轮上下文。
+	if result.Content != "答案是42" {
+		t.Errorf("最终正文里不该有思维链: %q", result.Content)
+	}
+	if result.InputTokens != 3 || result.OutputTokens != 4 {
+		t.Errorf("用量不对: %+v", result)
+	}
+}
+
+// 与火山方舟同样的理由：GLM 按人民币计价且调价频繁，刻意不预置价格表，成
+// 本按 0 记而不是记一个折算出来的假数字。
+func TestZhipu_HasNoGuessedPricing(t *testing.T) {
+	if cost := EstimateCost("zhipu", "glm-4.6", 1_000_000, 1_000_000); cost != 0 {
+		t.Fatalf("没有价格表的渠道应按 0 计费，得到 %v", cost)
 	}
 }

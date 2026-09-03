@@ -1,6 +1,8 @@
 import deepseekIcon from '@lobehub/icons-static-svg/icons/deepseek-color.svg'
 import volcengineIcon from '@lobehub/icons-static-svg/icons/volcengine-color.svg'
 import qwenIcon from '@lobehub/icons-static-svg/icons/qwen-color.svg'
+// 智谱在 lobehub 那边的图标名是 chatglm（沿用模型系列名），不是 zhipu。
+import zhipuIcon from '@lobehub/icons-static-svg/icons/chatglm-color.svg'
 import openaiIcon from '@lobehub/icons-static-svg/icons/openai.svg'
 
 import { cn } from '@/lib/utils'
@@ -19,6 +21,7 @@ const TEMPLATE_ICON: Record<string, string> = {
   deepseek: deepseekIcon,
   volcengine: volcengineIcon,
   qwen: qwenIcon,
+  zhipu: zhipuIcon,
   'openai-compatible': openaiIcon,
 }
 

@@ -1,0 +1,131 @@
+{
+  "descriptor_version": 1,
+  "id": "zhipu",
+  "label": "智谱 GLM（BigModel）",
+  "wire": "openai.chat.v1",
+  "description": "智谱开放平台，线协议与 OpenAI Chat Completions 兼容。接口前缀是 /api/paas/v4 而不是 /v1——这是接智谱最常踩的一个坑，很多客户端会自作主张往 base_url 后面拼 /v1，这里的 base_url 已经写全，不要再改。GLM-4.5 及以上的思考型号会额外返回 reasoning_content（思维链），流式和非流式都映射到 reasoning。价格表刻意留空：GLM 按人民币计价且调价频繁，硬编一个折算汇率进来会让成本统计看着像真的、其实是错的——EstimateCost 对没有价格的模型按 0 处理，token 数照常记录。",
+  "capabilities": [
+    "text",
+    "tools",
+    "stream",
+    "embed"
+  ],
+  "base_url": "https://open.bigmodel.cn/api/paas/v4",
+  "credentials": [
+    {
+      "name": "api_key",
+      "type": "secret",
+      "label": "API Key",
+      "required": true
+    },
+    {
+      "name": "base_url",
+      "type": "url",
+      "label": "接口地址（留空用官方默认）",
+      "required": false
+    }
+  ],
+  "auth": {
+    "driver": "bearer",
+    "credential": "api_key"
+  },
+  "messages": {
+    "system": "inline",
+    "content": "string",
+    "tool_calls": "sibling_field",
+    "tool_calls_field": "tool_calls",
+    "tool_call_part": {
+      "id": "$.id",
+      "type": "function",
+      "function": {
+        "name": "$.name",
+        "arguments": {
+          "$json": "$.arguments"
+        }
+      }
+    }
+  },
+  "complete": {
+    "method": "POST",
+    "path": "/chat/completions",
+    "body": {
+      "model": "$.model",
+      "messages": "$.messages",
+      "tools": "$.tools",
+      "max_tokens": "$.max_tokens",
+      "temperature": "$.temperature"
+    },
+    "response": {
+      "text": [
+        "choices.0.message.content"
+      ],
+      "reasoning": [
+        "choices.0.message.reasoning_content"
+      ],
+      "tool_calls": {
+        "each": "choices.0.message.tool_calls",
+        "id": "id",
+        "name": "function.name",
+        "arguments_json": "function.arguments"
+      },
+      "usage": {
+        "input": "usage.prompt_tokens",
+        "output": "usage.completion_tokens"
+      },
+      "error": {
+        "when": "error",
+        "code": "error.code",
+        "message": "error.message"
+      }
+    }
+  },
+  "stream": {
+    "request": {
+      "patch": {
+        "stream": true
+      }
+    },
+    "transport": "sse",
+    "done": [
+      "[DONE]"
+    ],
+    "on": [
+      {
+        "emit_text": "$.choices.0.delta.content"
+      },
+      {
+        "emit_reasoning": "$.choices.0.delta.reasoning_content"
+      },
+      {
+        "each": "$.choices.0.delta.tool_calls",
+        "index": "$.index",
+        "set_id": "$.id",
+        "set_name": "$.function.name",
+        "append_args": "$.function.arguments"
+      },
+      {
+        "usage_in": "$.usage.prompt_tokens",
+        "usage_out": "$.usage.completion_tokens"
+      },
+      {
+        "fail": "$.error.message"
+      }
+    ]
+  },
+  "embed": {
+    "method": "POST",
+    "path": "/embeddings",
+    "body": {
+      "model": "$.model",
+      "input": "$.texts"
+    },
+    "response": {
+      "each": "data",
+      "vector": "embedding"
+    }
+  },
+  "probe": {
+    "method": "GET",
+    "path": "/models"
+  }
+}
