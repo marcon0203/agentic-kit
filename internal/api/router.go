@@ -241,6 +241,8 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Get("/runs/{id}/stream", cfg.Runs.Stream)
 				r.Post("/runs/{id}/cancel", cfg.Runs.Cancel)
 				r.Post("/runs/{id}/gate", cfg.Runs.ResolveGate)
+				// 一段对话里的全部运行，用来在刷新后重建整段对话。
+				r.Get("/sessions/{id}/runs", cfg.Runs.ListSession)
 				// A run can burn a lot of tokens per call, so creation
 				// gets its own tighter limiter on top of the general one.
 				runCreateLimiter := NewRateLimiter(20, time.Minute, generalRateLimitKey)

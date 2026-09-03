@@ -42,12 +42,15 @@ type Run struct {
 	BundleVersion string
 	TriggeredBy   int64
 	ViaListingID  *int64
-	Status        Status
-	Error         string
-	SharedState   map[string]any
-	Usage         Usage
-	CreatedAt     time.Time
-	FinishedAt    *time.Time
+	// SessionID 是这次运行所属的那段对话。同一段对话里的多次运行共享它，
+	// 模型因此看得到上文。历史数据可能为空——那些运行本来就各自独立。
+	SessionID   string
+	Status      Status
+	Error       string
+	SharedState map[string]any
+	Usage       Usage
+	CreatedAt   time.Time
+	FinishedAt  *time.Time
 }
 
 // Usage is a run's accumulated cost. DurationSeconds is derived rather

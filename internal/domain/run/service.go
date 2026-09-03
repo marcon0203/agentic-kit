@@ -14,6 +14,8 @@ import (
 // randomness behind it is not the domain's business.
 type IDGenerator interface {
 	NewRunID() (string, error)
+	// NewSessionID 产生一段新对话的 id，调用方没指定 session_id 时用。
+	NewSessionID() (string, error)
 }
 
 // Service is the 编排运行时 application service.
@@ -54,6 +56,9 @@ type StartCommand struct {
 	BundleRef     string
 	BundleVersion string
 	Input         map[string]any
+	// SessionID 接上已有的一段对话；留空就开一段新的。前端连着发消息时
+	// 把上一次拿到的 session_id 带回来，模型才接得住上文。
+	SessionID string
 }
 
 // AgentTestBundleProvider hands back the placeholder Bundle a 草稿试运行
@@ -71,6 +76,9 @@ type AgentTestBundleProvider interface {
 type AgentTestCommand struct {
 	Definition map[string]any
 	Input      map[string]any
+	// SessionID 同 StartCommand.SessionID：试运行面板里连着问几句，靠它
+	// 串成一段对话。
+	SessionID string
 }
 
 // StartAgentTest is Start for a single, possibly unsaved, Agent: the 智能体
@@ -125,6 +133,10 @@ func (s *Service) StartAgentTest(ctx context.Context, userID int64, cmd AgentTes
 	if err != nil {
 		return Run{}, domain.Internal(err)
 	}
+	sessionID, err := s.resolveSessionID(cmd.SessionID)
+	if err != nil {
+		return Run{}, err
+	}
 
 	execution, err := s.orch.Prepare(ctx, runID, resolved, ParseGateConfigs(resolved.Definition))
 	if err != nil {
@@ -133,14 +145,33 @@ func (s *Service) StartAgentTest(ctx context.Context, userID int64, cmd AgentTes
 
 	created, err := s.runs.Create(ctx, Run{
 		ID: runID, BundleID: bundleID, BundleRef: ref, BundleVersion: version,
-		TriggeredBy: userID, Status: StatusRunning,
+		TriggeredBy: userID, Status: StatusRunning, SessionID: sessionID,
 	})
 	if err != nil {
 		return Run{}, domain.Internal(err)
 	}
 
-	go execution.Start(userID, cmd.Input, ParseLimits(resolved.Definition))
+	go execution.Start(userID, sessionID, cmd.Input, ParseLimits(resolved.Definition))
 	return created, nil
+}
+
+// resolveSessionID 决定这次运行挂在哪段对话上：调用方带了 session_id 就
+// 接上去，没带就开一段新的。
+//
+// 这里**不校验**传进来的 session_id 是否已存在：ADK 的 runner 配的是
+// AutoCreateSession，第一次用到一个 id 就自己把会话建出来，前端因此可以
+// 先自己生成一个 id 再连着发几条消息，不必先跑一次空运行去换 id。越权也
+// 不是这里的问题——会话在存储层是按 (app_name, user_id, session_id) 定位
+// 的，user_id 来自登录态，猜到别人的 session_id 也读不到别人的会话。
+func (s *Service) resolveSessionID(requested string) (string, error) {
+	if strings.TrimSpace(requested) != "" {
+		return strings.TrimSpace(requested), nil
+	}
+	id, err := s.ids.NewSessionID()
+	if err != nil {
+		return "", domain.Internal(err)
+	}
+	return id, nil
 }
 
 // Start implements spec-11's launch chain: resolve the Bundle (ownership
@@ -180,6 +211,10 @@ func (s *Service) Start(ctx context.Context, userID int64, cmd StartCommand) (Ru
 	if err != nil {
 		return Run{}, domain.Internal(err)
 	}
+	sessionID, err := s.resolveSessionID(cmd.SessionID)
+	if err != nil {
+		return Run{}, err
+	}
 
 	execution, err := s.orch.Prepare(ctx, runID, resolved, ParseGateConfigs(resolved.Definition))
 	if err != nil {
@@ -188,13 +223,13 @@ func (s *Service) Start(ctx context.Context, userID int64, cmd StartCommand) (Ru
 
 	created, err := s.runs.Create(ctx, Run{
 		ID: runID, BundleID: resolved.BundleID, BundleRef: resolved.Ref, BundleVersion: resolved.Version,
-		TriggeredBy: userID, ViaListingID: resolved.ViaListingID, Status: StatusRunning,
+		TriggeredBy: userID, ViaListingID: resolved.ViaListingID, Status: StatusRunning, SessionID: sessionID,
 	})
 	if err != nil {
 		return Run{}, domain.Internal(err)
 	}
 
-	go execution.Start(userID, cmd.Input, ParseLimits(resolved.Definition))
+	go execution.Start(userID, sessionID, cmd.Input, ParseLimits(resolved.Definition))
 	return created, nil
 }
 
@@ -236,6 +271,26 @@ func (s *Service) agentTestDependencyError(ctx context.Context, userID int64, de
 }
 
 // List returns the caller's own runs, newest first.
+// ListSession 返回一段对话里的全部运行，时间正序。
+//
+// 只按 (调用者, session_id) 查，所以猜到别人的 session_id 也读不到别人的
+// 对话；一个陌生的 id 得到的是空列表而不是 404——它可能是前端自己刚生成、
+// 还没跑过任何一次运行的新会话。
+func (s *Service) ListSession(ctx context.Context, userID int64, sessionID string) ([]Run, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, domain.Invalid(domain.CodeValidationFailed, "invalid request").
+			WithDetails(domain.FieldError{Field: "session_id", Reason: "required"})
+	}
+	rows, err := s.runs.ListInSession(ctx, userID, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, domain.Internal(err)
+	}
+	if rows == nil {
+		rows = []Run{}
+	}
+	return rows, nil
+}
+
 func (s *Service) List(ctx context.Context, userID int64, q ListQuery) (domain.Page[Run], error) {
 	limit := domain.PageQuery{Limit: q.Limit}.Normalize().Limit
 	q.TriggeredBy, q.Limit = userID, limit+1

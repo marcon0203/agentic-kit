@@ -619,6 +619,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 一段对话里的全部运行
+         * @description 按时间正序返回。一次运行只是一问一答，一段对话是它们串起来的那条线——
+         *     前端刷新页面后靠这个列表重建整段对话，再按各自的 run_id 去
+         *     `/runs/{id}/stream` 取事件。
+         *
+         *     只返回调用者自己的运行，所以猜到别人的 session_id 也读不到别人的对话。
+         *     没跑过任何运行的会话返回空数组而不是 404：它可能是前端刚生成、还没发出
+         *     第一条消息的新会话。
+         */
+        get: operations["listSessionRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/agent-test": {
         parameters: {
             query?: never;
@@ -2023,6 +2049,11 @@ export interface components {
         RunSummary: {
             /** @example run-9e67931d5c38024e */
             run_id: string;
+            /**
+             * @description 这次运行所属的那段对话；把它带回下一次 POST 就能续上上下文。历史运行可能没有。
+             * @example sess-9e67931d5c38024e
+             */
+            session_id?: string;
             bundle_ref: string;
             bundle_version?: string;
             status: components["schemas"]["RunStatus"];
@@ -3874,6 +3905,13 @@ export interface operations {
                     input: {
                         [key: string]: unknown;
                     };
+                    /**
+                     * @description 接上已有的一段对话。一段对话由多次运行组成——每发一条消息是一次运行，
+                     *     但它们共享同一个 ADK 会话，模型因此看得到上文。留空则新开一段，
+                     *     用哪个 id 会在响应的 `session_id` 里回传，下一条消息带回来即可续上。
+                     * @example sess-9e67931d5c38024e
+                     */
+                    session_id?: string;
                 };
             };
         };
@@ -3902,6 +3940,32 @@ export interface operations {
             };
         };
     };
+    listSessionRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["RunSummary"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
     createAgentTestRun: {
         parameters: {
             query?: never;
@@ -3920,6 +3984,13 @@ export interface operations {
                     input?: {
                         [key: string]: unknown;
                     };
+                    /**
+                     * @description 接上已有的一段对话。一段对话由多次运行组成——每发一条消息是一次运行，
+                     *     但它们共享同一个 ADK 会话，模型因此看得到上文。留空则新开一段，
+                     *     用哪个 id 会在响应的 `session_id` 里回传，下一条消息带回来即可续上。
+                     * @example sess-9e67931d5c38024e
+                     */
+                    session_id?: string;
                 };
             };
         };
@@ -4902,7 +4973,7 @@ export interface operations {
                      * @example deepseek
                      */
                     template: string;
-                    /** @description URL 或 data: URI */
+                    /** @description lobehub 图标名（如 kimi、zhipu）、http(s) URL 或 data: URI */
                     icon?: string;
                     /** @description 留空沿用模板默认地址；模板没有默认地址时必填 */
                     base_url?: string;

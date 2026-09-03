@@ -38,7 +38,16 @@ func (s *stubRunRepo) Get(_ context.Context, runID string) (run.Run, error) {
 	return r, nil
 }
 
-func (s *stubRunRepo) ListPage(context.Context, run.ListQuery) ([]run.Run, error)     { return nil, nil }
+func (s *stubRunRepo) ListPage(context.Context, run.ListQuery) ([]run.Run, error) { return nil, nil }
+func (s *stubRunRepo) ListInSession(_ context.Context, triggeredBy int64, sessionID string) ([]run.Run, error) {
+	var out []run.Run
+	for _, r := range s.runs {
+		if r.TriggeredBy == triggeredBy && r.SessionID == sessionID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
 func (s *stubRunRepo) UpdateStatus(context.Context, string, run.Status, string) error { return nil }
 func (s *stubRunRepo) MarkCancelRequested(context.Context, string) error              { return nil }
 func (s *stubRunRepo) AddUsage(context.Context, string, int64, float64) error         { return nil }
@@ -87,7 +96,7 @@ type stubOrchestrator struct{}
 // soon as a test actually reaches a launch.
 type stubExecution struct{}
 
-func (stubExecution) Start(int64, map[string]any, run.Limits) {}
+func (stubExecution) Start(int64, string, map[string]any, run.Limits) {}
 
 func (stubOrchestrator) Prepare(context.Context, string, run.ResolvedBundle, map[string]run.GateConfig) (run.Execution, error) {
 	return stubExecution{}, nil
@@ -117,7 +126,8 @@ func (stubAudit) Record(context.Context, *int64, string, string, string, map[str
 
 type stubIDs struct{}
 
-func (stubIDs) NewRunID() (string, error) { return "run-0000000000000001", nil }
+func (stubIDs) NewRunID() (string, error)     { return "run-0000000000000001", nil }
+func (stubIDs) NewSessionID() (string, error) { return "sess-0000000000000001", nil }
 
 type runFixture struct {
 	handlers *RunHandlers

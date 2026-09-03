@@ -55,6 +55,16 @@ func (f *fakeRepo) ListPage(_ context.Context, q run.ListQuery) ([]run.Run, erro
 	return rows, nil
 }
 
+func (f *fakeRepo) ListInSession(_ context.Context, triggeredBy int64, sessionID string) ([]run.Run, error) {
+	var out []run.Run
+	for _, r := range f.list {
+		if r.TriggeredBy == triggeredBy && r.SessionID == sessionID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) UpdateStatus(_ context.Context, runID string, status run.Status, _ string) error {
 	f.statuses[runID] = status
 	return nil
@@ -132,10 +142,13 @@ type fakeOrchestrator struct {
 	// 草稿试运行 test asserts on, since the whole point there is *what* got
 	// compiled, not just that something did.
 	preparedBundle run.ResolvedBundle
-	started        chan struct{}
-	cancelled      []string
-	gateConfigs    map[string]run.GateConfig
-	limits         run.Limits
+	// sessionID 是最后一次 Start 收到的会话 id——"连着发消息共享同一段对
+	// 话"这件事就是在这里断言的。
+	sessionID   string
+	started     chan struct{}
+	cancelled   []string
+	gateConfigs map[string]run.GateConfig
+	limits      run.Limits
 }
 
 func (f *fakeOrchestrator) Prepare(_ context.Context, _ string, b run.ResolvedBundle, gates map[string]run.GateConfig) (run.Execution, error) {
@@ -155,8 +168,9 @@ func (f *fakeOrchestrator) Cancel(runID string) bool {
 
 type fakeExecution struct{ owner *fakeOrchestrator }
 
-func (x *fakeExecution) Start(_ int64, _ map[string]any, limits run.Limits) {
+func (x *fakeExecution) Start(_ int64, sessionID string, _ map[string]any, limits run.Limits) {
 	x.owner.limits = limits
+	x.owner.sessionID = sessionID
 	if x.owner.started != nil {
 		close(x.owner.started)
 	}
@@ -225,6 +239,9 @@ func (f *fakeAudit) Record(_ context.Context, actor *int64, action, _, _ string,
 type fixedIDs struct{ id string }
 
 func (f fixedIDs) NewRunID() (string, error) { return f.id, nil }
+
+// NewSessionID 固定值，好让"没传 session_id 就自己开一段"这条路径可断言。
+func (fixedIDs) NewSessionID() (string, error) { return "sess-generated", nil }
 
 // harness bundles every fake so a test can reach into whichever one it is
 // making an assertion about.
@@ -871,5 +888,113 @@ func TestStart_ProviderMissing_StaysGeneric(t *testing.T) {
 	}
 	if strings.Contains(de.Message, "my-deepseek") {
 		t.Fatalf("正式运行的报错不该泄漏 Bundle 用了哪个提供商: %s", de.Message)
+	}
+}
+
+// ── 多轮对话 ─────────────────────────────────────────────────────────
+
+// 没带 session_id 就开一段新会话，并把 id 回给调用方——前端拿它续下一条。
+func TestStart_WithoutSessionIDOpensANewOne(t *testing.T) {
+	h := newHarness()
+	h.orch.started = make(chan struct{})
+	h.resolver.resolved = run.ResolvedBundle{BundleID: 7, Ref: "content-pipeline", Version: "2.1"}
+
+	created, err := h.svc.Start(context.Background(), 1, run.StartCommand{BundleRef: "content-pipeline"})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	select {
+	case <-h.orch.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("execution 没被启动")
+	}
+
+	if created.SessionID != "sess-generated" {
+		t.Fatalf("响应里应当带上新开的会话 id，得到 %q", created.SessionID)
+	}
+	if h.orch.sessionID != "sess-generated" {
+		t.Fatalf("会话 id 要传给 execution，得到 %q", h.orch.sessionID)
+	}
+}
+
+// 带了 session_id 就接上那段对话——这条是"连着发消息模型记得上文"的地基。
+// 以前这里传的是 runID，每次运行都是全新会话。
+func TestStart_WithSessionIDContinuesThatConversation(t *testing.T) {
+	h := newHarness()
+	h.orch.started = make(chan struct{})
+	h.resolver.resolved = run.ResolvedBundle{BundleID: 7, Ref: "content-pipeline", Version: "2.1"}
+
+	created, err := h.svc.Start(context.Background(), 1, run.StartCommand{
+		BundleRef: "content-pipeline", SessionID: "sess-已有的",
+	})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	select {
+	case <-h.orch.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("execution 没被启动")
+	}
+
+	if created.SessionID != "sess-已有的" || h.orch.sessionID != "sess-已有的" {
+		t.Fatalf("应当接上传进来的会话，run=%q execution=%q", created.SessionID, h.orch.sessionID)
+	}
+	if h.orch.sessionID == created.ID {
+		t.Fatal("会话 id 不该退化成 runID")
+	}
+}
+
+// 试运行面板走的是另一条入口，同样要能续上——用户在里面连着问几句是常态。
+func TestStartAgentTest_CarriesTheSessionThrough(t *testing.T) {
+	h := newHarness()
+	h.orch.started = make(chan struct{})
+	svc := h.svc.WithAgentTestRuns(&fakeTestBundles{})
+
+	created, err := svc.StartAgentTest(context.Background(), 1, run.AgentTestCommand{
+		Definition: map[string]any{"agent": "writer"},
+		Input:      map[string]any{"message": "接着上一句说"},
+		SessionID:  "sess-已有的",
+	})
+	if err != nil {
+		t.Fatalf("start agent test: %v", err)
+	}
+	select {
+	case <-h.orch.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("execution 没被启动")
+	}
+	if created.SessionID != "sess-已有的" || h.orch.sessionID != "sess-已有的" {
+		t.Fatalf("试运行也要接上会话，run=%q execution=%q", created.SessionID, h.orch.sessionID)
+	}
+}
+
+// 一段对话由多次运行组成；刷新页面后前端靠这个列表把整段重建出来。别人的
+// 对话读不到——查询按 (调用者, session_id) 走。
+func TestListSession_ReturnsOnlyThisUsersRunsInThatConversation(t *testing.T) {
+	h := newHarness()
+	h.repo.list = []run.Run{
+		{ID: "run-1", TriggeredBy: 1, SessionID: "sess-a"},
+		{ID: "run-2", TriggeredBy: 1, SessionID: "sess-a"},
+		{ID: "run-3", TriggeredBy: 1, SessionID: "sess-b"},
+		{ID: "run-4", TriggeredBy: 2, SessionID: "sess-a"},
+	}
+
+	rows, err := h.svc.ListSession(context.Background(), 1, "sess-a")
+	if err != nil {
+		t.Fatalf("list session: %v", err)
+	}
+	if len(rows) != 2 || rows[0].ID != "run-1" || rows[1].ID != "run-2" {
+		t.Fatalf("只该拿到自己在 sess-a 里的两次运行，得到 %+v", rows)
+	}
+
+	if _, err := h.svc.ListSession(context.Background(), 1, "  "); err == nil {
+		t.Fatal("空 session_id 应当报字段错误")
+	}
+
+	// 陌生 id 是空列表而不是 404：它可能是前端刚生成、还没跑过任何运行的
+	// 新会话。
+	rows, err = h.svc.ListSession(context.Background(), 1, "sess-还没跑过")
+	if err != nil || len(rows) != 0 {
+		t.Fatalf("陌生会话应当是空列表，得到 %+v / %v", rows, err)
 	}
 }

@@ -1315,6 +1315,13 @@ paths:
                   additionalProperties: true
                   examples:
                     - { requirements: '做一个待办事项 Web 应用' }
+                session_id:
+                  type: string
+                  description: |
+                    接上已有的一段对话。一段对话由多次运行组成——每发一条消息是一次运行，
+                    但它们共享同一个 ADK 会话，模型因此看得到上文。留空则新开一段，
+                    用哪个 id 会在响应的 `session_id` 里回传，下一条消息带回来即可续上。
+                  examples: ['sess-9e67931d5c38024e']
       responses:
         '201':
           description: 创建成功
@@ -1333,6 +1340,41 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
+
+  /sessions/{id}/runs:
+    get:
+      tags: [Runs]
+      summary: 一段对话里的全部运行
+      description: |
+        按时间正序返回。一次运行只是一问一答，一段对话是它们串起来的那条线——
+        前端刷新页面后靠这个列表重建整段对话，再按各自的 run_id 去
+        `/runs/{id}/stream` 取事件。
+
+        只返回调用者自己的运行，所以猜到别人的 session_id 也读不到别人的对话。
+        没跑过任何运行的会话返回空数组而不是 404：它可能是前端刚生成、还没发出
+        第一条消息的新会话。
+      operationId: listSessionRuns
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          examples: { default: { value: 'sess-9e67931d5c38024e' } }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/RunSummary' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /runs/agent-test:
     post:
@@ -1359,6 +1401,13 @@ paths:
                   type: object
                   description: 初始输入，写入 shared_state
                   additionalProperties: true
+                session_id:
+                  type: string
+                  description: |
+                    接上已有的一段对话。一段对话由多次运行组成——每发一条消息是一次运行，
+                    但它们共享同一个 ADK 会话，模型因此看得到上文。留空则新开一段，
+                    用哪个 id 会在响应的 `session_id` 里回传，下一条消息带回来即可续上。
+                  examples: ['sess-9e67931d5c38024e']
       responses:
         '201':
           description: 已启动
@@ -3918,6 +3967,10 @@ components:
       required: [run_id, bundle_ref, status, created_at]
       properties:
         run_id: { type: string, examples: ['run-9e67931d5c38024e'] }
+        session_id:
+          type: string
+          description: 这次运行所属的那段对话；把它带回下一次 POST 就能续上上下文。历史运行可能没有。
+          examples: ['sess-9e67931d5c38024e']
         bundle_ref: { type: string }
         bundle_version: { type: string }
         status: { $ref: '#/components/schemas/RunStatus' }

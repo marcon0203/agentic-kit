@@ -18,6 +18,10 @@ type Repository interface {
 	Create(ctx context.Context, r Run) (Run, error)
 	Get(ctx context.Context, runID string) (Run, error)
 	ListPage(ctx context.Context, q ListQuery) ([]Run, error)
+	// ListInSession 返回一段对话里的全部运行，时间正序。前端刷新页面后靠
+	// 它把整段对话重建出来——一段对话由多次运行组成，每次运行只对应其中
+	// 一问一答。
+	ListInSession(ctx context.Context, triggeredBy int64, sessionID string) ([]Run, error)
 	UpdateStatus(ctx context.Context, runID string, status Status, errMsg string) error
 	MarkCancelRequested(ctx context.Context, runID string) error
 	AddUsage(ctx context.Context, runID string, tokens int64, costUSD float64) error
@@ -116,7 +120,10 @@ type Execution interface {
 	// Start drives the run to completion. It blocks, so the service
 	// launches it in its own goroutine — POST /runs returns as soon as the
 	// run_id exists ("异步启动，立即返回 run_id").
-	Start(triggeredBy int64, input map[string]any, limits Limits)
+	//
+	// sessionID 是这次运行所属的那段对话。多次运行共享同一个 sessionID，
+	// 模型才看得到上文——在这之前它直接取 runID，等于每条消息都失忆。
+	Start(triggeredBy int64, sessionID string, input map[string]any, limits Limits)
 }
 
 // GateRepository persists human gates.

@@ -276,7 +276,7 @@ type execution struct {
 // Every persistence call uses a fresh background context rather than the
 // run's own: cancelling a run must still record why it stopped, and a
 // cancelled context would silently drop exactly the events that explain it.
-func (x *execution) Start(triggeredBy int64, input map[string]any, limits run.Limits) {
+func (x *execution) Start(triggeredBy int64, sessionID string, input map[string]any, limits run.Limits) {
 	e := x.engine
 	ctx := context.Background()
 	if limits.MaxWallClockSeconds > 0 {
@@ -297,6 +297,10 @@ func (x *execution) Start(triggeredBy int64, input map[string]any, limits run.Li
 		x.finish(persist, run.StatusFailed, err.Error())
 		return
 	}
+	// 会话落库，替掉 ADKRunner 默认的 session.InMemoryService()。这是
+	// "同一段对话连得起来"的那一半——另一半是上面 SessionID 传的是会话
+	// id 而不是 runID。两者缺一，模型都只能看见当前这一条消息。
+	runner.SessionService = adk.NewSessionService(postgres.NewADKSessionStore(e.queries))
 	// Real, persisted memory when the owner has registered a "memory"
 	// resource — otherwise ADKRunner falls back to its own process-local
 	// default, same as it always did before 记忆库 existed.
@@ -325,7 +329,11 @@ func (x *execution) Start(triggeredBy int64, input map[string]any, limits run.Li
 	var usage run.Usage
 	breached := ""
 
-	_, runErr := runner.Run(ctx, adk.AgentInput{UserID: fmt.Sprint(triggeredBy), SessionID: x.runID, Message: string(msg)},
+	// SessionID 用的是这段**对话**的 id，不是 runID。这条线以前接的是
+	// runID，等于每次运行都是全新会话，模型看不到上一条消息说了什么；配
+	// 上持久化的 session.Service（NewSessionService），同一段对话的多次
+	// 运行现在能接上上文，进程重启也还在。
+	_, runErr := runner.Run(ctx, adk.AgentInput{UserID: fmt.Sprint(triggeredBy), SessionID: sessionID, Message: string(msg)},
 		func(ev adk.Event) {
 			payload := map[string]any{}
 			if b, err := json.Marshal(ev.Payload); err == nil {

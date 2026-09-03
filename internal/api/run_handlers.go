@@ -30,6 +30,7 @@ func NewRunHandlers(svc *run.Service) *RunHandlers {
 
 type runSummaryDTO struct {
 	RunID         string     `json:"run_id"`
+	SessionID     string     `json:"session_id,omitempty"`
 	BundleRef     string     `json:"bundle_ref"`
 	BundleVersion string     `json:"bundle_version"`
 	Status        string     `json:"status"`
@@ -53,7 +54,7 @@ type runDetailDTO struct {
 
 func toRunSummaryDTO(r run.Run) runSummaryDTO {
 	dto := runSummaryDTO{
-		RunID: r.ID, BundleRef: r.BundleRef, BundleVersion: r.BundleVersion,
+		RunID: r.ID, SessionID: r.SessionID, BundleRef: r.BundleRef, BundleVersion: r.BundleVersion,
 		Status: string(r.Status), CreatedAt: r.CreatedAt, FinishedAt: r.FinishedAt,
 	}
 	if r.Error != "" {
@@ -69,6 +70,9 @@ type createRunRequest struct {
 	BundleRef     string         `json:"bundle_ref"`
 	BundleVersion string         `json:"bundle_version"`
 	Input         map[string]any `json:"input"`
+	// SessionID 接上已有的一段对话，留空就开一段新的。响应里会回传这次用
+	// 的 session_id，下一条消息带回来即可续上。
+	SessionID string `json:"session_id"`
 }
 
 // Create handles POST /runs. The run starts asynchronously — openapi's
@@ -89,6 +93,7 @@ func (h *RunHandlers) Create(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.svc.Start(r.Context(), userID, run.StartCommand{
 		BundleRef: req.BundleRef, BundleVersion: req.BundleVersion, Input: req.Input,
+		SessionID: req.SessionID,
 	})
 	if err != nil {
 		writeDomainErr(w, r, err)
@@ -117,7 +122,7 @@ func (h *RunHandlers) CreateAgentTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created, err := h.svc.StartAgentTest(r.Context(), userID, run.AgentTestCommand{
-		Definition: req.Definition, Input: req.Input,
+		Definition: req.Definition, Input: req.Input, SessionID: req.SessionID,
 	})
 	if err != nil {
 		writeDomainErr(w, r, err)
@@ -129,6 +134,30 @@ func (h *RunHandlers) CreateAgentTest(w http.ResponseWriter, r *http.Request) {
 type createAgentTestRunRequest struct {
 	Definition map[string]any `json:"definition"`
 	Input      map[string]any `json:"input"`
+	SessionID  string         `json:"session_id"`
+}
+
+// ── Session ──────────────────────────────────────────────────────────
+
+// ListSession handles GET /sessions/{id}/runs — 一段对话里的全部运行，时
+// 间正序。前端刷新页面后靠它把整段对话重建出来：一次运行只是一问一答，
+// 一段对话是它们串起来的那条线。
+func (h *RunHandlers) ListSession(w http.ResponseWriter, r *http.Request) {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
+		return
+	}
+	rows, err := h.svc.ListSession(r.Context(), userID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	items := make([]runSummaryDTO, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toRunSummaryDTO(row))
+	}
+	writeJSON(w, r, http.StatusOK, items)
 }
 
 // ── List ─────────────────────────────────────────────────────────────

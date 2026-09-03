@@ -1,6 +1,6 @@
 -- name: CreateBundleRun :one
-INSERT INTO bundle_runs (id, bundle_id, triggered_by, via_listing_id, status)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO bundle_runs (id, bundle_id, triggered_by, via_listing_id, status, session_id)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: GetBundleRun :one
@@ -91,3 +91,13 @@ ORDER BY id ASC;
 SELECT * FROM bundle_run_events
 WHERE run_id = $1 AND id > $2 AND is_internal = false
 ORDER BY id ASC;
+
+-- name: ListBundleRunsInSession :many
+-- 一段对话里的全部运行，按时间正序——前端刷新页面后靠它把整段对话重建
+-- 出来。会话按 (triggered_by, session_id) 定位，猜到别人的 session_id 也
+-- 读不到别人的对话。
+SELECT br.*, b.bundle_ref AS bundle_ref, b.version AS bundle_version
+FROM bundle_runs br
+JOIN bundles b ON b.id = br.bundle_id
+WHERE br.triggered_by = $1 AND br.session_id = $2
+ORDER BY br.created_at ASC;

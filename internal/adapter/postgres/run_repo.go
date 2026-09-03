@@ -27,6 +27,7 @@ func (r *RunRepository) Create(ctx context.Context, in run.Run) (run.Run, error)
 	row, err := r.q.CreateBundleRun(ctx, store.CreateBundleRunParams{
 		ID: in.ID, BundleID: in.BundleID, TriggeredBy: in.TriggeredBy,
 		ViaListingID: viaListingID, Status: string(in.Status),
+		SessionID: pgtype.Text{String: in.SessionID, Valid: in.SessionID != ""},
 	})
 	if err != nil {
 		return run.Run{}, err
@@ -63,6 +64,28 @@ func (r *RunRepository) ListPage(ctx context.Context, q run.ListQuery) ([]run.Ru
 			ID: row.ID, BundleID: row.BundleID, TriggeredBy: row.TriggeredBy, ViaListingID: row.ViaListingID,
 			Status: row.Status, Error: row.Error, SharedState: row.SharedState, TotalTokens: row.TotalTokens,
 			CostUsd: row.CostUsd, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt,
+			SessionID: row.SessionID,
+		})
+		item.BundleRef, item.BundleVersion = row.BundleRef, row.BundleVersion
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+func (r *RunRepository) ListInSession(ctx context.Context, triggeredBy int64, sessionID string) ([]run.Run, error) {
+	rows, err := r.q.ListBundleRunsInSession(ctx, store.ListBundleRunsInSessionParams{
+		TriggeredBy: triggeredBy, SessionID: pgtype.Text{String: sessionID, Valid: true},
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]run.Run, 0, len(rows))
+	for _, row := range rows {
+		item := toDomainRun(store.BundleRun{
+			ID: row.ID, BundleID: row.BundleID, TriggeredBy: row.TriggeredBy, ViaListingID: row.ViaListingID,
+			Status: row.Status, Error: row.Error, SharedState: row.SharedState, TotalTokens: row.TotalTokens,
+			CostUsd: row.CostUsd, CreatedAt: row.CreatedAt, FinishedAt: row.FinishedAt,
+			SessionID: row.SessionID,
 		})
 		item.BundleRef, item.BundleVersion = row.BundleRef, row.BundleVersion
 		out = append(out, item)
@@ -104,6 +127,9 @@ func toDomainRun(row store.BundleRun) run.Run {
 	}
 	if row.Error.Valid {
 		out.Error = row.Error.String
+	}
+	if row.SessionID.Valid {
+		out.SessionID = row.SessionID.String
 	}
 	if row.FinishedAt.Valid {
 		t := row.FinishedAt.Time
