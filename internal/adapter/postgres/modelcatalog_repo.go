@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	"github.com/jackc/pgx/v5"
@@ -28,11 +29,36 @@ func toDomainProvider(id int64, key, displayName string, icon, baseURL, template
 	}
 }
 
+// paramsToDB 把参数取值编码成 JSONB。nil 和空 map 都落成 '{}'——列是 NOT
+// NULL，存 NULL 只会在读侧多一个分支。
+func paramsToDB(params map[string]any) []byte {
+	if len(params) == 0 {
+		return []byte("{}")
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return []byte("{}")
+	}
+	return raw
+}
+
+func paramsFromDB(raw []byte) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
+		return map[string]any{}
+	}
+	return out
+}
+
 func toDomainModel(row store.CatalogModel) modelcatalog.Model {
 	return modelcatalog.Model{
 		ID: row.ID, ProviderID: row.ProviderID, Model: row.Model, DisplayName: row.DisplayName,
 		Description: row.Description, Modality: modelcatalog.Modality(row.Modality),
 		Featured: row.Featured, Status: row.Status, CreatedAt: row.CreatedAt.Time,
+		Params: paramsFromDB(row.Params),
 	}
 }
 
@@ -60,7 +86,9 @@ func (r *ModelCatalogRepository) ListProviders(ctx context.Context) ([]modelcata
 	}
 	out := make([]modelcatalog.Provider, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Template, row.Status, row.CreatedAt, row.HasCredential))
+		p := toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Template, row.Status, row.CreatedAt, row.HasCredential)
+		p.Descriptor = row.Descriptor
+		out = append(out, p)
 	}
 	return out, nil
 }
@@ -73,7 +101,9 @@ func (r *ModelCatalogRepository) GetProvider(ctx context.Context, id int64) (mod
 		}
 		return modelcatalog.Provider{}, err
 	}
-	return toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Template, row.Status, row.CreatedAt, row.HasCredential), nil
+	p := toDomainProvider(row.ID, row.ProviderKey, row.DisplayName, row.Icon, row.BaseUrl, row.Template, row.Status, row.CreatedAt, row.HasCredential)
+	p.Descriptor = row.Descriptor
+	return p, nil
 }
 
 func (r *ModelCatalogRepository) SetProviderStatus(ctx context.Context, id int64, status int16) error {
@@ -101,10 +131,11 @@ func (r *ModelCatalogRepository) DeleteProvider(ctx context.Context, id int64) e
 	return r.q.DeleteCatalogProvider(ctx, id)
 }
 
-func (r *ModelCatalogRepository) CreateModel(ctx context.Context, providerID int64, model, displayName, description string, modality modelcatalog.Modality, featured bool) (modelcatalog.Model, error) {
+func (r *ModelCatalogRepository) CreateModel(ctx context.Context, in modelcatalog.NewModel) (modelcatalog.Model, error) {
 	row, err := r.q.CreateCatalogModel(ctx, store.CreateCatalogModelParams{
-		ProviderID: providerID, Model: model, DisplayName: displayName,
-		Description: description, Modality: string(modality), Featured: featured,
+		ProviderID: in.ProviderID, Model: in.Model, DisplayName: in.DisplayName,
+		Description: in.Description, Modality: string(in.Modality), Featured: in.Featured,
+		Params: paramsToDB(in.Params),
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -127,8 +158,23 @@ func (r *ModelCatalogRepository) ListModelsForProvider(ctx context.Context, prov
 	return out, nil
 }
 
+func (r *ModelCatalogRepository) GetModel(ctx context.Context, id int64) (modelcatalog.Model, error) {
+	row, err := r.q.GetCatalogModel(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return modelcatalog.Model{}, modelcatalog.ErrNotFound
+		}
+		return modelcatalog.Model{}, err
+	}
+	return toDomainModel(row), nil
+}
+
 func (r *ModelCatalogRepository) SetModelStatus(ctx context.Context, id int64, status int16) error {
 	return r.q.SetCatalogModelStatus(ctx, store.SetCatalogModelStatusParams{ID: id, Status: status})
+}
+
+func (r *ModelCatalogRepository) UpdateModelParams(ctx context.Context, id int64, params map[string]any) error {
+	return r.q.UpdateCatalogModelParams(ctx, store.UpdateCatalogModelParamsParams{ID: id, Params: paramsToDB(params)})
 }
 
 func (r *ModelCatalogRepository) DeleteModel(ctx context.Context, id int64) error {
@@ -162,6 +208,22 @@ func (r *ModelCatalogRepository) ListChannelDescriptors(ctx context.Context) ([]
 	out := make([]modelcatalog.ChannelDescriptor, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, modelcatalog.ChannelDescriptor{Key: row.ProviderKey, Descriptor: row.Descriptor})
+	}
+	return out, nil
+}
+
+// ListChannelModelParams 返回启用中提供商下每个模型的请求参数取值，和
+// ListChannelDescriptors 在同一次注册表重建里使用。
+func (r *ModelCatalogRepository) ListChannelModelParams(ctx context.Context) ([]modelcatalog.ChannelModelParams, error) {
+	rows, err := r.q.ListCatalogModelParams(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]modelcatalog.ChannelModelParams, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, modelcatalog.ChannelModelParams{
+			ProviderKey: row.ProviderKey, Model: row.Model, Params: paramsFromDB(row.Params),
+		})
 	}
 	return out, nil
 }

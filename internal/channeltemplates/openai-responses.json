@@ -28,6 +28,10 @@
     "driver": "bearer",
     "credential": "api_key"
   },
+  "request_params": [
+    {"name": "max_tokens", "label": "最大输出 tokens", "type": "int", "required": false, "min": 1, "max": 65536, "help": "选填，留空用厂商默认"},
+    {"name": "temperature", "label": "温度", "type": "number", "required": false, "min": 0, "max": 2}
+  ],
   "messages": {
     "system": "hoist",
     "content": "string",

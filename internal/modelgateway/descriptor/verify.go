@@ -17,11 +17,13 @@ type Fixture struct {
 	Request Request `json:"request"`
 
 	// ExpectHTTP 校验渲染出的请求。Body 是子集匹配——只断言你关心的字
-	// 段，加一个可选参数不会把所有 fixture 都弄失败。
+	// 段，加一个可选参数不会把所有 fixture 都弄失败。BodyAbsent 是它的
+	// 反面：断言某些键**不该**出现，用来锁住"零值不静默兜底"这类语义。
 	ExpectHTTP *struct {
-		Method string         `json:"method"`
-		Path   string         `json:"path"`
-		Body   map[string]any `json:"body"`
+		Method     string         `json:"method"`
+		Path       string         `json:"path"`
+		Body       map[string]any `json:"body"`
+		BodyAbsent []string       `json:"body_absent"`
 	} `json:"expect_http"`
 
 	CompleteResponse json.RawMessage `json:"complete_response"`
@@ -70,6 +72,11 @@ func (d *Descriptor) verifyOne(f Fixture) []string {
 			}
 			body, _ := built.Body.(map[string]any)
 			problems = append(problems, subsetDiff("body", f.ExpectHTTP.Body, body)...)
+			for _, key := range f.ExpectHTTP.BodyAbsent {
+				if _, present := body[key]; present {
+					problems = append(problems, fmt.Sprintf("body.%s 不该出现（期望零值被省略），得到 %v", key, body[key]))
+				}
+			}
 		}
 	}
 

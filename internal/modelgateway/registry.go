@@ -60,6 +60,11 @@ var defaultCredentialFields = []CredentialFieldSpec{
 type registry struct {
 	mu    sync.RWMutex
 	items []ProviderDefinition
+	// modelParams 是每渠道每模型的请求参数取值（provider -> model ->
+	// params）。和 items 一样由管理员的写操作触发整体重建；两个 Set 分开
+	// 是因为数据来源不同（描述符快照 vs catalog_models.params），但同一次
+	// Reload 里先后调用，读侧按 provider+model 现查现用，不存在谁等谁。
+	modelParams map[string]map[string]map[string]any
 }
 
 var channels = &registry{}
@@ -76,6 +81,28 @@ func SetChannels(descriptors []*descriptor.Descriptor) {
 	channels.mu.Lock()
 	channels.items = items
 	channels.mu.Unlock()
+}
+
+// SetModelParams 整体替换模型参数表，来源是模型目录（catalog_models.params）。
+// 没有参数的模型不出现在表里——applyModelParams 对查不到的模型原样放行，
+// 是否缺必填参数由 descriptorClient 按渠道声明拦。
+func SetModelParams(params map[string]map[string]map[string]any) {
+	channels.mu.Lock()
+	channels.modelParams = params
+	channels.mu.Unlock()
+}
+
+// modelParamsFor 取一个模型的参数取值，没有就是 nil。
+func modelParamsFor(provider, model string) map[string]any {
+	channels.mu.RLock()
+	defer channels.mu.RUnlock()
+	if channels.modelParams == nil {
+		return nil
+	}
+	if models, ok := channels.modelParams[provider]; ok {
+		return models[model]
+	}
+	return nil
 }
 
 // descriptorProvider 把一份描述符转成 ProviderDefinition。Gateway、降级

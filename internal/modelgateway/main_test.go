@@ -17,6 +17,7 @@ var testChannelSpecs = []struct{ template, key, label, baseURL string }{
 	{"qwen", "qwen", "通义千问", ""},
 	{"zhipu", "zhipu", "智谱 GLM", ""},
 	{"openai-compatible", "custom", "自定义端点", "https://custom.test/v1"},
+	{"kimi-for-coding", "kimi", "Kimi For Coding", ""},
 }
 
 func instantiateTestChannels() ([]*descriptor.Descriptor, error) {

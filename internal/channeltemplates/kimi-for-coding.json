@@ -1,7 +1,7 @@
 {
   "descriptor_version": 1,
-  "id": "kimi-anthropic",
-  "label": "Kimi（Anthropic 兼容端点）",
+  "id": "kimi-for-coding",
+  "label": "Kimi For Coding",
   "wire": "anthropic.messages.v1",
   "description": "Kimi 开放平台的 Anthropic 兼容端点，线协议就是 Anthropic Messages，完整路径是 {base_url}/v1/messages。base_url 填 https://api.kimi.com/coding（不要带尾斜杠、也不要自己补 /v1）。\n\n这里最容易踩的是选错模板：这个地址长得像个普通 OpenAI 端点，但它不认 /chat/completions——拿「OpenAI 兼容端点」模板去接会一路 404。鉴权用 Authorization: Bearer（不是 Anthropic 官方的 x-api-key）。\n\n价格表留空，成本按 0 记，token 数照常。",
   "capabilities": [
@@ -28,6 +28,10 @@
     "driver": "bearer",
     "credential": "api_key"
   },
+  "request_params": [
+    {"name": "max_tokens", "label": "最大输出 tokens", "type": "int", "required": true, "min": 1, "max": 65536, "default": 8192, "help": "Anthropic Messages 协议必填，按模型输出上限填写"},
+    {"name": "temperature", "label": "温度", "type": "number", "required": false, "min": 0, "max": 2}
+  ],
   "messages": {
     "system": "hoist",
     "content": "parts",

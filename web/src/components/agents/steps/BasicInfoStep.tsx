@@ -89,7 +89,7 @@ export function BasicInfoStep({ form, set, modelsForProvider, catalog, isEdit }:
             catalog={catalog}
             value={form.fallback}
             onChange={(v) => set('fallback', v)}
-            exclude={form.model ? `${form.provider}/${form.model}` : undefined}
+            exclude={form.modelName ? `${form.provider}/${form.modelName}` : undefined}
           />
         </Field>
       </div>

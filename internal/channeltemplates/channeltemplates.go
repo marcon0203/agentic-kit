@@ -30,13 +30,14 @@ var files embed.FS
 
 // Template 是模板的对外形状：管理员在前端看到的选项。
 type Template struct {
-	ID           string                       `json:"id"`
-	Label        string                       `json:"label"`
-	Description  string                       `json:"description"`
-	Wire         string                       `json:"wire"`
-	BaseURL      string                       `json:"base_url"`
-	Capabilities []string                     `json:"capabilities"`
-	Credentials  []descriptor.CredentialField `json:"credentials"`
+	ID            string                       `json:"id"`
+	Label         string                       `json:"label"`
+	Description   string                       `json:"description"`
+	Wire          string                       `json:"wire"`
+	BaseURL       string                       `json:"base_url"`
+	Capabilities  []string                     `json:"capabilities"`
+	Credentials   []descriptor.CredentialField `json:"credentials"`
+	RequestParams []descriptor.RequestParam    `json:"request_params"`
 }
 
 // List 返回全部模板，按 id 排序。每份模板在这里都会被完整加载 + 跑一遍
@@ -56,6 +57,7 @@ func List() ([]Template, error) {
 		out = append(out, Template{
 			ID: d.ID, Label: d.Label, Description: d.Description, Wire: d.Wire,
 			BaseURL: d.BaseURL, Capabilities: d.Capabilities, Credentials: d.Credentials,
+			RequestParams: d.RequestParams,
 		})
 	}
 	return out, nil

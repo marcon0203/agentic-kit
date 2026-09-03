@@ -1222,8 +1222,8 @@ export interface paths {
         delete: operations["deleteCatalogModel"];
         options?: never;
         head?: never;
-        /** 启用/禁用 Model，管理员 */
-        patch: operations["updateCatalogModelStatus"];
+        /** 启用/禁用 Model 或更新其请求参数，管理员 */
+        patch: operations["updateCatalogModel"];
         trace?: never;
     };
     "/features": {
@@ -1843,6 +1843,24 @@ export interface components {
                 label?: string;
                 required?: boolean;
             }[];
+            /** @description 这个线协议的 complete 请求要收的模型级参数，添加模型表单按它渲染 */
+            request_params?: components["schemas"]["ModelRequestParam"][];
+        };
+        /** @description 线协议声明的模型级请求参数（形状）。取值存在每个模型上（CatalogModel.params）， 调用时由网关注入。保留名 max_tokens / temperature 直接映射到请求字段， 其它名字作为渠道私有参数进入请求体。 */
+        ModelRequestParam: {
+            /** @example max_tokens */
+            name: string;
+            /** @example 最大输出 tokens */
+            label?: string;
+            /** @enum {string} */
+            type: "int" | "number";
+            /** @description 线协议必填（如 Anthropic Messages 的 max_tokens）；没配的调用在发出前就会被拦下 */
+            required: boolean;
+            min?: number;
+            max?: number;
+            /** @description 仅作添加模型表单的预填值，可改；运行时不做静默兜底 */
+            default?: number;
+            help?: string;
         };
         ModelProviderSpec: {
             name: components["schemas"]["ProviderName"];
@@ -2261,6 +2279,8 @@ export interface components {
             created_at: string;
             /** @description 是否已登记管理员统一凭证（api_key 永不通过接口返回，只有这个布尔标记） */
             has_credential: boolean;
+            /** @description 从落库的描述符快照解析出的模型级参数声明，添加/编辑模型表单按它渲染 */
+            request_params?: components["schemas"]["ModelRequestParam"][];
         };
         CatalogModel: {
             id: string;
@@ -2274,6 +2294,10 @@ export interface components {
             status: components["schemas"]["Status"];
             /** Format: date-time */
             created_at: string;
+            /** @description 模型级请求参数的取值（形状见所属提供商的 request_params），调用时注入 */
+            params?: {
+                [key: string]: number;
+            };
         };
         /** @description 一个按钮/操作对应的固定权限，由迁移脚本预置，不能通过接口创建 */
         Permission: {
@@ -5060,6 +5084,10 @@ export interface operations {
                     description?: string;
                     modality: components["schemas"]["CatalogModality"];
                     featured?: boolean;
+                    /** @description 模型级请求参数取值；线协议必填的参数（如 Anthropic 的 max_tokens）在这一步收齐，缺失返回 422 */
+                    params?: {
+                        [key: string]: number;
+                    };
                 };
             };
         };
@@ -5120,7 +5148,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
-    updateCatalogModelStatus: {
+    updateCatalogModel: {
         parameters: {
             query?: never;
             header?: never;
@@ -5133,7 +5161,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    status: components["schemas"]["Status"];
+                    status?: components["schemas"]["Status"];
+                    /** @description 整体替换该模型的参数取值；传空对象表示清掉全部参数（清掉必填参数会被 422 拦下） */
+                    params?: {
+                        [key: string]: number;
+                    };
                 };
             };
         };

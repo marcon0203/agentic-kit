@@ -11,6 +11,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/channeltemplates"
 	"github.com/marcon0203/agentic-kit/internal/domain"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcatalog"
+	descriptortype "github.com/marcon0203/agentic-kit/internal/modelgateway/descriptor"
 )
 
 // ModelCatalogAdminHandlers is 系统配置 → 模型提供商's HTTP transport:
@@ -36,26 +37,31 @@ type catalogProviderDTO struct {
 	Status        int16     `json:"status"`
 	CreatedAt     time.Time `json:"created_at"`
 	HasCredential bool      `json:"has_credential"`
+	// RequestParams 是这个渠道线协议声明的模型级参数（快照里的
+	// request_params）。添加模型表单按它渲染输入项——描述符原文不透出，
+	// 只透出表单需要的这一段。
+	RequestParams []descriptortype.RequestParam `json:"request_params"`
 }
 
 func toCatalogProviderDTO(p modelcatalog.Provider) catalogProviderDTO {
 	return catalogProviderDTO{
 		ID: strconv.FormatInt(p.ID, 10), Key: p.Key, DisplayName: p.DisplayName,
 		Icon: p.Icon, BaseURL: p.BaseURL, Template: p.Template, Status: p.Status, CreatedAt: p.CreatedAt,
-		HasCredential: p.HasCredential,
+		HasCredential: p.HasCredential, RequestParams: p.RequestParams(),
 	}
 }
 
 type catalogModelDTO struct {
-	ID          string    `json:"id"`
-	ProviderID  string    `json:"provider_id"`
-	Model       string    `json:"model"`
-	DisplayName string    `json:"display_name"`
-	Description string    `json:"description"`
-	Modality    string    `json:"modality"`
-	Featured    bool      `json:"featured"`
-	Status      int16     `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string         `json:"id"`
+	ProviderID  string         `json:"provider_id"`
+	Model       string         `json:"model"`
+	DisplayName string         `json:"display_name"`
+	Description string         `json:"description"`
+	Modality    string         `json:"modality"`
+	Featured    bool           `json:"featured"`
+	Status      int16          `json:"status"`
+	CreatedAt   time.Time      `json:"created_at"`
+	Params      map[string]any `json:"params"`
 }
 
 func toCatalogModelDTO(m modelcatalog.Model) catalogModelDTO {
@@ -63,6 +69,7 @@ func toCatalogModelDTO(m modelcatalog.Model) catalogModelDTO {
 		ID: strconv.FormatInt(m.ID, 10), ProviderID: strconv.FormatInt(m.ProviderID, 10),
 		Model: m.Model, DisplayName: m.DisplayName, Description: m.Description,
 		Modality: string(m.Modality), Featured: m.Featured, Status: m.Status, CreatedAt: m.CreatedAt,
+		Params: m.Params,
 	}
 }
 
@@ -236,6 +243,9 @@ type createCatalogModelRequest struct {
 	Description string `json:"description"`
 	Modality    string `json:"modality"`
 	Featured    bool   `json:"featured"`
+	// Params 是模型级请求参数的取值，形状按所属提供商声明的 request_params
+	// 校验（线协议必填的参数——如 Anthropic 的 max_tokens——在这一步收齐）。
+	Params map[string]any `json:"params"`
 }
 
 // CreateModel handles POST /model-catalog/providers/{id}/models.
@@ -253,7 +263,11 @@ func (h *ModelCatalogAdminHandlers) CreateModel(w http.ResponseWriter, r *http.R
 		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
 		return
 	}
-	created, err := h.svc.CreateModel(r.Context(), userID, providerID, req.Model, req.DisplayName, req.Description, modelcatalog.Modality(req.Modality), req.Featured)
+	created, err := h.svc.CreateModel(r.Context(), userID, modelcatalog.NewModel{
+		ProviderID: providerID, Model: req.Model, DisplayName: req.DisplayName,
+		Description: req.Description, Modality: modelcatalog.Modality(req.Modality),
+		Featured: req.Featured, Params: req.Params,
+	})
 	if err != nil {
 		writeDomainErr(w, r, err)
 		return
@@ -261,7 +275,15 @@ func (h *ModelCatalogAdminHandlers) CreateModel(w http.ResponseWriter, r *http.R
 	writeJSON(w, r, http.StatusCreated, toCatalogModelDTO(created))
 }
 
-// UpdateModelStatus handles PATCH /model-catalog/providers/{id}/models/{model_id}.
+type updateCatalogModelRequest struct {
+	Status *int16 `json:"status"`
+	// Params 用指针区分"这次请求没带 params"和"带了个空对象（清掉全部参
+	// 数）"。清掉后如果线协议有必填参数，UpdateModelParams 的校验会拦下。
+	Params *map[string]any `json:"params"`
+}
+
+// UpdateModel handles PATCH /model-catalog/providers/{id}/models/{model_id}:
+// status 和 params 是两个独立的可更新项，一次请求里带哪个改哪个。
 func (h *ModelCatalogAdminHandlers) UpdateModelStatus(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -271,14 +293,22 @@ func (h *ModelCatalogAdminHandlers) UpdateModelStatus(w http.ResponseWriter, r *
 	if !ok {
 		return
 	}
-	var req setStatusRequest
+	var req updateCatalogModelRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, r, http.StatusBadRequest, ErrValidationFailed, "malformed request body")
 		return
 	}
-	if err := h.svc.SetModelStatus(r.Context(), userID, modelID, req.Status == 1); err != nil {
-		writeDomainErr(w, r, err)
-		return
+	if req.Status != nil {
+		if err := h.svc.SetModelStatus(r.Context(), userID, modelID, *req.Status == 1); err != nil {
+			writeDomainErr(w, r, err)
+			return
+		}
+	}
+	if req.Params != nil {
+		if err := h.svc.UpdateModelParams(r.Context(), userID, modelID, *req.Params); err != nil {
+			writeDomainErr(w, r, err)
+			return
+		}
 	}
 	writeJSON(w, r, http.StatusOK, nil)
 }

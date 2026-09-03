@@ -51,6 +51,24 @@ func TestInstantiate_RendersACallableChannel(t *testing.T) {
 	}
 }
 
+// Anthropic 线协议的 max_tokens 是必填参数——快照里必须带着这份声明，落库
+// 的渠道才知道添加模型时要向管理员收哪些参数。
+func TestInstantiate_AnthropicTemplateCarriesRequiredParams(t *testing.T) {
+	d, _, err := Instantiate("kimi-for-coding", "kimi", "Kimi", "")
+	if err != nil {
+		t.Fatalf("实例化失败: %v", err)
+	}
+	var required bool
+	for _, p := range d.RequestParams {
+		if p.Name == "max_tokens" {
+			required = p.Required
+		}
+	}
+	if !required {
+		t.Errorf("kimi-for-coding 模板应把 max_tokens 声明为必填参数: %+v", d.RequestParams)
+	}
+}
+
 // 尾部斜杠会让拼出来的路径变成 //chat/completions，有些网关直接 404。
 func TestInstantiate_TrimsTrailingSlashFromBaseURL(t *testing.T) {
 	d, _, err := Instantiate("deepseek", "x", "X", "https://proxy.example.com/v1/")

@@ -25,11 +25,14 @@ func (Templates) Instantiate(templateID, key, label, baseURL string) ([]byte, er
 	return rendered, err
 }
 
-// ChannelSource 是 Reloader 从哪里读描述符快照——由 modelcatalog.Service
-// 实现（它的 Channels 方法不做权限判定：调用方是进程自己，不是某个用户的
-// 请求）。
+// ChannelSource 是 Reloader 从哪里读描述符快照和模型参数——由
+// modelcatalog.Service 实现（它的 Channels / ChannelModelParams 方法不做
+// 权限判定：调用方是进程自己，不是某个用户的请求）。
 type ChannelSource interface {
 	Channels(ctx context.Context) ([]ChannelRow, error)
+	// ChannelModelParams 返回每渠道每模型的请求参数取值。实现方读失败时
+	// 可以返回 nil——参数表丢了只是退回"没配参数"，渠道本身还可用。
+	ChannelModelParams(ctx context.Context) ([]ModelParamsRow, error)
 }
 
 // ChannelRow 与 modelcatalog.ChannelDescriptor 同形。这里重新声明一遍而不
@@ -38,6 +41,13 @@ type ChannelSource interface {
 type ChannelRow struct {
 	Key        string
 	Descriptor []byte
+}
+
+// ModelParamsRow 与 modelcatalog.ChannelModelParams 同形，理由同上。
+type ModelParamsRow struct {
+	ProviderKey string
+	Model       string
+	Params      map[string]any
 }
 
 // Reloader 实现 modelcatalog.ChannelReloader：从库里读全量启用中的描述符
@@ -70,6 +80,25 @@ func (r *Reloader) Reload(ctx context.Context) error {
 		descs = append(descs, d)
 	}
 	modelgateway.SetChannels(descs)
+
+	// 模型参数读失败不拦注册表更新——渠道描述符是"能不能调"的问题，参数
+	// 只是"怎么调"；后者退回空表（缺必填参数会在调用前被明确拦下），前者
+	// 卡住会让所有渠道一起消失。
+	params := map[string]map[string]map[string]any{}
+	if paramRows, err := r.source.ChannelModelParams(ctx); err != nil {
+		slog.Error("model_channel_params_load_failed", "err", err)
+	} else {
+		for _, row := range paramRows {
+			models, ok := params[row.ProviderKey]
+			if !ok {
+				models = map[string]map[string]any{}
+				params[row.ProviderKey] = models
+			}
+			models[row.Model] = row.Params
+		}
+	}
+	modelgateway.SetModelParams(params)
+
 	slog.Info("model_channels_loaded", "count", len(descs), "providers", modelgateway.ProviderNames())
 	return nil
 }

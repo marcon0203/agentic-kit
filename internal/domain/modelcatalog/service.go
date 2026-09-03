@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
+	descriptortype "github.com/marcon0203/agentic-kit/internal/modelgateway/descriptor"
 )
 
 var ErrNotFound = errors.New("modelcatalog: not found")
@@ -25,15 +26,23 @@ type Repository interface {
 	// provider. encryptedKey nil means "leave the stored key as-is".
 	SetProviderCredential(ctx context.Context, id int64, encryptedKey *string, baseURL string) error
 
-	CreateModel(ctx context.Context, providerID int64, model, displayName, description string, modality Modality, featured bool) (Model, error)
+	CreateModel(ctx context.Context, in NewModel) (Model, error)
 	ListModelsForProvider(ctx context.Context, providerID int64) ([]Model, error)
+	GetModel(ctx context.Context, id int64) (Model, error)
 	SetModelStatus(ctx context.Context, id int64, status int16) error
+	// UpdateModelParams 只改参数取值：status 和 params 是两种不同的管理动
+	// 作，合并成一条可空字段的更新反而要在调用侧区分"没传"和"清空"。
+	UpdateModelParams(ctx context.Context, id int64, params map[string]any) error
 	DeleteModel(ctx context.Context, id int64) error
 
 	ListPublic(ctx context.Context) ([]CatalogEntry, error)
 
 	// ListChannelDescriptors 返回全部**启用中**提供商的渠道描述符快照。
 	ListChannelDescriptors(ctx context.Context) ([]ChannelDescriptor, error)
+
+	// ListChannelModelParams 返回启用中提供商下每个模型的请求参数取值，
+	// 供网关注册表重建（和 ListChannelDescriptors 同一次 Reload 里用）。
+	ListChannelModelParams(ctx context.Context) ([]ChannelModelParams, error)
 }
 
 // ChannelDescriptor 是一个提供商的渠道描述符快照。
@@ -42,10 +51,22 @@ type ChannelDescriptor struct {
 	Descriptor []byte
 }
 
+// ChannelModelParams 是一个模型的请求参数取值，按渠道 + 模型名定位。
+type ChannelModelParams struct {
+	ProviderKey string
+	Model       string
+	Params      map[string]any
+}
+
 // Channels 是给渠道注册表重建用的读接口，不做权限判定——它的调用方是进程
 // 自己（启动时和写操作之后），不是某个用户的请求。
 func (s *Service) Channels(ctx context.Context) ([]ChannelDescriptor, error) {
 	return s.repo.ListChannelDescriptors(ctx)
+}
+
+// ChannelModelParams 同样是进程内部读，和 Channels 一对。
+func (s *Service) ChannelModelParams(ctx context.Context) ([]ChannelModelParams, error) {
+	return s.repo.ListChannelModelParams(ctx)
 }
 
 // ChannelTemplates 是协议模板的端口：把一个模板 + 管理员填的
@@ -73,6 +94,19 @@ type NewProvider struct {
 	BaseURL     string
 	Template    string
 	Descriptor  []byte
+}
+
+// NewModel 是在某个提供商下登记一个模型需要的全部输入。Params 的取值会按
+// 提供商描述符快照声明的 request_params 校验——线协议必填的参数（如
+// Anthropic 的 max_tokens）在添加模型时就要收齐，缺了落库的模型一调就 400。
+type NewModel struct {
+	ProviderID  int64
+	Model       string
+	DisplayName string
+	Description string
+	Modality    Modality
+	Featured    bool
+	Params      map[string]any
 }
 
 type AdminDirectory interface {
@@ -297,41 +331,56 @@ func (s *Service) SetProviderCredential(ctx context.Context, userID, providerID 
 }
 
 // CreateModel registers a model under a provider. Admin only.
-func (s *Service) CreateModel(ctx context.Context, userID, providerID int64, model, displayName, description string, modality Modality, featured bool) (Model, error) {
+func (s *Service) CreateModel(ctx context.Context, userID int64, in NewModel) (Model, error) {
 	if err := s.requireAccess(ctx, userID, PermModelCreate); err != nil {
 		return Model{}, err
 	}
-	if _, err := s.repo.GetProvider(ctx, providerID); err != nil {
+	provider, err := s.repo.GetProvider(ctx, in.ProviderID)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			return Model{}, domain.NotFound(domain.CodeCatalogProviderNotFound, "provider 不存在")
 		}
 		return Model{}, domain.Internal(err)
 	}
 
-	model = strings.TrimSpace(model)
-	displayName = strings.TrimSpace(displayName)
+	in.Model = strings.TrimSpace(in.Model)
+	in.DisplayName = strings.TrimSpace(in.DisplayName)
 	var fields []domain.FieldError
-	if model == "" {
+	if in.Model == "" {
 		fields = append(fields, domain.FieldError{Field: "model", Reason: "required"})
 	}
-	if displayName == "" {
+	if in.DisplayName == "" {
 		fields = append(fields, domain.FieldError{Field: "display_name", Reason: "required"})
 	}
-	if !modality.Valid() {
+	if !in.Modality.Valid() {
 		fields = append(fields, domain.FieldError{Field: "modality", Reason: "must be one of text, image, video, vision, embedding"})
 	}
+	fields = append(fields, paramFieldErrors(provider.RequestParams(), in.Params)...)
 	if len(fields) > 0 {
 		return Model{}, domain.Invalid(domain.CodeValidationFailed, "模型信息填得不完整").WithDetails(fields...)
 	}
 
-	created, err := s.repo.CreateModel(ctx, providerID, model, displayName, description, modality, featured)
+	created, err := s.repo.CreateModel(ctx, in)
 	if err != nil {
 		if errors.Is(err, ErrDuplicate) {
 			return Model{}, domain.Conflict(domain.CodeCatalogProviderKeyDup, "该 provider 下已存在同名模型")
 		}
 		return Model{}, domain.Internal(err)
 	}
+	// 模型参数属于网关运行时状态，落库后立即重建注册表。
+	s.reloadChannels(ctx)
 	return created, nil
+}
+
+// paramFieldErrors 按描述符声明的参数表校验取值，错误定位到 params.<name>
+// ——前端能把红字标到具体输入框上，而不是一句笼统的"参数不合法"。
+func paramFieldErrors(specs []descriptortype.RequestParam, params map[string]any) []domain.FieldError {
+	problems := descriptortype.ValidateParams(specs, params)
+	fields := make([]domain.FieldError, 0, len(problems))
+	for _, p := range problems {
+		fields = append(fields, domain.FieldError{Field: "params." + p.Name, Reason: p.Message})
+	}
+	return fields
 }
 
 // ListModelsForProvider returns every model under a provider, enabled or
@@ -358,6 +407,37 @@ func (s *Service) SetModelStatus(ctx context.Context, userID, modelID int64, ena
 	if err := s.repo.SetModelStatus(ctx, modelID, status); err != nil {
 		return domain.Internal(err)
 	}
+	s.reloadChannels(ctx)
+	return nil
+}
+
+// UpdateModelParams 更新一个模型的请求参数取值。重新走一遍和创建时相同
+// 的校验——管理员改出一份越界的参数，和创建时填错一样会在调用时炸。
+func (s *Service) UpdateModelParams(ctx context.Context, userID, modelID int64, params map[string]any) error {
+	if err := s.requireAccess(ctx, userID, PermModelCreate); err != nil {
+		return err
+	}
+	m, err := s.repo.GetModel(ctx, modelID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return domain.NotFound(domain.CodeCatalogModelNotFound, "model 不存在")
+		}
+		return domain.Internal(err)
+	}
+	provider, err := s.repo.GetProvider(ctx, m.ProviderID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return domain.NotFound(domain.CodeCatalogProviderNotFound, "provider 不存在")
+		}
+		return domain.Internal(err)
+	}
+	if fields := paramFieldErrors(provider.RequestParams(), params); len(fields) > 0 {
+		return domain.Invalid(domain.CodeValidationFailed, "模型参数不合法").WithDetails(fields...)
+	}
+	if err := s.repo.UpdateModelParams(ctx, modelID, params); err != nil {
+		return domain.Internal(err)
+	}
+	s.reloadChannels(ctx)
 	return nil
 }
 
@@ -368,6 +448,7 @@ func (s *Service) DeleteModel(ctx context.Context, userID, modelID int64) error 
 	if err := s.repo.DeleteModel(ctx, modelID); err != nil {
 		return domain.Internal(err)
 	}
+	s.reloadChannels(ctx)
 	return nil
 }
 

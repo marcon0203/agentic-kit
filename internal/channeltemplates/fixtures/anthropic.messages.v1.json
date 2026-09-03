@@ -1,5 +1,25 @@
 [
   {
+    "name": "请求未带 max_tokens 时不兜底（协议必填项由模型参数在网关层补）",
+    "request": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ]
+    },
+    "expect_http": {
+      "method": "POST",
+      "path": "/v1/messages",
+      "body": {
+        "model": "claude-sonnet-4"
+      },
+      "body_absent": ["max_tokens", "temperature", "tools", "system"]
+    }
+  },
+  {
     "name": "基础文本 + usage（system 抽到顶层）",
     "request": {
       "model": "claude-sonnet-4",

@@ -436,3 +436,15 @@ func (s catalogChannelSource) Channels(ctx context.Context) ([]modelchannels.Cha
 	}
 	return out, nil
 }
+
+func (s catalogChannelSource) ChannelModelParams(ctx context.Context) ([]modelchannels.ModelParamsRow, error) {
+	rows, err := s.svc.ChannelModelParams(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]modelchannels.ModelParamsRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, modelchannels.ModelParamsRow{ProviderKey: row.ProviderKey, Model: row.Model, Params: row.Params})
+	}
+	return out, nil
+}

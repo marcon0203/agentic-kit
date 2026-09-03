@@ -6,7 +6,12 @@
 // enabled providers are what 模型广场 (GET /model-catalog) actually shows.
 package modelcatalog
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+
+	descriptortype "github.com/marcon0203/agentic-kit/internal/modelgateway/descriptor"
+)
 
 // Modality is the "模型类型" tag 模型广场 lets a user filter by. It doubles
 // as the shape a model works with (what goes in, what comes out) — text
@@ -51,9 +56,22 @@ type Provider struct {
 	Status        int16
 	CreatedAt     time.Time
 	HasCredential bool
+	// Descriptor 是描述符快照的原文，只在服务端用（添加/编辑模型时按它声
+	// 明的 request_params 校验参数取值），永远不进任何对外 DTO。
+	Descriptor []byte
 }
 
 func (p Provider) Enabled() bool { return p.Status == 1 }
+
+// RequestParams 从描述符快照里解析出参数声明。解析失败按"没有声明"处理
+// ——快照在创建时已完整校验过，这里只是防御手工改库的兜底。
+func (p Provider) RequestParams() []descriptortype.RequestParam {
+	var doc struct {
+		RequestParams []descriptortype.RequestParam `json:"request_params"`
+	}
+	_ = json.Unmarshal(p.Descriptor, &doc)
+	return doc.RequestParams
+}
 
 // Model is one model registered under a Provider (e.g. deepseek-v3), the
 // unit 模型广场 actually lists.
@@ -67,6 +85,9 @@ type Model struct {
 	Featured    bool
 	Status      int16
 	CreatedAt   time.Time
+	// Params 是这个模型的请求参数取值（max_tokens 等），形状由所属提供商
+	// 描述符快照的 request_params 声明，调用时由网关注入。
+	Params map[string]any
 }
 
 func (m Model) Enabled() bool { return m.Status == 1 }

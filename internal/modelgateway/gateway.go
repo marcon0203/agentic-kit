@@ -65,6 +65,10 @@ type CompletionRequest struct {
 	Tools       []Tool
 	MaxTokens   int
 	Temperature float64
+	// Options 是渠道私有参数，经描述符的 $.options.<name> 进 body 模板。
+	// 模型目录里按模型配置的参数取值（保留名 max_tokens/temperature 之外
+	// 的）在 Gateway 层并进来；调用方也可以自带。
+	Options map[string]any
 }
 
 // CompletionResult is what every Client normalizes its provider's response
@@ -231,8 +235,56 @@ func (e *chainStepError) Unwrap() error { return e.cause }
 // (ErrAllProvidersUnavailable).
 func (g *Gateway) Complete(ctx context.Context, primary ModelSpec, fallbacks []ModelSpec, creds map[string]Credential, req CompletionRequest) (CompletionResult, error) {
 	return g.resolve(ctx, primary, fallbacks, creds, nil, func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error) {
-		return client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, req)
+		return client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, applyModelParams(spec, req))
 	})
+}
+
+// applyModelParams 把模型目录里为这个模型配置的参数取值并进请求，fallback
+// 链的每一环按各自的 provider+model 取参——降级到另一个模型时参数跟着换。
+//
+// 显式的请求值优先：零值按"未设置"处理（和 buildScope 的口径一致），只有
+// 未设置的字段才用模型参数补。保留名映射到类型化字段，其余进 Options。
+func applyModelParams(spec ModelSpec, req CompletionRequest) CompletionRequest {
+	params := modelParamsFor(spec.Provider, spec.Name)
+	if len(params) == 0 {
+		return req
+	}
+	for name, v := range params {
+		switch name {
+		case "max_tokens":
+			if req.MaxTokens == 0 {
+				if n, ok := asFloat(v); ok {
+					req.MaxTokens = int(n)
+				}
+			}
+		case "temperature":
+			if req.Temperature == 0 {
+				if n, ok := asFloat(v); ok {
+					req.Temperature = n
+				}
+			}
+		default:
+			if req.Options == nil {
+				req.Options = map[string]any{}
+			}
+			if _, exists := req.Options[name]; !exists {
+				req.Options[name] = v
+			}
+		}
+	}
+	return req
+}
+
+// asFloat 只认 JSON 解码会产出的数字类型，不做字符串转换——参数表单里
+// 填的 "8192" 在校验层就该被拦下。
+func asFloat(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case int:
+		return float64(t), true
+	}
+	return 0, false
 }
 
 // StreamDelta is one incremental chunk of a streaming completion — just the
@@ -290,6 +342,7 @@ func (g *Gateway) CompleteStream(ctx context.Context, primary ModelSpec, fallbac
 	canFallback := func() bool { return !streamed }
 
 	return g.resolve(ctx, primary, fallbacks, creds, canFallback, func(client Client, cred Credential, spec ModelSpec) (CompletionResult, error) {
+		req := applyModelParams(spec, req)
 		if sc, ok := client.(StreamingClient); ok {
 			return sc.CompleteStream(ctx, cred.APIKey, cred.BaseURL, spec.Name, req, forward)
 		}

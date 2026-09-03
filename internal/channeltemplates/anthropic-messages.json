@@ -29,6 +29,10 @@
     "credential": "api_key",
     "header": "x-api-key"
   },
+  "request_params": [
+    {"name": "max_tokens", "label": "最大输出 tokens", "type": "int", "required": true, "min": 1, "max": 65536, "default": 8192, "help": "Anthropic Messages 协议必填，按模型输出上限填写"},
+    {"name": "temperature", "label": "温度", "type": "number", "required": false, "min": 0, "max": 2}
+  ],
   "messages": {
     "system": "hoist",
     "content": "parts",

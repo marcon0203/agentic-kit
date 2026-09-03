@@ -171,6 +171,68 @@ func TestLoad_ReportsEveryProblemAtOnce(t *testing.T) {
 	}
 }
 
+// request_params 的声明错误要在装载期报——default 会被预填进表单，坏值
+// 会原样落库，不能等管理员填的时候才发现。
+func TestLoad_ValidatesRequestParams(t *testing.T) {
+	const badName = `"request_params": [{"name": "Max-Tokens", "type": "int"}]`
+	const badType = `"request_params": [{"name": "max_tokens", "type": "text"}]`
+	const minMax = `"request_params": [{"name": "max_tokens", "type": "int", "min": 100, "max": 50}]`
+	const badDefault = `"request_params": [{"name": "max_tokens", "type": "int", "min": 1, "default": 0}]`
+	const dup = `"request_params": [{"name": "max_tokens", "type": "int"}, {"name": "max_tokens", "type": "int"}]`
+	const ok = `"request_params": [{"name": "max_tokens", "type": "int", "required": true, "min": 1, "max": 65536, "default": 8192}]`
+	for _, tc := range []struct{ patch, want string }{
+		{badName, "只能用小写字母"},
+		{badType, "int/number"},
+		{minMax, "min 大于 max"},
+		{badDefault, "不在 min/max 区间"},
+		{dup, "声明了两次"},
+	} {
+		raw := strings.Replace(openaiWire, `"auth": {"driver": "bearer", "credential": "api_key"},`,
+			`"auth": {"driver": "bearer", "credential": "api_key"}, `+tc.patch+`,`, 1)
+		if _, err := Load([]byte(raw)); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("patch=%s 期望被拒绝（%s），得到: %v", tc.patch, tc.want, err)
+		}
+	}
+	raw := strings.Replace(openaiWire, `"auth": {"driver": "bearer", "credential": "api_key"},`,
+		`"auth": {"driver": "bearer", "credential": "api_key"}, `+ok+`,`, 1)
+	d, err := Load([]byte(raw))
+	if err != nil {
+		t.Fatalf("合法声明不该被拒: %v", err)
+	}
+	if len(d.RequestParams) != 1 || d.RequestParams[0].Name != "max_tokens" || !d.RequestParams[0].Required {
+		t.Fatalf("request_params 没有被解析出来: %+v", d.RequestParams)
+	}
+}
+
+func TestValidateParams(t *testing.T) {
+	specs := []RequestParam{
+		{Name: "max_tokens", Type: "int", Required: true, Min: ptr(1.0), Max: ptr(65536.0)},
+		{Name: "temperature", Type: "number", Min: ptr(0.0), Max: ptr(2.0)},
+	}
+	for _, tc := range []struct {
+		name   string
+		values map[string]any
+		want   string
+	}{
+		{"未知参数", map[string]any{"top_k": 1}, "没有声明该参数"},
+		{"缺必填", map[string]any{"temperature": 0.5}, "必填"},
+		{"非数字", map[string]any{"max_tokens": "8192"}, "必须是数字"},
+		{"非整数", map[string]any{"max_tokens": 1.5}, "必须是整数"},
+		{"低于下限", map[string]any{"max_tokens": 0}, "不能小于"},
+		{"高于上限", map[string]any{"max_tokens": 1000000}, "不能大于"},
+	} {
+		problems := ValidateParams(specs, tc.values)
+		if len(problems) == 0 || !strings.Contains(problems[0].Message, tc.want) {
+			t.Errorf("%s 期望被拦（%s），得到: %+v", tc.name, tc.want, problems)
+		}
+	}
+	if problems := ValidateParams(specs, map[string]any{"max_tokens": 8192}); len(problems) != 0 {
+		t.Errorf("合法取值不该有问题: %+v", problems)
+	}
+}
+
+func ptr(f float64) *float64 { return &f }
+
 // ── ★ 流式状态机 ──────────────────────────────────────────────────────
 
 // 这是整套设计的核心论断的验证：**Anthropic 那种 content_block_start 开

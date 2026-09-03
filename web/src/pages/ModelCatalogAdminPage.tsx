@@ -28,6 +28,7 @@ type CatalogProvider = components['schemas']['CatalogProvider']
 type ChannelTemplate = components['schemas']['ModelChannelTemplate']
 type CatalogModel = components['schemas']['CatalogModel']
 type CatalogModality = components['schemas']['CatalogModality']
+type ModelRequestParam = components['schemas']['ModelRequestParam']
 
 const MODALITY_LABEL: Record<CatalogModality, string> = {
   text: '文本',
@@ -180,7 +181,7 @@ export function ModelCatalogAdminPage() {
                   </div>
                   {expanded === p.id && (
                     <div className="border-t border-border px-space-5 py-space-4">
-                      <ProviderModels providerId={p.id} onError={setActionError} />
+                      <ProviderModels provider={p} onError={setActionError} />
                     </div>
                   )}
                 </Panel>
@@ -312,9 +313,11 @@ function ProviderCredentialDialog({
   )
 }
 
-function ProviderModels({ providerId, onError }: { providerId: string; onError: (msg: string | null) => void }) {
+function ProviderModels({ provider, onError }: { provider: CatalogProvider; onError: (msg: string | null) => void }) {
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
+  const [paramsTarget, setParamsTarget] = useState<CatalogModel | null>(null)
+  const providerId = provider.id
 
   const modelsQuery = useQuery({
     queryKey: ['catalog-models', providerId],
@@ -388,10 +391,24 @@ function ProviderModels({ providerId, onError }: { providerId: string; onError: 
                   {m.featured && <span className="text-caption text-signal">精选</span>}
                 </span>
                 {m.description && <span className="text-caption truncate text-ink-500">{m.description}</span>}
+                {Object.keys(m.params ?? {}).length > 0 && (
+                  <span className="text-caption truncate text-ink-500">
+                    {Object.entries(m.params ?? {})
+                      .map(([k, v]) => `${k}: ${v}`)
+                      .join(' · ')}
+                  </span>
+                )}
               </span>
               <span className={cn('text-caption w-12 shrink-0 text-right', m.status === 1 ? 'text-moss' : 'text-ink-500')}>
                 {m.status === 1 ? '已启用' : '已停用'}
               </span>
+              {(provider.request_params?.length ?? 0) > 0 && (
+                <Can permission="model_catalog.model.create">
+                  <Button variant="outline" size="sm" onClick={() => setParamsTarget(m)}>
+                    参数
+                  </Button>
+                </Can>
+              )}
               <Can permission="model_catalog.model.toggle">
                 <Button variant="outline" size="sm" onClick={() => toggleModelStatus(m)}>
                   {m.status === 1 ? '停用' : '启用'}
@@ -409,6 +426,7 @@ function ProviderModels({ providerId, onError }: { providerId: string; onError: 
 
       <CreateModelDialog
         providerId={providerId}
+        requestParams={provider.request_params ?? []}
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreated={() => {
@@ -417,8 +435,92 @@ function ProviderModels({ providerId, onError }: { providerId: string; onError: 
           setCreateOpen(false)
         }}
       />
+
+      <EditModelParamsDialog
+        providerId={providerId}
+        requestParams={provider.request_params ?? []}
+        model={paramsTarget}
+        onOpenChange={(v) => {
+          if (!v) setParamsTarget(null)
+        }}
+        onSaved={() => {
+          queryClient.invalidateQueries({ queryKey: ['catalog-models', providerId] })
+          setParamsTarget(null)
+        }}
+      />
     </div>
   )
+}
+
+/**
+ * 按渠道声明的 request_params 渲染数字输入。输入态用 string 保存（空串 =
+ * 未设置），提交时由调用方转成数字——受控数字输入里清空中间态没法表达。
+ */
+function ModelParamFields({
+  specs,
+  values,
+  onChange,
+}: {
+  specs: ModelRequestParam[]
+  values: Record<string, string>
+  onChange: (values: Record<string, string>) => void
+}) {
+  if (specs.length === 0) return null
+  return (
+    <>
+      {specs.map((spec) => {
+        const range = [spec.min, spec.max].filter((v) => v !== undefined).join(' ~ ')
+        return (
+          <div key={spec.name} className="flex flex-col gap-space-1">
+            <label htmlFor={`model-param-${spec.name}`} className="text-label-md text-ink-700">
+              {spec.label || spec.name}
+              {spec.required && <span className="ml-1 text-rust">*</span>}
+              <span className="ml-space-2 text-caption text-ink-500">{spec.name}</span>
+            </label>
+            <Input
+              id={`model-param-${spec.name}`}
+              type="number"
+              inputMode="decimal"
+              value={values[spec.name] ?? ''}
+              onChange={(e) => onChange({ ...values, [spec.name]: e.target.value })}
+              placeholder={range ? `取值范围 ${range}` : '数字'}
+              className="h-12 rounded-sm"
+            />
+            {(spec.help || !spec.required) && (
+              <span className="text-caption text-ink-500">
+                {spec.help}
+                {!spec.required && (spec.help ? '；' : '') + '选填，留空用厂商默认'}
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+/** 把表单里的字符串值收成提交用的参数对象：空串不提交。 */
+function collectParams(specs: ModelRequestParam[], values: Record<string, string>): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const spec of specs) {
+    const raw = (values[spec.name] ?? '').trim()
+    if (raw === '') continue
+    const num = Number(raw)
+    if (Number.isFinite(num)) out[spec.name] = num
+  }
+  return out
+}
+
+/** 必填参数有一项没填就不能提交。 */
+function missingRequired(specs: ModelRequestParam[], values: Record<string, string>): boolean {
+  return specs.some((spec) => spec.required && (values[spec.name] ?? '').trim() === '')
+}
+
+/** 已保存的数字取值回填成表单字符串态。 */
+function paramsToFormValues(params: Record<string, number> | undefined): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(params ?? {})) out[k] = String(v)
+  return out
 }
 
 /** 新建模型提供商：选供应商、填 API Key 和接口地址。 */
@@ -622,11 +724,13 @@ function CreateProviderDialog({
 
 function CreateModelDialog({
   providerId,
+  requestParams,
   open,
   onOpenChange,
   onCreated,
 }: {
   providerId: string
+  requestParams: ModelRequestParam[]
   open: boolean
   onOpenChange: (v: boolean) => void
   onCreated: () => void
@@ -636,8 +740,19 @@ function CreateModelDialog({
   const [description, setDescription] = useState('')
   const [modality, setModality] = useState<CatalogModality>('text')
   const [featured, setFeatured] = useState(false)
+  const [paramValues, setParamValues] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+
+  // 参数输入按声明的 default 预填：那只是表单初始值，保存下来的永远是管理员
+  // 看到并确认过的数字——运行时不做任何静默兜底。
+  function defaultParamValues(): Record<string, string> {
+    const out: Record<string, string> = {}
+    for (const spec of requestParams) {
+      if (spec.default !== undefined) out[spec.name] = String(spec.default)
+    }
+    return out
+  }
 
   function reset() {
     setModel('')
@@ -645,8 +760,14 @@ function CreateModelDialog({
     setDescription('')
     setModality('text')
     setFeatured(false)
+    setParamValues(defaultParamValues())
     setError(null)
   }
+
+  useEffect(() => {
+    setParamValues(defaultParamValues())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
   async function submit() {
     setPending(true)
@@ -655,7 +776,14 @@ function CreateModelDialog({
       unwrap(
         await apiClient.POST('/model-catalog/providers/{id}/models', {
           params: { path: { id: providerId } },
-          body: { model, display_name: displayName, description: description || undefined, modality, featured },
+          body: {
+            model,
+            display_name: displayName,
+            description: description || undefined,
+            modality,
+            featured,
+            params: collectParams(requestParams, paramValues),
+          },
         }),
       )
       reset()
@@ -719,6 +847,10 @@ function CreateModelDialog({
             rows={2}
           />
 
+          {/* 这个渠道的线协议要收的模型级参数（如 Anthropic 必填的
+              max_tokens）——值随模型保存，调用时注入请求。 */}
+          <ModelParamFields specs={requestParams} values={paramValues} onChange={setParamValues} />
+
           <label className="flex items-center gap-space-2 text-label-md text-ink-700">
             <Checkbox checked={featured} onCheckedChange={(v) => setFeatured(v === true)} />
             设为精选模型
@@ -734,7 +866,82 @@ function CreateModelDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             取消
           </Button>
-          <Button disabled={pending || !model || !displayName} onClick={submit}>
+          <Button
+            disabled={pending || !model || !displayName || missingRequired(requestParams, paramValues)}
+            onClick={submit}
+          >
+            {pending ? '保存中…' : '保存'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** 编辑一个已保存模型的请求参数（PATCH 只带 params，不动 status）。 */
+function EditModelParamsDialog({
+  providerId,
+  requestParams,
+  model,
+  onOpenChange,
+  onSaved,
+}: {
+  providerId: string
+  requestParams: ModelRequestParam[]
+  model: CatalogModel | null
+  onOpenChange: (v: boolean) => void
+  onSaved: () => void
+}) {
+  const [paramValues, setParamValues] = useState<Record<string, string>>({})
+  const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+
+  useEffect(() => {
+    setParamValues(paramsToFormValues(model?.params))
+    setError(null)
+  }, [model])
+
+  async function submit() {
+    if (!model) return
+    setPending(true)
+    setError(null)
+    try {
+      unwrap(
+        await apiClient.PATCH('/model-catalog/providers/{id}/models/{model_id}', {
+          params: { path: { id: providerId, model_id: model.id } },
+          body: { params: collectParams(requestParams, paramValues) },
+        }),
+      )
+      onSaved()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : '保存失败，请稍后重试')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Dialog open={model !== null} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>模型参数{model ? ` · ${model.model}` : ''}</DialogTitle>
+          <DialogDescription>
+            这个渠道的线协议要求的请求参数，保存后随每次调用注入。必填参数（标 * 的）留空会导致调用被拦下。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col gap-space-2">
+          <ModelParamFields specs={requestParams} values={paramValues} onChange={setParamValues} />
+          {error && (
+            <p role="alert" className="text-caption text-rust">
+              {error}
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            取消
+          </Button>
+          <Button disabled={pending || missingRequired(requestParams, paramValues)} onClick={submit}>
             {pending ? '保存中…' : '保存'}
           </Button>
         </DialogFooter>

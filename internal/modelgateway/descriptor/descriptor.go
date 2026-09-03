@@ -3,6 +3,8 @@ package descriptor
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"regexp"
 	"strings"
 )
 
@@ -22,14 +24,82 @@ type Descriptor struct {
 	Capabilities []string `json:"capabilities"`
 	BaseURL      string   `json:"base_url"`
 
-	Credentials []CredentialField     `json:"credentials"`
-	Auth        Auth                  `json:"auth"`
-	Messages    MessagesConfig        `json:"messages"`
-	Complete    *Operation            `json:"complete"`
-	Stream      *StreamConfig         `json:"stream"`
-	Embed       *EmbedConfig          `json:"embed"`
-	Probe       *Probe                `json:"probe"`
-	Pricing     map[string]ModelPrice `json:"pricing"`
+	Credentials []CredentialField `json:"credentials"`
+	Auth        Auth              `json:"auth"`
+	// RequestParams 声明这个线协议的 complete 请求要收哪些**模型级**参数。
+	// 参数的"形状"属于协议（这里声明），"取值"属于模型（存在模型目录的每
+	// 个模型上）。保留名 max_tokens / temperature 映射到请求的类型化字段，
+	// 调用方没设置时用模型存的值补上；其它名字经 $.options.<name> 暴露给
+	// body 模板。
+	RequestParams []RequestParam        `json:"request_params"`
+	Messages      MessagesConfig        `json:"messages"`
+	Complete      *Operation            `json:"complete"`
+	Stream        *StreamConfig         `json:"stream"`
+	Embed         *EmbedConfig          `json:"embed"`
+	Probe         *Probe                `json:"probe"`
+	Pricing       map[string]ModelPrice `json:"pricing"`
+}
+
+// RequestParam 是一个"添加模型时让管理员填"的请求参数。
+type RequestParam struct {
+	Name     string   `json:"name"`
+	Label    string   `json:"label"`
+	Type     string   `json:"type"` // int | number
+	Required bool     `json:"required"`
+	Min      *float64 `json:"min"`
+	Max      *float64 `json:"max"`
+	// Default 只作表单预填，运行时绝不静默兜底——必填参数没配的请求会在
+	// 发出去之前就被拦下（见 descriptorClient），而不是被这个默认值救活。
+	Default any    `json:"default"`
+	Help    string `json:"help"`
+}
+
+// ParamProblem 是一份模型参数取值里的问题，Name 用作表单字段定位
+// （"params.max_tokens"），Message 面向管理员。
+type ParamProblem struct {
+	Name    string
+	Message string
+}
+
+// ValidateParams 按声明的参数表校验一份模型级参数取值。添加/编辑模型时
+// 调它——规则和声明放在同一个包里，模板作者看到的约束和管理员被拦下的
+// 理由就永远不会是两套。
+func ValidateParams(specs []RequestParam, values map[string]any) []ParamProblem {
+	var problems []ParamProblem
+	known := make(map[string]RequestParam, len(specs))
+	for _, spec := range specs {
+		known[spec.Name] = spec
+	}
+	for name, v := range values {
+		spec, ok := known[name]
+		if !ok {
+			problems = append(problems, ParamProblem{name, "这个渠道没有声明该参数，请从表单里移除"})
+			continue
+		}
+		num, ok := numberOf(v)
+		if !ok {
+			problems = append(problems, ParamProblem{name, "必须是数字"})
+			continue
+		}
+		if spec.Type == "int" && num != math.Trunc(num) {
+			problems = append(problems, ParamProblem{name, "必须是整数"})
+			continue
+		}
+		if spec.Min != nil && num < *spec.Min {
+			problems = append(problems, ParamProblem{name, fmt.Sprintf("不能小于 %v", *spec.Min)})
+		}
+		if spec.Max != nil && num > *spec.Max {
+			problems = append(problems, ParamProblem{name, fmt.Sprintf("不能大于 %v", *spec.Max)})
+		}
+	}
+	for _, spec := range specs {
+		if spec.Required {
+			if _, ok := values[spec.Name]; !ok {
+				problems = append(problems, ParamProblem{spec.Name, "这个渠道的线协议要求必填"})
+			}
+		}
+	}
+	return problems
 }
 
 // CredentialField 驱动前端表单和 provider_keys 的存储形状。type 为
@@ -215,6 +285,8 @@ var (
 	knownCapabilities = map[string]bool{"text": true, "tools": true, "stream": true, "embed": true}
 	knownAuthDrivers  = map[string]bool{"": true, "none": true, "bearer": true, "header": true, "query": true}
 	knownTransports   = map[string]bool{"sse": true, "ndjson": true}
+	paramNamePattern  = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	knownParamTypes   = map[string]bool{"int": true, "number": true}
 )
 
 // Load 解析并**完整校验**一份描述符。校验一次性收集全部错误再返回，而不
@@ -298,6 +370,7 @@ func (d *Descriptor) validate() []string {
 			add("凭据字段 %q 的 type 必须是 secret/text/url", f.Name)
 		}
 	}
+	errs = append(errs, validateRequestParams(d.RequestParams)...)
 
 	// capabilities 是声明，和实际存在的段交叉校验。声明了 stream 却没有
 	// stream 段，等到运行时才发现"这渠道其实不支持流"就太晚了。
@@ -444,6 +517,63 @@ func (d *Descriptor) validateMessages() []string {
 	validateTemplate(toAny(m.TextPart), "messages.text_part", partVars, &errs)
 	validateTemplate(toAny(m.ToolCallPart), "messages.tool_call_part", partVars, &errs)
 	validateTemplate(toAny(m.ToolResultPart), "messages.tool_result_part", partVars, &errs)
+	return errs
+}
+
+// numberOf 只认数字类型，不做字符串到数字的转换——"8192" 这种值在参数表
+// 单里就该被拦下，而不是被好心救活。
+func numberOf(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case json.Number:
+		f, err := t.Float64()
+		return f, err == nil
+	}
+	return 0, false
+}
+
+// validateRequestParams 校验参数声明本身：名字合法且不重复、类型是封闭
+// 集、min≤max、default 与类型一致且落在区间内。default 类型错或越界在装
+// 载期就该报——它会被预填进表单，坏值会原样落库。
+func validateRequestParams(params []RequestParam) []string {
+	var errs []string
+	seen := map[string]bool{}
+	for i, p := range params {
+		label := fmt.Sprintf("request_params[%d]", i)
+		if p.Name == "" {
+			errs = append(errs, label+" 缺少 name")
+			continue
+		}
+		if !paramNamePattern.MatchString(p.Name) {
+			errs = append(errs, fmt.Sprintf("%s: 参数名 %q 只能用小写字母、数字、下划线，且以字母开头", label, p.Name))
+		}
+		if seen[p.Name] {
+			errs = append(errs, fmt.Sprintf("%s: 参数 %q 声明了两次", label, p.Name))
+		}
+		seen[p.Name] = true
+		if !knownParamTypes[p.Type] {
+			errs = append(errs, fmt.Sprintf("%s: 参数 %q 的 type 必须是 int/number", label, p.Name))
+			continue
+		}
+		if p.Min != nil && p.Max != nil && *p.Min > *p.Max {
+			errs = append(errs, fmt.Sprintf("%s: 参数 %q 的 min 大于 max", label, p.Name))
+		}
+		if p.Default != nil {
+			num, ok := p.Default.(float64)
+			if !ok {
+				errs = append(errs, fmt.Sprintf("%s: 参数 %q 的 default 必须是数字", label, p.Name))
+			} else if p.Type == "int" && num != math.Trunc(num) {
+				errs = append(errs, fmt.Sprintf("%s: 参数 %q 的 default 必须是整数", label, p.Name))
+			} else if p.Min != nil && num < *p.Min || p.Max != nil && num > *p.Max {
+				errs = append(errs, fmt.Sprintf("%s: 参数 %q 的 default 不在 min/max 区间内", label, p.Name))
+			}
+		}
+	}
 	return errs
 }
 

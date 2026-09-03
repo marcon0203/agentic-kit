@@ -7,7 +7,8 @@ VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, provider_key, display_name, icon, base_url, template, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential;
 
 -- name: ListCatalogProviders :many
-SELECT id, provider_key, display_name, icon, base_url, template, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
+-- descriptor 一并取回：管理端列表要从中解析 request_params 给添加模型表单用。
+SELECT id, provider_key, display_name, icon, base_url, template, descriptor, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 FROM catalog_providers
 ORDER BY created_at ASC;
 
@@ -20,7 +21,9 @@ WHERE status = 1 AND descriptor IS NOT NULL
 ORDER BY provider_key;
 
 -- name: GetCatalogProvider :one
-SELECT id, provider_key, display_name, icon, base_url, template, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
+-- descriptor 一并取回：添加/编辑模型时要按快照里的 request_params 校验
+-- 管理员填的参数取值。
+SELECT id, provider_key, display_name, icon, base_url, template, descriptor, status, created_at, (default_api_key_encrypted IS NOT NULL)::bool AS has_credential
 FROM catalog_providers
 WHERE id = $1;
 
@@ -48,21 +51,43 @@ WHERE status = 1 AND default_api_key_encrypted IS NOT NULL;
 DELETE FROM catalog_providers WHERE id = $1;
 
 -- name: CreateCatalogModel :one
-INSERT INTO catalog_models (provider_id, model, display_name, description, modality, featured)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, provider_id, model, display_name, description, modality, featured, status, created_at;
+-- params 是模型级请求参数的取值（形状见渠道描述符的 request_params），
+-- 添加模型时经 modelcatalog.Service 按描述符校验后落库。
+INSERT INTO catalog_models (provider_id, model, display_name, description, modality, featured, params)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, provider_id, model, display_name, description, modality, featured, status, created_at, params;
 
 -- name: ListCatalogModelsForProvider :many
-SELECT id, provider_id, model, display_name, description, modality, featured, status, created_at
+SELECT id, provider_id, model, display_name, description, modality, featured, status, created_at, params
 FROM catalog_models
 WHERE provider_id = $1
 ORDER BY created_at ASC;
 
+-- name: GetCatalogModel :one
+SELECT id, provider_id, model, display_name, description, modality, featured, status, created_at, params
+FROM catalog_models
+WHERE id = $1;
+
 -- name: SetCatalogModelStatus :exec
 UPDATE catalog_models SET status = $2 WHERE id = $1;
 
+-- name: UpdateCatalogModelParams :exec
+-- 编辑模型参数走独立语句：status 和 params 是两种不同的管理动作，合并成
+-- 一条可空字段的 UPDATE 反而要在调用侧区分"没传"和"清空"。
+UPDATE catalog_models SET params = $2 WHERE id = $1;
+
 -- name: DeleteCatalogModel :exec
 DELETE FROM catalog_models WHERE id = $1;
+
+-- name: ListCatalogModelParams :many
+-- 网关注册表重建时一并取回每渠道每模型的请求参数（modelgateway.SetModelParams）。
+-- 停用提供商下的模型不出现，和渠道描述符（ListEnabledChannelDescriptors）
+-- 的口径保持一致：停用就该立刻调不通。
+SELECT cp.provider_key, cm.model, cm.params
+FROM catalog_models cm
+JOIN catalog_providers cp ON cp.id = cm.provider_id
+WHERE cp.status = 1
+ORDER BY cp.provider_key, cm.model;
 
 -- name: ListCatalogModelsPublic :many
 -- Joined read for 模型广场 (GET /model-catalog): only enabled models under

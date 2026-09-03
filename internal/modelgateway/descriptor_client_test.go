@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -214,7 +215,7 @@ func TestProviderSpecs_DescribeCredentialFields(t *testing.T) {
 // 系统配置 → 模型提供商 里建了它们。
 func TestProviderNames_MatchesTheTestChannels(t *testing.T) {
 	want := map[string]bool{
-		"deepseek": true, "volcengine": true, "qwen": true, "zhipu": true, "custom": true,
+		"deepseek": true, "volcengine": true, "qwen": true, "zhipu": true, "custom": true, "kimi": true,
 	}
 	got := ProviderNames()
 	if len(got) != len(want) {
@@ -374,7 +375,7 @@ func TestAnthropicAndOpenAITemplates_HitDifferentPaths(t *testing.T) {
 	}{
 		{"openai-compatible", "oa", "/chat/completions"},
 		{"anthropic-messages", "an", "/v1/messages"},
-		{"kimi-anthropic", "kimi", "/v1/messages"},
+		{"kimi-for-coding", "kimi", "/v1/messages"},
 		{"openai-responses", "resp", "/responses"},
 	} {
 		var gotPath string
@@ -399,7 +400,9 @@ func TestAnthropicAndOpenAITemplates_HitDifferentPaths(t *testing.T) {
 		}
 		_, err = def.NewClient(srv.Client(), srv.URL).
 			Complete(context.Background(), "k", "", "m", CompletionRequest{
-				Messages: []Message{{Role: "user", Content: "hi"}},
+				// Anthropic 线协议必填 max_tokens（见 request_params）——
+				// 这里给所有线协议统一带上，路径断言不受影响。
+				Messages: []Message{{Role: "user", Content: "hi"}}, MaxTokens: 64,
 			})
 		srv.Close()
 		if err != nil {
@@ -415,7 +418,7 @@ func TestAnthropicAndOpenAITemplates_HitDifferentPaths(t *testing.T) {
 // Kimi 那个地址（https://api.kimi.com/coding）后面没有 /v1，要靠模板补上。
 // 用户填的地址原样拼接、不多不少，这是 404 与否的分界。
 func TestKimiTemplate_AppendsV1MessagesToTheGivenBase(t *testing.T) {
-	d, _, err := channeltemplates.Instantiate("kimi-anthropic", "kimi", "Kimi", "")
+	d, _, err := channeltemplates.Instantiate("kimi-for-coding", "kimi", "Kimi", "")
 	if err != nil {
 		t.Fatalf("实例化失败: %v", err)
 	}
@@ -429,4 +432,142 @@ func TestKimiTemplate_AppendsV1MessagesToTheGivenBase(t *testing.T) {
 	if d.Auth.Driver != "bearer" {
 		t.Errorf("Kimi 的鉴权应为 bearer，得到 %s", d.Auth.Driver)
 	}
+}
+
+// ── 模型级请求参数 ─────────────────────────────────────────────────────
+
+// 模型参数在 Gateway 层按 provider+model 注入。这条走完整链路（注册表 →
+// Gateway → descriptorClient → httptest 上游），盯的是"没设置的参数被模型
+// 参数补上、显式设置的值优先"。
+func TestGateway_InjectsModelParamsIntoTheRequest(t *testing.T) {
+	var gotBody map[string]any
+	var bodyMu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 每个请求新建 map：json.Decode 往已有 map 里是合并而不是清空，
+		// 复用会把上一个请求的字段带进断言。
+		fresh := map[string]any{}
+		_ = json.NewDecoder(r.Body).Decode(&fresh)
+		bodyMu.Lock()
+		gotBody = fresh
+		bodyMu.Unlock()
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	override := map[string]map[string]map[string]any{
+		"deepseek": {
+			"deepseek-chat": {"max_tokens": 4096, "temperature": 0.3},
+		},
+	}
+	SetModelParams(override)
+	t.Cleanup(func() {
+		SetModelParams(nil)
+		restoreTestChannels(t)
+	})
+	// 把渠道指到测试服务器上（Gateway 用描述符里的 base_url 建连接）。
+	SetChannels([]*descriptor.Descriptor{mustInstantiate(t, "deepseek", "deepseek", srv.URL)})
+
+	gw := NewGateway(nil)
+	// 请求里没设 max_tokens/temperature → 用模型参数补。
+	if _, err := gw.Complete(context.Background(),
+		ModelSpec{Provider: "deepseek", Name: "deepseek-chat"}, nil,
+		map[string]Credential{"deepseek": {APIKey: "sk"}},
+		CompletionRequest{Messages: []Message{{Role: "user", Content: "hi"}}}); err != nil {
+		t.Fatalf("调用失败: %v", err)
+	}
+	body := func() map[string]any {
+		bodyMu.Lock()
+		defer bodyMu.Unlock()
+		return gotBody
+	}
+	if body()["max_tokens"] != float64(4096) || body()["temperature"] != 0.3 {
+		t.Errorf("模型参数应注入请求体: %v", gotBody)
+	}
+
+	// 请求里显式给了值 → 显式值优先，模型参数不覆盖。
+	if _, err := gw.Complete(context.Background(),
+		ModelSpec{Provider: "deepseek", Name: "deepseek-chat"}, nil,
+		map[string]Credential{"deepseek": {APIKey: "sk"}},
+		CompletionRequest{Messages: []Message{{Role: "user", Content: "hi"}}, MaxTokens: 64}); err != nil {
+		t.Fatalf("调用失败: %v", err)
+	}
+	if body()["max_tokens"] != float64(64) {
+		t.Errorf("显式请求值应优先于模型参数: %v", gotBody)
+	}
+
+	// 没配参数的模型（另一个模型名）原样放行，不会被别的模型的参数污染。
+	if _, err := gw.Complete(context.Background(),
+		ModelSpec{Provider: "deepseek", Name: "deepseek-r1"}, nil,
+		map[string]Credential{"deepseek": {APIKey: "sk"}},
+		CompletionRequest{Messages: []Message{{Role: "user", Content: "hi"}}}); err != nil {
+		t.Fatalf("调用失败: %v", err)
+	}
+	if _, present := body()["max_tokens"]; present {
+		t.Errorf("没配参数的模型不该带上别的模型的参数: %v", gotBody)
+	}
+}
+
+// Anthropic 线协议的 max_tokens 是必填项。模型没配参数时，请求必须在发出去
+// 之前被拦下，错误点名渠道、模型和参数——而不是等上游回一句没有字段的
+// "Invalid request Error"。
+func TestGateway_MissingRequiredParamFailsBeforeHTTP(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+	}))
+	defer srv.Close()
+
+	SetModelParams(nil)
+	t.Cleanup(func() {
+		SetModelParams(nil)
+		restoreTestChannels(t)
+	})
+	SetChannels([]*descriptor.Descriptor{mustInstantiate(t, "kimi-for-coding", "kimi", srv.URL)})
+
+	gw := NewGateway(nil)
+	_, err := gw.Complete(context.Background(),
+		ModelSpec{Provider: "kimi", Name: "k3"}, nil,
+		map[string]Credential{"kimi": {APIKey: "sk"}},
+		CompletionRequest{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err == nil {
+		t.Fatal("缺必填参数的调用必须报错")
+	}
+	for _, want := range []string{"kimi", "k3", "max_tokens"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("错误里应点名 %s，得到: %v", want, err)
+		}
+	}
+	if requests != 0 {
+		t.Errorf("缺必填参数时不应发出 HTTP 请求，实际发了 %d 次", requests)
+	}
+
+	// 配上参数后同一个渠道立刻能用：拦的是"缺参数"，不是渠道本身。
+	SetModelParams(map[string]map[string]map[string]any{
+		"kimi": {"k3": {"max_tokens": 8192}},
+	})
+	var gotBody map[string]any
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}]}`))
+	})
+	result, err := gw.Complete(context.Background(),
+		ModelSpec{Provider: "kimi", Name: "k3"}, nil,
+		map[string]Credential{"kimi": {APIKey: "sk"}},
+		CompletionRequest{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil {
+		t.Fatalf("配了参数后应该能调通: %v", err)
+	}
+	if result.Content != "ok" || gotBody["max_tokens"] != float64(8192) {
+		t.Errorf("参数注入后的请求不对: %v / %+v", gotBody, result)
+	}
+}
+
+// mustInstantiate 按模板实例化一个指向测试服务器的渠道。
+func mustInstantiate(t *testing.T, template, key, baseURL string) *descriptor.Descriptor {
+	t.Helper()
+	d, _, err := channeltemplates.Instantiate(template, key, key, baseURL)
+	if err != nil {
+		t.Fatalf("模板 %s 实例化失败: %v", template, err)
+	}
+	return d
 }

@@ -46,6 +46,7 @@ func (c *descriptorClient) toDescriptorRequest(model string, req CompletionReque
 		Model:       model,
 		MaxTokens:   req.MaxTokens,
 		Temperature: req.Temperature,
+		Options:     req.Options,
 		Cred:        map[string]string{},
 	}
 	for name, value := range cred.Fields {
@@ -82,7 +83,37 @@ func fromDescriptorResult(r descriptor.Result) CompletionResult {
 	return out
 }
 
+// checkRequiredParams 在请求发出去之前拦下"必填参数没配"的调用。上游的报错
+// 往往是一句没有字段的 "Invalid request Error"，把它翻译成点名渠道、模型和
+// 参数名的本地错误——日志里一眼知道去哪里补配置。
+func (c *descriptorClient) checkRequiredParams(model string, req CompletionRequest) error {
+	for _, p := range c.desc.RequestParams {
+		if !p.Required {
+			continue
+		}
+		missing := false
+		switch p.Name {
+		case "max_tokens":
+			missing = req.MaxTokens <= 0
+		case "temperature":
+			// 零值在整条管道里的语义就是"未设置"（buildScope 只注入非零
+			// 值），必填的 temperature 取 0 等同于没配。
+			missing = req.Temperature == 0
+		default:
+			_, ok := req.Options[p.Name]
+			missing = !ok
+		}
+		if missing {
+			return fmt.Errorf("渠道 %s 的模型 %s 缺少必填请求参数 %s：在 系统配置 → 模型提供商 里编辑该模型补全后再调用", c.desc.ID, model, p.Name)
+		}
+	}
+	return nil
+}
+
 func (c *descriptorClient) Complete(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest) (CompletionResult, error) {
+	if err := c.checkRequiredParams(model, req); err != nil {
+		return CompletionResult{}, err
+	}
 	spec, err := c.desc.BuildComplete(c.toDescriptorRequest(model, req, credOf(ctx, apiKey, baseURL)))
 	if err != nil {
 		return CompletionResult{}, err
@@ -105,6 +136,9 @@ func (c *descriptorClient) CompleteStream(ctx context.Context, apiKey, baseURL, 
 	if c.desc.Stream == nil {
 		// 没声明流式的渠道退回一次性调用，由 Gateway 合成单个 delta。
 		return c.Complete(ctx, apiKey, baseURL, model, req)
+	}
+	if err := c.checkRequiredParams(model, req); err != nil {
+		return CompletionResult{}, err
 	}
 	spec, err := c.desc.BuildStream(c.toDescriptorRequest(model, req, credOf(ctx, apiKey, baseURL)))
 	if err != nil {
