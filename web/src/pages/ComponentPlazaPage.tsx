@@ -307,7 +307,12 @@ export function ComponentPlazaPage() {
           {visible.length > 0 && (
             <ul className="grid grid-cols-1 gap-space-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {visible.map((r) => (
-                <ComponentCard key={r.id} resource={r} onToggle={() => toggleStatus(r)} />
+                <ComponentCard
+                  key={r.id}
+                  resource={r}
+                  onToggle={() => toggleStatus(r)}
+                  onOpen={() => navigate(`/apps/tool/${r.id}`)}
+                />
               ))}
             </ul>
           )}
@@ -361,7 +366,15 @@ function FilterRow({
   )
 }
 
-function ComponentCard({ resource, onToggle }: { resource: Resource; onToggle: () => void }) {
+function ComponentCard({
+  resource,
+  onToggle,
+  onOpen,
+}: {
+  resource: Resource
+  onToggle: () => void
+  onOpen: () => void
+}) {
   const config = componentConfig(resource.config)
   const shape = COMPONENT_SHAPE_META[componentShape(config)]
   const Icon = shape.icon
@@ -380,11 +393,18 @@ function ComponentCard({ resource, onToggle }: { resource: Resource; onToggle: (
         >
           <Icon className="size-4" />
         </span>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="text-label-md truncate text-ink-900" title={name}>
+        <span className="flex min-w-0 flex-1 flex-col items-start">
+          {/* 标题即入口。整张卡不做点击区——卡上还有"停用"，套一层点击区容
+              易误触。 */}
+          <button
+            type="button"
+            onClick={onOpen}
+            className="text-label-md max-w-full truncate text-ink-900 hover:text-blueprint hover:underline"
+            title={name}
+          >
             {name}
-          </span>
-          <span className="text-ref truncate text-ink-500" title={resource.ref}>
+          </button>
+          <span className="text-ref max-w-full truncate text-ink-500" title={resource.ref}>
             {resource.ref}
           </span>
         </span>
@@ -404,8 +424,13 @@ function ComponentCard({ resource, onToggle }: { resource: Resource; onToggle: (
         <span className="text-caption shrink-0 rounded-sm bg-surface-muted px-space-2 py-0.5 text-ink-700">
           {categoryLabel(config.category)}
         </span>
-        <span className={cn('text-caption truncate', enabled ? 'text-ink-500' : 'text-rust')}>
-          {enabled ? shape.label : '已停用'}
+        <span className="flex shrink-0 items-center gap-space-2">
+          <span className={cn('text-caption truncate', enabled ? 'text-ink-500' : 'text-rust')}>
+            {enabled ? shape.label : '已停用'}
+          </span>
+          <Button variant="ghost" size="sm" className="text-caption h-7 px-space-2 text-blueprint" onClick={onOpen}>
+            详情
+          </Button>
         </span>
       </div>
     </li>

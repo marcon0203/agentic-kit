@@ -251,13 +251,23 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /**
+         * 单条资源详情
+         * @description config 里的凭证字段照例不出现（与列表接口一致）。编辑时把这份 config
+         *     原样交回 PATCH 即可——缺席的凭证字段会保留库里已存的值。
+         */
+        get: operations["getResource"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        /** 更新资源（含启用/禁用） */
+        /**
+         * 更新资源（含启用/禁用）
+         * @description config 采取"凭证保留"的合并语义，而不是整体替换：GET 拿到的 config
+         *     不含凭证字段，原样存回来不会把已存的密钥清空。要换密钥就给新值，要
+         *     清除就显式给空串。非凭证字段一律以本次提交为准，包括删除。
+         */
         patch: operations["updateResource"];
         trace?: never;
     };
@@ -3039,6 +3049,32 @@ export interface operations {
                     "application/json": components["schemas"]["Envelope"];
                 };
             };
+        };
+    };
+    getResource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Resource"];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     updateResource: {

@@ -112,6 +112,30 @@ type updateResourceRequest struct {
 }
 
 // Update handles PATCH /resources/{id} (also enable/disable via `status`).
+// Get handles GET /resources/{id}：单条资源详情。
+//
+// 领域层的 Service.Get 一直都有，只是没有这条路由——于是前端只能靠列表接
+// 口凑详情，或者干脆做不了详情页。config 里的凭据字段照例不会出现
+// （Redact），编辑时不回填即表示"不改"。
+func (h *ResourceHandlers) Get(w http.ResponseWriter, r *http.Request) {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
+		return
+	}
+	kind, id, err := decodeResourceID(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, r, http.StatusNotFound, ErrResourceNotFound, "resource not found")
+		return
+	}
+	res, err := h.svc.Get(r.Context(), userID, kind, id)
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, toResourceDTO(res))
+}
+
 func (h *ResourceHandlers) Update(w http.ResponseWriter, r *http.Request) {
 	userID, ok := UserIDFromContext(r.Context())
 	if !ok {

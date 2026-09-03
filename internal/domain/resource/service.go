@@ -374,7 +374,15 @@ func (s *Service) Update(ctx context.Context, ownerID int64, kind Kind, id int64
 		current.Status = *cmd.Status
 	}
 	if cmd.Config != nil {
-		encrypted, err := s.encryptCredentials(cmd.Config)
+		// 先把存量里的凭据解出来，再让 incoming 合并——调用方拿到的
+		// config 是 Redact 过的，凭据字段根本不在里面，直接整体替换会把密
+		// 钥静默清空（见 Config.MergePreservingCredentials）。
+		decrypted, err := s.DecryptCredentials(current.Config)
+		if err != nil {
+			return Resource{}, domain.Internal(err)
+		}
+		merged := cmd.Config.MergePreservingCredentials(decrypted)
+		encrypted, err := s.encryptCredentials(merged)
 		if err != nil {
 			return Resource{}, domain.Invalid(domain.CodeValidationFailed, "invalid config")
 		}

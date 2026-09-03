@@ -144,6 +144,88 @@ func redactHeaderList(v any) any {
 	return out
 }
 
+// MergePreservingCredentials 把一份"从 GET 读出来又改过"的 config 合回存
+// 量，凭据字段不因为读不到而丢失。
+//
+// 为什么需要它：GET 返回的 config 是 Redact() 过的——凭据字段整个不出现
+// （spec-05 的规矩，不是打码也不是密文，是没有）。而编辑一个资源的自然做
+// 法就是"读出来、改一个字段、整份存回去"。两件事凑在一起，结果是用户只改
+// 了个显示名，api_key 就被那份读不到密钥的 config 覆盖没了——而且是静默
+// 的，下次调用才会失败。
+//
+// 规则：
+//   - 凭据键在 incoming 里缺席 → 保留库里的值（这就是"没改密钥"）
+//   - 凭据键有非空新值        → 用新值替换
+//   - 凭据键显式给空串        → 当作要清除，照办
+//
+// 非凭据字段一律以 incoming 为准，包括删除：改配置时把某个普通字段去掉，
+// 就该真的去掉。
+func (c Config) MergePreservingCredentials(stored Config) Config {
+	out := make(Config, len(c))
+	for k, v := range c {
+		out[k] = v
+	}
+	for k, storedVal := range stored {
+		if k == headersConfigKey {
+			continue // 头列表在下面单独按 key 对齐
+		}
+		if !IsCredentialKey(k) {
+			continue
+		}
+		if _, present := c[k]; !present {
+			out[k] = storedVal
+		}
+	}
+	if _, present := c[headersConfigKey]; present {
+		out[headersConfigKey] = mergeHeaderList(c[headersConfigKey], stored[headersConfigKey])
+	}
+	return out
+}
+
+// mergeHeaderList 按头名字对齐补回值。Redact 只留下了 key，所以一个"值为
+// 空"的头几乎总是"这个头我没动"，而不是"我要把它改成空字符串"——真想删掉
+// 一个头，把整项从列表里去掉即可，那是明确的动作。
+func mergeHeaderList(incoming, stored any) any {
+	rawIn, ok := incoming.([]any)
+	if !ok {
+		return incoming
+	}
+	storedByKey := make(map[string]string)
+	if rawStored, ok := stored.([]any); ok {
+		for _, item := range rawStored {
+			m, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			key, _ := m["key"].(string)
+			val, _ := m["value"].(string)
+			if key != "" {
+				storedByKey[key] = val
+			}
+		}
+	}
+
+	out := make([]any, 0, len(rawIn))
+	for _, item := range rawIn {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		key, _ := m["key"].(string)
+		val, _ := m["value"].(string)
+		merged := map[string]any{"key": key}
+		if val != "" {
+			merged["value"] = val
+		} else if prev, found := storedByKey[key]; found {
+			merged["value"] = prev
+		} else {
+			merged["value"] = ""
+		}
+		out = append(out, merged)
+	}
+	return out
+}
+
 // AgentReference is an Agent version that references a resource. A narrow
 // read model: the resource context needs only enough to explain why a
 // delete would be unsafe.

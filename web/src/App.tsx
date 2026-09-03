@@ -31,6 +31,7 @@ import { McpSourceDetailPage } from '@/pages/McpSourceDetailPage'
 import { SkillMarketDetailPage } from '@/pages/SkillMarketDetailPage'
 import { ComponentWizardPage } from '@/pages/ComponentWizardPage'
 import { ComponentPlazaPage } from '@/pages/ComponentPlazaPage'
+import { ComponentDetailPage } from '@/pages/ComponentDetailPage'
 import { AgentStudioPage } from '@/pages/AgentStudioPage'
 import { OpsLayout, RequireAdmin } from '@/pages/OpsLayout'
 import { RunMonitorTab } from '@/pages/operations/RunMonitorTab'
@@ -116,6 +117,8 @@ export default function App() {
               <Route path="agents" element={<AgentDefinitionPage />} />
               <Route path="tool" element={<ComponentPlazaPage />} />
               <Route path="tool/new" element={<ComponentWizardPage />} />
+              {/* /new 必须排在 /:id 前面，否则 "new" 会被当成资源 id。 */}
+              <Route path="tool/:id" element={<ComponentDetailPage />} />
               <Route path="skill" element={<ResourceKindPage type="skill" />} />
               <Route path="skill/new" element={<SkillUploadPage />} />
               <Route path="skill/market/:sourceId/:slug" element={<SkillMarketDetailPage />} />

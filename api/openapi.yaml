@@ -528,9 +528,33 @@ paths:
         in: path
         required: true
         schema: { type: string }
+    get:
+      tags: [Resources]
+      summary: 单条资源详情
+      description: |
+        config 里的凭证字段照例不出现（与列表接口一致）。编辑时把这份 config
+        原样交回 PATCH 即可——缺席的凭证字段会保留库里已存的值。
+      operationId: getResource
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Resource' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [Resources]
       summary: 更新资源（含启用/禁用）
+      description: |
+        config 采取"凭证保留"的合并语义，而不是整体替换：GET 拿到的 config
+        不含凭证字段，原样存回来不会把已存的密钥清空。要换密钥就给新值，要
+        清除就显式给空串。非凭证字段一律以本次提交为准，包括删除。
       operationId: updateResource
       requestBody:
         required: true
