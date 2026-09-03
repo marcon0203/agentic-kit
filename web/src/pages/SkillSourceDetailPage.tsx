@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyRail } from '@/components/common/Rail'
 import { Pagination } from '@/components/common/Pagination'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
+import { MarketAvatar } from '@/components/market/MarketAvatar'
 import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
@@ -289,6 +290,7 @@ export function SkillSourceDetailPage() {
                     onCheckedChange={() => toggle(s.slug)}
                     aria-label={`选择 ${s.name}`}
                   />
+                  <MarketAvatar iconUrl={s.icon_url} seed={s.slug} name={s.name} className="mt-0.5 size-8" />
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="flex flex-wrap items-center gap-space-2">
                       <span className="text-body-sm font-medium text-ink-900">{s.name}</span>

@@ -129,7 +129,7 @@ func (q *Queries) DeleteStaleMarketSkills(ctx context.Context, arg DeleteStaleMa
 }
 
 const getMarketSkill = `-- name: GetMarketSkill :one
-SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, s.name AS source_name, s.base_url AS source_base_url
+SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, m.icon_url, s.name AS source_name, s.base_url AS source_base_url
 FROM market_skills m
 JOIN skill_sources s ON s.id = m.source_id
 WHERE m.source_id = $1 AND m.slug = $2
@@ -159,6 +159,7 @@ type GetMarketSkillRow struct {
 	ReviewNote    pgtype.Text        `json:"review_note"`
 	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
 	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
+	IconUrl       pgtype.Text        `json:"icon_url"`
 	SourceName    string             `json:"source_name"`
 	SourceBaseUrl string             `json:"source_base_url"`
 }
@@ -185,6 +186,7 @@ func (q *Queries) GetMarketSkill(ctx context.Context, arg GetMarketSkillParams) 
 		&i.ReviewNote,
 		&i.ReviewedAt,
 		&i.ReviewedBy,
+		&i.IconUrl,
 		&i.SourceName,
 		&i.SourceBaseUrl,
 	)
@@ -230,7 +232,7 @@ func (q *Queries) GetSkillSourceByURL(ctx context.Context, baseUrl string) (Skil
 }
 
 const listMarketSkills = `-- name: ListMarketSkills :many
-SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, s.name AS source_name, s.base_url AS source_base_url
+SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, m.icon_url, s.name AS source_name, s.base_url AS source_base_url
 FROM market_skills m
 JOIN skill_sources s ON s.id = m.source_id AND s.status = 1
 WHERE m.review_status = 'approved'
@@ -256,6 +258,7 @@ type ListMarketSkillsRow struct {
 	ReviewNote    pgtype.Text        `json:"review_note"`
 	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
 	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
+	IconUrl       pgtype.Text        `json:"icon_url"`
 	SourceName    string             `json:"source_name"`
 	SourceBaseUrl string             `json:"source_base_url"`
 }
@@ -291,6 +294,7 @@ func (q *Queries) ListMarketSkills(ctx context.Context) ([]ListMarketSkillsRow, 
 			&i.ReviewNote,
 			&i.ReviewedAt,
 			&i.ReviewedBy,
+			&i.IconUrl,
 			&i.SourceName,
 			&i.SourceBaseUrl,
 		); err != nil {
@@ -305,7 +309,7 @@ func (q *Queries) ListMarketSkills(ctx context.Context) ([]ListMarketSkillsRow, 
 }
 
 const listMarketSkillsForReview = `-- name: ListMarketSkillsForReview :many
-SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, s.name AS source_name, s.base_url AS source_base_url
+SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.changelog, m.topics, m.stars, m.downloads, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, m.icon_url, s.name AS source_name, s.base_url AS source_base_url
 FROM market_skills m
 JOIN skill_sources s ON s.id = m.source_id
 WHERE ($1::text IS NULL OR m.review_status = $1::text)
@@ -345,6 +349,7 @@ type ListMarketSkillsForReviewRow struct {
 	ReviewNote    pgtype.Text        `json:"review_note"`
 	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
 	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
+	IconUrl       pgtype.Text        `json:"icon_url"`
 	SourceName    string             `json:"source_name"`
 	SourceBaseUrl string             `json:"source_base_url"`
 }
@@ -388,6 +393,7 @@ func (q *Queries) ListMarketSkillsForReview(ctx context.Context, arg ListMarketS
 			&i.ReviewNote,
 			&i.ReviewedAt,
 			&i.ReviewedBy,
+			&i.IconUrl,
 			&i.SourceName,
 			&i.SourceBaseUrl,
 		); err != nil {
@@ -528,8 +534,8 @@ func (q *Queries) SetMarketSkillReview(ctx context.Context, arg SetMarketSkillRe
 }
 
 const upsertMarketSkill = `-- name: UpsertMarketSkill :one
-INSERT INTO market_skills (source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+INSERT INTO market_skills (source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw, icon_url)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (source_id, slug) DO UPDATE SET
     name        = EXCLUDED.name,
     summary     = EXCLUDED.summary,
@@ -539,10 +545,11 @@ ON CONFLICT (source_id, slug) DO UPDATE SET
     topics      = EXCLUDED.topics,
     stars       = EXCLUDED.stars,
     downloads   = EXCLUDED.downloads,
+    icon_url    = EXCLUDED.icon_url,
     updated_at  = EXCLUDED.updated_at,
     raw         = EXCLUDED.raw,
     synced_at   = now()
-RETURNING id, source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw, synced_at, review_status, review_note, reviewed_at, reviewed_by
+RETURNING id, source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw, synced_at, review_status, review_note, reviewed_at, reviewed_by, icon_url
 `
 
 type UpsertMarketSkillParams struct {
@@ -558,6 +565,7 @@ type UpsertMarketSkillParams struct {
 	Downloads int64              `json:"downloads"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	Raw       []byte             `json:"raw"`
+	IconUrl   pgtype.Text        `json:"icon_url"`
 }
 
 // 同步落库：同一 (source, slug) 覆盖刷新，上次同步后被上游下架的条目由
@@ -580,6 +588,7 @@ func (q *Queries) UpsertMarketSkill(ctx context.Context, arg UpsertMarketSkillPa
 		arg.Downloads,
 		arg.UpdatedAt,
 		arg.Raw,
+		arg.IconUrl,
 	)
 	var i MarketSkill
 	err := row.Scan(
@@ -601,6 +610,7 @@ func (q *Queries) UpsertMarketSkill(ctx context.Context, arg UpsertMarketSkillPa
 		&i.ReviewNote,
 		&i.ReviewedAt,
 		&i.ReviewedBy,
+		&i.IconUrl,
 	)
 	return i, err
 }

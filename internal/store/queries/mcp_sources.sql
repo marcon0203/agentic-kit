@@ -42,8 +42,8 @@ RETURNING *;
 --
 -- review_* 刻意不在 DO UPDATE 里：审核结论是本地判断，不是上游字段。每次
 -- 同步都重置的话，管理员批准过的条目会在下次同步后集体打回待审。
-INSERT INTO market_mcp_servers (source_id, slug, name, summary, version, license, repository_url, remote_url, remote_type, topics, updated_at, raw)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+INSERT INTO market_mcp_servers (source_id, slug, name, summary, version, license, repository_url, remote_url, remote_type, topics, updated_at, raw, icon_url)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (source_id, slug) DO UPDATE SET
     name           = EXCLUDED.name,
     summary        = EXCLUDED.summary,
@@ -52,6 +52,7 @@ ON CONFLICT (source_id, slug) DO UPDATE SET
     repository_url = EXCLUDED.repository_url,
     remote_url     = EXCLUDED.remote_url,
     remote_type    = EXCLUDED.remote_type,
+    icon_url       = EXCLUDED.icon_url,
     topics         = EXCLUDED.topics,
     updated_at     = EXCLUDED.updated_at,
     raw            = EXCLUDED.raw,

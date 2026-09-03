@@ -156,6 +156,7 @@ func (r *SkillSourceRepository) ReplaceSkills(ctx context.Context, sourceID int6
 			Version:   pgtype.Text{String: s.Version, Valid: s.Version != ""},
 			License:   pgtype.Text{String: s.License, Valid: s.License != ""},
 			Changelog: pgtype.Text{String: s.Changelog, Valid: s.Changelog != ""},
+			IconUrl:   pgtype.Text{String: s.IconURL, Valid: s.IconURL != ""},
 			Topics:    s.Topics,
 			Stars:     s.Stars,
 			Downloads: s.Downloads,
@@ -185,7 +186,8 @@ func marketSkillFromRow(row store.ListMarketSkillsRow) skillsource.MarketSkill {
 		Slug: row.Slug, Name: row.Name,
 		Summary: textOrEmpty(row.Summary), Version: textOrEmpty(row.Version),
 		License: textOrEmpty(row.License), Changelog: textOrEmpty(row.Changelog),
-		Topics: row.Topics, Stars: row.Stars, Downloads: row.Downloads,
+		IconURL: textOrEmpty(row.IconUrl),
+		Topics:  row.Topics, Stars: row.Stars, Downloads: row.Downloads,
 		Raw: append([]byte(nil), row.Raw...),
 	}
 	if row.UpdatedAt.Valid {

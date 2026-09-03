@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Download, Star } from 'lucide-react'
 
+import { MarketAvatar } from '@/components/market/MarketAvatar'
 import type { components } from '@/lib/api/schema'
 
 type MarketSkill = components['schemas']['MarketSkill']
@@ -20,7 +21,11 @@ export function MarketSkillCard({ skill }: { skill: MarketSkill }) {
         aria-label={`查看 ${skill.name} 详情`}
         onClick={() => navigate(`/apps/skill/market/${skill.source_id}/${skill.slug}`)}
       />
-      <span className="text-body-md truncate font-medium text-ink-900">{skill.name}</span>
+      {/* 图标和标题一行：卡片密度不变，但一眼能认出是哪个条目。 */}
+      <span className="flex items-center gap-space-3">
+        <MarketAvatar iconUrl={skill.icon_url} seed={skill.slug} name={skill.name} />
+        <span className="text-body-md min-w-0 truncate font-medium text-ink-900">{skill.name}</span>
+      </span>
       <span className="text-body-sm line-clamp-2 text-ink-500">
         {skill.summary || '上游没有提供简介。'}
       </span>

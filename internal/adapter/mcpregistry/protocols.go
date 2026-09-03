@@ -25,6 +25,7 @@ func NewRegistry() *Registry {
 		fetchers: map[mcpsource.Protocol]mcpsource.Fetcher{
 			mcpsource.ProtocolMCPRegistry: NewRegistryFetcher(),
 			mcpsource.ProtocolSmithery:    NewSmitheryFetcher(),
+			mcpsource.ProtocolStaticJSON:  NewStaticJSONFetcher(),
 		},
 		specs: []mcpsource.ProtocolSpec{
 			{
@@ -45,6 +46,15 @@ func NewRegistry() *Registry {
 				DefaultBaseURL: "https://registry.smithery.ai",
 				RequiresAPIKey: true,
 				DocsURL:        "https://smithery.ai/docs/use/registry",
+			},
+			{
+				ID:    mcpsource.ProtocolStaticJSON,
+				Label: "自定义清单（JSON）",
+				Descript: "指向一个返回 server.json 清单的地址即可。腾讯云、阿里云百炼、" +
+					"百度千帆、魔搭这些国内广场都没有公开的列表接口，服务清单只在各自" +
+					"控制台里登录可见——把要用的抄成一份 JSON 托管起来，就能走同一条" +
+					"同步、审核、接入的流程。内部自研的 Server 也用这个，不必先搭注册中心。",
+				DocsURL: "https://github.com/modelcontextprotocol/registry/blob/main/docs/reference/api/generic-registry-api.md",
 			},
 		},
 	}

@@ -113,6 +113,7 @@ func (f *SmitheryFetcher) FetchList(ctx context.Context, target mcpsource.FetchT
 				Name:          firstNonEmpty(s.DisplayName, s.QualifiedName),
 				Summary:       s.Description,
 				RepositoryURL: s.Homepage,
+				IconURL:       s.IconURL,
 				RemoteURL:     remoteURL,
 				Topics:        smitheryTopics(s, remoteURL),
 				Raw:           raw,

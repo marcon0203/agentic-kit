@@ -18,6 +18,11 @@ const (
 	// ProtocolSmithery 是 Smithery 自己的一套（qualifiedName + pagination），
 	// 且要 API Key 才给读。
 	ProtocolSmithery Protocol = "smithery"
+	// ProtocolStaticJSON 是"一个返回 server.json 清单的地址"。国内几家广场
+	// （腾讯云、阿里云百炼、百度千帆、魔搭）都没有公开的列表接口，清单只在
+	// 控制台里登录可见；这个协议让管理员把清单落成一份 JSON 托管起来，照样
+	// 走同一条同步→审核→市场→接入的链路。
+	ProtocolStaticJSON Protocol = "static-json"
 )
 
 // ProtocolSpec 是一个协议对外暴露的形状：怎么称呼它、默认接口前缀是什么、

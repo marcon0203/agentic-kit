@@ -39,8 +39,8 @@ RETURNING *;
 -- review_status/review_note/reviewed_* 刻意不在 DO UPDATE 里：审核结论是
 -- 本地的判断，不是上游字段。每次同步都重置的话，管理员批准过的条目会在下
 -- 次同步后集体打回待审，等于审核白做。
-INSERT INTO market_skills (source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+INSERT INTO market_skills (source_id, slug, name, summary, version, license, changelog, topics, stars, downloads, updated_at, raw, icon_url)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (source_id, slug) DO UPDATE SET
     name        = EXCLUDED.name,
     summary     = EXCLUDED.summary,
@@ -50,6 +50,7 @@ ON CONFLICT (source_id, slug) DO UPDATE SET
     topics      = EXCLUDED.topics,
     stars       = EXCLUDED.stars,
     downloads   = EXCLUDED.downloads,
+    icon_url    = EXCLUDED.icon_url,
     updated_at  = EXCLUDED.updated_at,
     raw         = EXCLUDED.raw,
     synced_at   = now()

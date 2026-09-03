@@ -83,6 +83,9 @@ type MarketServer struct {
 	Version       string `json:"version,omitempty"`
 	License       string `json:"license,omitempty"`
 	RepositoryURL string `json:"repository_url,omitempty"`
+	// IconURL 是上游给的图标地址。多数条目上游根本没给，前端据此决定用图还
+	// 是生成一个字母图标，所以这里为空是常态、不是异常。
+	IconURL string `json:"icon_url,omitempty"`
 	// RemoteURL 空 = 这个 Server 只能在本机起进程（上游只给了 packages），
 	// 平台装不了它。页面据此把安装按钮置灰并说明原因。
 	RemoteURL  string          `json:"remote_url,omitempty"`
@@ -110,6 +113,7 @@ type FetchedServer struct {
 	Version       string
 	License       string
 	RepositoryURL string
+	IconURL       string
 	RemoteURL     string
 	RemoteType    string
 	Topics        []string

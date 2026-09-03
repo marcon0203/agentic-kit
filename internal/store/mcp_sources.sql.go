@@ -184,7 +184,7 @@ func (q *Queries) GetMCPSourceByURL(ctx context.Context, baseUrl string) (McpSou
 }
 
 const getMarketMCPServer = `-- name: GetMarketMCPServer :one
-SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.repository_url, m.remote_url, m.remote_type, m.topics, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, s.name AS source_name, s.base_url AS source_base_url
+SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.repository_url, m.remote_url, m.remote_type, m.topics, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, m.icon_url, s.name AS source_name, s.base_url AS source_base_url
 FROM market_mcp_servers m
 JOIN mcp_sources s ON s.id = m.source_id
 WHERE m.id = $1
@@ -209,6 +209,7 @@ type GetMarketMCPServerRow struct {
 	ReviewNote    pgtype.Text        `json:"review_note"`
 	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
 	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
+	IconUrl       pgtype.Text        `json:"icon_url"`
 	SourceName    string             `json:"source_name"`
 	SourceBaseUrl string             `json:"source_base_url"`
 }
@@ -236,6 +237,7 @@ func (q *Queries) GetMarketMCPServer(ctx context.Context, id int64) (GetMarketMC
 		&i.ReviewNote,
 		&i.ReviewedAt,
 		&i.ReviewedBy,
+		&i.IconUrl,
 		&i.SourceName,
 		&i.SourceBaseUrl,
 	)
@@ -298,7 +300,7 @@ func (q *Queries) ListMCPSources(ctx context.Context) ([]ListMCPSourcesRow, erro
 }
 
 const listMarketMCPServers = `-- name: ListMarketMCPServers :many
-SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.repository_url, m.remote_url, m.remote_type, m.topics, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, s.name AS source_name, s.base_url AS source_base_url
+SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.repository_url, m.remote_url, m.remote_type, m.topics, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, m.icon_url, s.name AS source_name, s.base_url AS source_base_url
 FROM market_mcp_servers m
 JOIN mcp_sources s ON s.id = m.source_id AND s.status = 1
 WHERE m.review_status = 'approved'
@@ -324,6 +326,7 @@ type ListMarketMCPServersRow struct {
 	ReviewNote    pgtype.Text        `json:"review_note"`
 	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
 	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
+	IconUrl       pgtype.Text        `json:"icon_url"`
 	SourceName    string             `json:"source_name"`
 	SourceBaseUrl string             `json:"source_base_url"`
 }
@@ -358,6 +361,7 @@ func (q *Queries) ListMarketMCPServers(ctx context.Context) ([]ListMarketMCPServ
 			&i.ReviewNote,
 			&i.ReviewedAt,
 			&i.ReviewedBy,
+			&i.IconUrl,
 			&i.SourceName,
 			&i.SourceBaseUrl,
 		); err != nil {
@@ -372,7 +376,7 @@ func (q *Queries) ListMarketMCPServers(ctx context.Context) ([]ListMarketMCPServ
 }
 
 const listMarketMCPServersForReview = `-- name: ListMarketMCPServersForReview :many
-SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.repository_url, m.remote_url, m.remote_type, m.topics, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, s.name AS source_name, s.base_url AS source_base_url
+SELECT m.id, m.source_id, m.slug, m.name, m.summary, m.version, m.license, m.repository_url, m.remote_url, m.remote_type, m.topics, m.updated_at, m.raw, m.synced_at, m.review_status, m.review_note, m.reviewed_at, m.reviewed_by, m.icon_url, s.name AS source_name, s.base_url AS source_base_url
 FROM market_mcp_servers m
 JOIN mcp_sources s ON s.id = m.source_id
 WHERE ($1::text IS NULL OR m.review_status = $1::text)
@@ -412,6 +416,7 @@ type ListMarketMCPServersForReviewRow struct {
 	ReviewNote    pgtype.Text        `json:"review_note"`
 	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
 	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
+	IconUrl       pgtype.Text        `json:"icon_url"`
 	SourceName    string             `json:"source_name"`
 	SourceBaseUrl string             `json:"source_base_url"`
 }
@@ -452,6 +457,7 @@ func (q *Queries) ListMarketMCPServersForReview(ctx context.Context, arg ListMar
 			&i.ReviewNote,
 			&i.ReviewedAt,
 			&i.ReviewedBy,
+			&i.IconUrl,
 			&i.SourceName,
 			&i.SourceBaseUrl,
 		); err != nil {
@@ -565,8 +571,8 @@ func (q *Queries) SetMarketMCPServerReview(ctx context.Context, arg SetMarketMCP
 }
 
 const upsertMarketMCPServer = `-- name: UpsertMarketMCPServer :one
-INSERT INTO market_mcp_servers (source_id, slug, name, summary, version, license, repository_url, remote_url, remote_type, topics, updated_at, raw)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+INSERT INTO market_mcp_servers (source_id, slug, name, summary, version, license, repository_url, remote_url, remote_type, topics, updated_at, raw, icon_url)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (source_id, slug) DO UPDATE SET
     name           = EXCLUDED.name,
     summary        = EXCLUDED.summary,
@@ -575,11 +581,12 @@ ON CONFLICT (source_id, slug) DO UPDATE SET
     repository_url = EXCLUDED.repository_url,
     remote_url     = EXCLUDED.remote_url,
     remote_type    = EXCLUDED.remote_type,
+    icon_url       = EXCLUDED.icon_url,
     topics         = EXCLUDED.topics,
     updated_at     = EXCLUDED.updated_at,
     raw            = EXCLUDED.raw,
     synced_at      = now()
-RETURNING id, source_id, slug, name, summary, version, license, repository_url, remote_url, remote_type, topics, updated_at, raw, synced_at, review_status, review_note, reviewed_at, reviewed_by
+RETURNING id, source_id, slug, name, summary, version, license, repository_url, remote_url, remote_type, topics, updated_at, raw, synced_at, review_status, review_note, reviewed_at, reviewed_by, icon_url
 `
 
 type UpsertMarketMCPServerParams struct {
@@ -595,6 +602,7 @@ type UpsertMarketMCPServerParams struct {
 	Topics        []string           `json:"topics"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	Raw           []byte             `json:"raw"`
+	IconUrl       pgtype.Text        `json:"icon_url"`
 }
 
 // 同步落库：同一 (source, slug) 覆盖刷新，上次同步后被上游下架的条目由
@@ -616,6 +624,7 @@ func (q *Queries) UpsertMarketMCPServer(ctx context.Context, arg UpsertMarketMCP
 		arg.Topics,
 		arg.UpdatedAt,
 		arg.Raw,
+		arg.IconUrl,
 	)
 	var i MarketMcpServer
 	err := row.Scan(
@@ -637,6 +646,7 @@ func (q *Queries) UpsertMarketMCPServer(ctx context.Context, arg UpsertMarketMCP
 		&i.ReviewNote,
 		&i.ReviewedAt,
 		&i.ReviewedBy,
+		&i.IconUrl,
 	)
 	return i, err
 }

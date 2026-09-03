@@ -73,13 +73,18 @@ type wireLatestVersion struct {
 }
 
 type wireSkillItem struct {
-	Slug          string           `json:"slug"`
-	DisplayName   string           `json:"displayName"`
-	Summary       string           `json:"summary"`
-	Topics        []string         `json:"topics"`
-	Stats         wireStats        `json:"stats"`
-	CreatedAt     *int64           `json:"createdAt"`
-	UpdatedAt     *int64           `json:"updatedAt"`
+	Slug        string `json:"slug"`
+	DisplayName string `json:"displayName"`
+	Summary     string `json:"summary"`
+	// 图标的几种常见写法都认。上游列表接口给不给、叫什么名字各家不一样，
+	// 多认几个字段不花什么代价，认漏了就是一整片空白卡片。
+	Icon          string             `json:"icon"`
+	Image         string             `json:"image"`
+	Logo          string             `json:"logo"`
+	Topics        []string           `json:"topics"`
+	Stats         wireStats          `json:"stats"`
+	CreatedAt     *int64             `json:"createdAt"`
+	UpdatedAt     *int64             `json:"updatedAt"`
 	LatestVersion *wireLatestVersion `json:"latestVersion"`
 }
 
@@ -119,6 +124,16 @@ func msToTime(ms *int64) time.Time {
 	return time.UnixMilli(*ms).UTC()
 }
 
+// iconOf 按优先级挑一个图标地址；都没有就返回空串，前端生成字母图标兜底。
+func iconOf(it wireSkillItem) string {
+	for _, v := range []string{it.Icon, it.Image, it.Logo} {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func nameOf(it wireSkillItem) string {
 	if it.DisplayName != "" {
 		return it.DisplayName
@@ -148,6 +163,7 @@ func (f *Fetcher) FetchList(ctx context.Context, baseURL string) ([]skillsource.
 				Slug:      it.Slug,
 				Name:      nameOf(it),
 				Summary:   it.Summary,
+				IconURL:   iconOf(it),
 				Topics:    it.Topics,
 				UpdatedAt: msToTime(it.UpdatedAt),
 				Raw:       raw,

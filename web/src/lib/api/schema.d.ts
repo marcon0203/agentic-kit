@@ -2379,6 +2379,8 @@ export interface components {
             summary?: string;
             version?: string;
             license?: string;
+            /** @description 上游给的图标地址；多数条目没有，为空是常态。前端为空时按 slug 生成 字母图标兜底，所以卡片不会出现空白。 */
+            icon_url?: string;
             topics: string[];
             /** Format: int64 */
             stars: number;
@@ -2419,10 +2421,10 @@ export interface components {
             versions: components["schemas"]["MarketSkillVersion"][];
         };
         /**
-         * @description 源协议。mcp-registry 是官方注册中心的公开规范，各家子注册中心与自建注 册中心实现的是同一套，靠 api_prefix 区分版本；smithery 自成一套且要 API Key。
+         * @description 源协议。mcp-registry 是官方注册中心的公开规范，各家子注册中心与自建注 册中心实现的是同一套，靠 api_prefix 区分版本；smithery 自成一套且要 API Key；static-json 指向一个返回 server.json 清单的地址，用于没有公 开列表接口的来源（国内几家广场都属于此类）和内部自研清单。
          * @enum {string}
          */
-        MCPSourceProtocolID: "mcp-registry" | "smithery";
+        MCPSourceProtocolID: "mcp-registry" | "smithery" | "static-json";
         MCPSourceProtocol: {
             id: components["schemas"]["MCPSourceProtocolID"];
             label: string;
@@ -2478,6 +2480,8 @@ export interface components {
             version?: string;
             license?: string;
             repository_url?: string;
+            /** @description 上游给的图标地址；多数条目没有，为空是常态。前端为空时按 slug 生成 字母图标兜底，所以卡片不会出现空白。 */
+            icon_url?: string;
             /** @description 远端 MCP 地址；空 = 上游只给了本地运行包，平台接入不了 */
             remote_url?: string;
             /**

@@ -51,6 +51,7 @@ type marketSkillDTO struct {
 	Summary       string   `json:"summary,omitempty"`
 	Version       string   `json:"version,omitempty"`
 	License       string   `json:"license,omitempty"`
+	IconURL       string   `json:"icon_url,omitempty"`
 	Topics        []string `json:"topics"`
 	Stars         int64    `json:"stars"`
 	Downloads     int64    `json:"downloads"`
@@ -66,8 +67,8 @@ func toMarketSkillDTO(m skillsource.MarketSkill) marketSkillDTO {
 	dto := marketSkillDTO{
 		SourceID: m.SourceID, SourceName: m.SourceName, SourceBaseURL: m.SourceBaseURL,
 		Slug: m.Slug, Name: m.Name, Summary: m.Summary, Version: m.Version,
-		License: m.License,
-		Topics:  m.Topics, Stars: m.Stars, Downloads: m.Downloads,
+		License: m.License, IconURL: m.IconURL,
+		Topics: m.Topics, Stars: m.Stars, Downloads: m.Downloads,
 		ReviewStatus: string(m.ReviewStatus), ReviewNote: m.ReviewNote,
 	}
 	if !m.ReviewedAt.IsZero() {

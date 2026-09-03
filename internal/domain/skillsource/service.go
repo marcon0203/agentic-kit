@@ -59,20 +59,22 @@ type Source struct {
 // MarketSkill 是同步下来的公开 Skill 快照。Raw 保留上游列表条目原文，
 // 详情页把它带回前端兜底展示。
 type MarketSkill struct {
-	SourceID      int64           `json:"source_id"`
-	SourceName    string          `json:"source_name"`
-	SourceBaseURL string          `json:"source_base_url"`
-	Slug          string          `json:"slug"`
-	Name          string          `json:"name"`
-	Summary       string          `json:"summary,omitempty"`
-	Version       string          `json:"version,omitempty"`
-	License       string          `json:"license,omitempty"`
-	Changelog     string          `json:"changelog,omitempty"`
-	Topics        []string        `json:"topics"`
-	Stars         int64           `json:"stars"`
-	Downloads     int64           `json:"downloads"`
-	UpdatedAt     time.Time       `json:"updated_at"` // 上游的更新时间；zero = 上游没给
-	Raw           json.RawMessage `json:"raw,omitempty"`
+	SourceID      int64  `json:"source_id"`
+	SourceName    string `json:"source_name"`
+	SourceBaseURL string `json:"source_base_url"`
+	Slug          string `json:"slug"`
+	Name          string `json:"name"`
+	Summary       string `json:"summary,omitempty"`
+	Version       string `json:"version,omitempty"`
+	License       string `json:"license,omitempty"`
+	Changelog     string `json:"changelog,omitempty"`
+	// IconURL 是上游给的图标地址；为空是常态，前端会生成字母图标兜底。
+	IconURL   string          `json:"icon_url,omitempty"`
+	Topics    []string        `json:"topics"`
+	Stars     int64           `json:"stars"`
+	Downloads int64           `json:"downloads"`
+	UpdatedAt time.Time       `json:"updated_at"` // 上游的更新时间；zero = 上游没给
+	Raw       json.RawMessage `json:"raw,omitempty"`
 
 	// 审核结论。用户侧列表只会拿到 approved 的条目，这几个字段是给审核台
 	// （系统配置 → Skill 源）看的。
@@ -115,6 +117,7 @@ type FetchedSkill struct {
 	Version   string
 	License   string
 	Changelog string
+	IconURL   string
 	Topics    []string
 	Stars     int64
 	Downloads int64

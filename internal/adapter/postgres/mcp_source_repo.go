@@ -178,6 +178,7 @@ func (r *MCPSourceRepository) ReplaceServers(ctx context.Context, sourceID int64
 			RepositoryUrl: pgtype.Text{String: s.RepositoryURL, Valid: s.RepositoryURL != ""},
 			RemoteUrl:     pgtype.Text{String: s.RemoteURL, Valid: s.RemoteURL != ""},
 			RemoteType:    pgtype.Text{String: s.RemoteType, Valid: s.RemoteType != ""},
+			IconUrl:       pgtype.Text{String: s.IconURL, Valid: s.IconURL != ""},
 			Topics:        topics,
 			UpdatedAt:     updated,
 			Raw:           s.Raw,
@@ -208,7 +209,8 @@ func marketServerFromRow(row store.ListMarketMCPServersRow) mcpsource.MarketServ
 		Summary: textOrEmpty(row.Summary), Version: textOrEmpty(row.Version),
 		License: textOrEmpty(row.License), RepositoryURL: textOrEmpty(row.RepositoryUrl),
 		RemoteURL: textOrEmpty(row.RemoteUrl), RemoteType: textOrEmpty(row.RemoteType),
-		Topics: row.Topics, Raw: append([]byte(nil), row.Raw...),
+		IconURL: textOrEmpty(row.IconUrl),
+		Topics:  row.Topics, Raw: append([]byte(nil), row.Raw...),
 		ReviewStatus: mcpsource.ReviewStatus(row.ReviewStatus),
 		ReviewNote:   textOrEmpty(row.ReviewNote),
 	}

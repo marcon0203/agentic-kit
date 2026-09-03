@@ -4,6 +4,7 @@ import { ExternalLink, Plug } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { MarketAvatar } from '@/components/market/MarketAvatar'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 
@@ -38,8 +39,11 @@ export function MarketMcpServerCard({ server }: { server: MarketMCPServer }) {
 
   return (
     <div className="flex min-h-[9.5rem] flex-col gap-space-2 rounded-lg border border-border bg-surface p-space-4 transition-colors hover:border-border-strong">
-      <span className="text-body-md truncate font-medium text-ink-900" title={server.slug}>
-        {server.slug}
+      <span className="flex items-center gap-space-3">
+        <MarketAvatar iconUrl={server.icon_url} seed={server.slug} name={server.name} />
+        <span className="text-body-md min-w-0 truncate font-medium text-ink-900" title={server.slug}>
+          {server.slug}
+        </span>
       </span>
       <span className="text-body-sm line-clamp-2 text-ink-500">{server.summary || '上游没有提供简介。'}</span>
 

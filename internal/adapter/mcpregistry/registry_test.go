@@ -246,3 +246,31 @@ func TestFetchList_IncludesUpstreamErrorBody(t *testing.T) {
 		t.Fatalf("上游的错误正文必须带出来，得到 %v", err)
 	}
 }
+
+// 图标的三种写法都要认。认漏一种的结果不是报错，是整片卡片没有图——这种
+// 静默的降级最容易漏过去。
+func TestFetchList_PicksIconFromAnyOfTheThreeShapes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"servers":[
+			{"name":"a/icons","icons":[{"src":"https://cdn/a.png","mimeType":"image/png"}]},
+			{"name":"a/iconurl","iconUrl":"https://cdn/b.png"},
+			{"name":"a/logourl","logoUrl":"https://cdn/c.png"},
+			{"name":"a/none"}
+		],"metadata":{}}`))
+	}))
+	defer srv.Close()
+
+	got, err := mcpregistry.NewRegistryFetcher().FetchList(context.Background(), target(srv.URL))
+	if err != nil {
+		t.Fatalf("拉取失败: %v", err)
+	}
+	want := []string{"https://cdn/a.png", "https://cdn/b.png", "https://cdn/c.png", ""}
+	if len(got) != len(want) {
+		t.Fatalf("期望 %d 条，得到 %d 条", len(want), len(got))
+	}
+	for i, w := range want {
+		if got[i].IconURL != w {
+			t.Errorf("第 %d 条图标应为 %q，得到 %q", i, w, got[i].IconURL)
+		}
+	}
+}

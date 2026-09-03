@@ -156,6 +156,7 @@ type MarketMcpServer struct {
 	ReviewNote    pgtype.Text        `json:"review_note"`
 	ReviewedAt    pgtype.Timestamptz `json:"reviewed_at"`
 	ReviewedBy    pgtype.Int8        `json:"reviewed_by"`
+	IconUrl       pgtype.Text        `json:"icon_url"`
 }
 
 type MarketSkill struct {
@@ -177,6 +178,7 @@ type MarketSkill struct {
 	ReviewNote   pgtype.Text        `json:"review_note"`
 	ReviewedAt   pgtype.Timestamptz `json:"reviewed_at"`
 	ReviewedBy   pgtype.Int8        `json:"reviewed_by"`
+	IconUrl      pgtype.Text        `json:"icon_url"`
 }
 
 type MarketplaceListing struct {

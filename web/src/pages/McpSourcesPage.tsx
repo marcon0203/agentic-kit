@@ -68,6 +68,8 @@ export function McpSourcesPage() {
   })
   const protocols = protocolsQuery.data?.items ?? []
   const activeProtocol = protocols.find((p) => p.id === protocol)
+  // 自定义清单指向一个文件，不是一套接口——表单的措辞和拼出来的地址都不同。
+  const isStaticJSON = protocol === 'static-json'
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['mcp-sources'] })
 
@@ -315,17 +317,27 @@ export function McpSourcesPage() {
               <Input
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://registry.example.com"
+                placeholder={isStaticJSON ? 'https://内网地址或对象存储' : 'https://registry.example.com'}
               />
             </label>
 
             <label className="flex flex-col gap-space-2">
-              <span className="text-label-md text-ink-900">接口版本前缀</span>
-              <Input value={apiPrefix} onChange={(e) => setApiPrefix(e.target.value)} placeholder="/v0" />
-              {/* 前缀填错是这套东西最常见的故障，所以把最终请求路径直接摆出
-                  来给管理员对，而不是等同步失败了再去猜。 */}
+              <span className="text-label-md text-ink-900">
+                {isStaticJSON ? '清单路径' : '接口版本前缀'}
+              </span>
+              <Input
+                value={apiPrefix}
+                onChange={(e) => setApiPrefix(e.target.value)}
+                placeholder={isStaticJSON ? '/mcp-servers.json' : '/v0'}
+              />
+              {/* 路径填错是这套东西最常见的故障，所以把最终请求地址直接摆出
+                  来给管理员对，而不是等同步失败了再去猜。static-json 指向的
+                  是一个文件而不是一套接口，所以不追加 /servers。 */}
               <span className="text-caption text-ink-500">
-                实际会请求 <span className="text-ref">{(baseUrl || 'https://…') + apiPrefix + '/servers'}</span>
+                实际会请求{' '}
+                <span className="text-ref">
+                  {(baseUrl || 'https://…') + apiPrefix + (isStaticJSON ? '' : '/servers')}
+                </span>
                 {activeProtocol?.docs_url && (
                   <>
                     ，对不上就查{' '}

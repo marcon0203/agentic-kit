@@ -52,6 +52,14 @@ type wireRemote struct {
 	URL  string `json:"url"`
 }
 
+// wireIcon 是 server.json 里 icons[] 的一项。规范给的是一组不同尺寸的图，
+// 我们只需要一个能显示的地址。
+type wireIcon struct {
+	Src      string `json:"src"`
+	MimeType string `json:"mimeType"`
+	Sizes    string `json:"sizes"`
+}
+
 type wireServer struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -59,6 +67,12 @@ type wireServer struct {
 	Version     string          `json:"version"`
 	Repository  *wireRepository `json:"repository"`
 	Remotes     []wireRemote    `json:"remotes"`
+	// 图标的三种写法都认：规范里的 icons[]，以及各家子注册中心常见的两个
+	// 单值字段。宽进严出——多认几个字段不花什么代价，认漏了就是一整片空
+	// 白卡片。
+	Icons   []wireIcon `json:"icons"`
+	IconURL string     `json:"iconUrl"`
+	LogoURL string     `json:"logoUrl"`
 	// Packages 只用来判断"这条目是不是只能本地跑"，内容原样留在 raw 里。
 	Packages []json.RawMessage `json:"packages"`
 	Meta     wireMeta          `json:"_meta"`
@@ -122,6 +136,25 @@ func parseTime(s string) time.Time {
 	return t.UTC()
 }
 
+// pickIcon 从三种写法里挑一个图标地址。icons[] 里优先挑一个位图（有
+// mimeType 的），实在没有就用第一个有 src 的。
+func pickIcon(s wireServer) string {
+	for _, ic := range s.Icons {
+		if ic.Src != "" && ic.MimeType != "" {
+			return ic.Src
+		}
+	}
+	for _, ic := range s.Icons {
+		if ic.Src != "" {
+			return ic.Src
+		}
+	}
+	if s.IconURL != "" {
+		return s.IconURL
+	}
+	return s.LogoURL
+}
+
 // pickRemote 选一个远端地址。同一个 Server 可能同时给 streamable-http 和
 // sse 两个入口，优先前者：sse 是上一代传输，新服务端只保证 streamable-http
 // 可用。
@@ -137,6 +170,35 @@ func pickRemote(remotes []wireRemote) (url, typ string) {
 		}
 	}
 	return "", ""
+}
+
+// fetchedFromWire 把一条 server.json 转成领域条目。抽出来是因为
+// static-json 协议读的是同一种形状的清单，两边必须转得一模一样——否则同一
+// 个服务从注册中心同步和从清单同步，落库的字段会不一致。
+func fetchedFromWire(s wireServer) mcpsource.FetchedServer {
+	remoteURL, remoteType := pickRemote(s.Remotes)
+	raw, _ := json.Marshal(s)
+	fs := mcpsource.FetchedServer{
+		Slug:       s.Name,
+		Name:       s.Name,
+		Summary:    s.Description,
+		Version:    s.Version,
+		RemoteURL:  remoteURL,
+		RemoteType: remoteType,
+		IconURL:    pickIcon(s),
+		Topics:     topicsOf(s, remoteType),
+		Raw:        raw,
+	}
+	if s.Repository != nil {
+		fs.RepositoryURL = s.Repository.URL
+	}
+	if s.Meta.Official != nil {
+		fs.UpdatedAt = parseTime(s.Meta.Official.UpdatedAt)
+		if fs.UpdatedAt.IsZero() {
+			fs.UpdatedAt = parseTime(s.Meta.Official.PublishedAt)
+		}
+	}
+	return fs
 }
 
 // topicsOf 给条目打上页面上能筛的标签：有没有远端地址、代码托管在哪。
@@ -191,28 +253,7 @@ func (f *RegistryFetcher) FetchList(ctx context.Context, target mcpsource.FetchT
 			}
 			seen[s.Name] = true
 
-			remoteURL, remoteType := pickRemote(s.Remotes)
-			raw, _ := json.Marshal(s)
-			fs := mcpsource.FetchedServer{
-				Slug:       s.Name,
-				Name:       s.Name,
-				Summary:    s.Description,
-				Version:    s.Version,
-				RemoteURL:  remoteURL,
-				RemoteType: remoteType,
-				Topics:     topicsOf(s, remoteType),
-				Raw:        raw,
-			}
-			if s.Repository != nil {
-				fs.RepositoryURL = s.Repository.URL
-			}
-			if s.Meta.Official != nil {
-				fs.UpdatedAt = parseTime(s.Meta.Official.UpdatedAt)
-				if fs.UpdatedAt.IsZero() {
-					fs.UpdatedAt = parseTime(s.Meta.Official.PublishedAt)
-				}
-			}
-			all = append(all, fs)
+			all = append(all, fetchedFromWire(s))
 		}
 		next := resp.Metadata.cursor()
 		if next == "" || len(resp.Servers) == 0 {

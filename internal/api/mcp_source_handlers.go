@@ -64,6 +64,7 @@ type marketMCPServerDTO struct {
 	Version       string   `json:"version,omitempty"`
 	License       string   `json:"license,omitempty"`
 	RepositoryURL string   `json:"repository_url,omitempty"`
+	IconURL       string   `json:"icon_url,omitempty"`
 	RemoteURL     string   `json:"remote_url,omitempty"`
 	RemoteType    string   `json:"remote_type,omitempty"`
 	Topics        []string `json:"topics"`
@@ -81,7 +82,8 @@ func toMarketMCPServerDTO(m mcpsource.MarketServer) marketMCPServerDTO {
 	dto := marketMCPServerDTO{
 		ID: m.ID, SourceID: m.SourceID, SourceName: m.SourceName, SourceBaseURL: m.SourceBaseURL,
 		Slug: m.Slug, Name: m.Name, Summary: m.Summary, Version: m.Version, License: m.License,
-		RepositoryURL: m.RepositoryURL, RemoteURL: m.RemoteURL, RemoteType: m.RemoteType,
+		RepositoryURL: m.RepositoryURL, IconURL: m.IconURL,
+		RemoteURL: m.RemoteURL, RemoteType: m.RemoteType,
 		Topics: m.Topics, Installable: m.Installable(),
 		ReviewStatus: string(m.ReviewStatus), ReviewNote: m.ReviewNote,
 	}
