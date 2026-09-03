@@ -1,107 +1,140 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown } from 'lucide-react'
 
 import { apiClient, unwrap, assertOk, ApiError } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
 import { useAuthStore } from '@/lib/auth/store'
-
-type RunDetail = components['schemas']['RunDetail']
-import { useRunEvents } from '@/lib/runs/useRunEvents'
-import { buildTimeline } from '@/lib/runs/timeline'
+import { AgentThread } from '@/components/chat/AgentThread'
+import { useConversation, type StartRun } from '@/lib/runs/useConversation'
+import { replayFinishedTurns } from '@/lib/runs/replaySession'
+import type { ChatTurn } from '@/lib/runs/threadMessages'
 import { RunHeader } from '@/components/run/RunHeader'
 import { RunSidebar } from '@/components/run/RunSidebar'
-import { UserBubble, AgentBubble } from '@/components/run/ChatBubble'
-import { GateCard } from '@/components/run/GateCard'
-import { PluginRenderCard } from '@/components/run/PluginRenderCard'
 import type { PlatformStatus } from '@/components/run/StatusChip'
 
+type RunDetail = components['schemas']['RunDetail']
+type RunSummary = components['schemas']['RunSummary']
+
+/**
+ * 应用运行页。
+ *
+ * 这一页原来是个一次性的"运行查看器"：没有输入框，看完这一次就完了，想
+ * 再问一句只能回去重新发起。现在它是一段**对话**——同一个 session 里连着
+ * 发消息，模型接得住上文；刷新页面也能把整段对话重建出来。
+ *
+ * 界面换成了 assistant-ui（AgentThread），右边的执行图/共享状态侧栏保持
+ * 原样：那一栏是"这次运行内部发生了什么"，和对话本身是两件事。
+ */
 export function RunPage() {
   const { runId } = useParams<{ runId: string }>()
-  const location = useLocation()
-  const initialInput = (location.state as { inputText?: string } | null)?.inputText
+  const navigate = useNavigate()
   const userId = useAuthStore((s) => s.user?.id)
   const queryClient = useQueryClient()
-
-  const { events, status: streamStatus, reconnect } = useRunEvents(runId)
-  const timeline = useMemo(() => buildTimeline(events), [events])
 
   const runQuery = useQuery({
     queryKey: ['run', runId],
     queryFn: async () => unwrap<RunDetail>(await apiClient.GET('/runs/{id}', { params: { path: { id: runId! } } })),
     enabled: !!runId,
-    refetchInterval: streamStatus === 'open' ? 4000 : false,
+  })
+  const run = runQuery.data
+  const sessionID = run?.session_id
+
+  // 这段对话里的全部运行，用来重建历史。老运行没有 session_id，那就只有
+  // 眼前这一次——如实呈现，不硬凑成一段对话。
+  const sessionQuery = useQuery({
+    queryKey: ['session-runs', sessionID],
+    queryFn: async () =>
+      unwrap<RunSummary[]>(await apiClient.GET('/sessions/{id}/runs', { params: { path: { id: sessionID! } } })),
+    enabled: !!sessionID,
   })
 
-  // No shared_state.updated event exists yet (see run_engine.go's
-  // finishRun/persistEvent) — refetch the run detail whenever the stream
-  // reaches a terminal state so the sidebar's shared_state panel and
-  // final usage numbers are current, instead of leaving the last poll.
+  // 地址栏里那次运行还在跑，就交给 useConversation 实时跟；已经结束了，
+  // 它和其它历史轮次一样由重放补回来。
+  const liveRunID = run?.status === 'running' ? runId : undefined
+
+  const [history, setHistory] = useState<ChatTurn[] | undefined>(undefined)
   useEffect(() => {
-    if (streamStatus === 'closed') {
-      queryClient.invalidateQueries({ queryKey: ['run', runId] })
-    }
-  }, [streamStatus, runId, queryClient])
+    const rows = sessionQuery.data
+    if (!run) return
+    // 没有 session_id 的老运行不属于任何一段对话，就只有眼前这一次。
+    const ids = rows ? rows.map((r) => r.run_id) : runId ? [runId] : []
+    const controller = new AbortController()
+    replayFinishedTurns(ids, liveRunID, controller.signal)
+      .then(setHistory)
+      .catch(() => {
+        // 重建失败不该把整页拖垮：至少还能接着往下聊。
+        setHistory([])
+      })
+    return () => controller.abort()
+  }, [sessionQuery.data, run, runId, liveRunID])
 
-  const run = runQuery.data
+  const start = useCallback<StartRun>(
+    async (question, sid) => {
+      const created = unwrap<RunSummary>(
+        await apiClient.POST('/runs', {
+          body: {
+            bundle_ref: run?.bundle_ref ?? '',
+            ...(run?.bundle_version ? { bundle_version: run.bundle_version } : {}),
+            input: { message: question },
+            ...(sid ? { session_id: sid } : {}),
+          },
+          params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+        }),
+      )
+      // 地址栏跟着走到最新那次运行：刷新、分享链接拿到的都是这段对话的当
+      // 前位置，而不是它开头的那一次。
+      navigate(`/runs/${created.run_id}`, { replace: true })
+      return created
+    },
+    [run?.bundle_ref, run?.bundle_version, navigate],
+  )
 
-  // Auto-scroll to bottom on new content, but pause once the user scrolls
-  // up — spec-14: show a "new message" pill instead of yanking them back.
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const [autoScroll, setAutoScroll] = useState(true)
-  const [hasNewMessage, setHasNewMessage] = useState(false)
+  const chat = useConversation({
+    start,
+    initialSessionID: sessionID,
+    initialTurns: history,
+    // 历史还没重建完就别接管实时那一轮，否则它会排在历史前面。
+    initialActiveRunID: history !== undefined ? liveRunID : undefined,
+    blocked: !run?.bundle_ref,
+  })
 
+  // 一轮跑完后回头刷运行详情：用量、共享状态这些只在运行行上，事件流里
+  // 没有。
+  const settledRun = chat.activeRunID === undefined
   useEffect(() => {
-    if (autoScroll) {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-      setHasNewMessage(false)
-    } else {
-      setHasNewMessage(true)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events.length])
-
-  function handleScroll() {
-    const el = scrollRef.current
-    if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    setAutoScroll(nearBottom)
-    if (nearBottom) setHasNewMessage(false)
-  }
-
-  function scrollToBottom() {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
-    setAutoScroll(true)
-    setHasNewMessage(false)
-  }
+    if (settledRun && runId) queryClient.invalidateQueries({ queryKey: ['run', runId] })
+  }, [settledRun, runId, queryClient])
 
   const [actionError, setActionError] = useState<string | null>(null)
 
-  async function resolveGate(node: string, approved: boolean) {
-    if (!runId) return
-    setActionError(null)
-    try {
-      assertOk(await apiClient.POST('/runs/{id}/gate', { params: { path: { id: runId } }, body: { node, approved } }))
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : '操作失败，请稍后重试')
-      throw err
-    }
-  }
+  const resolveGate = useCallback(
+    async (node: string, approved: boolean) => {
+      const target = chat.activeRunID ?? runId
+      if (!target) return
+      setActionError(null)
+      try {
+        assertOk(await apiClient.POST('/runs/{id}/gate', { params: { path: { id: target } }, body: { node, approved } }))
+      } catch (err) {
+        setActionError(err instanceof ApiError ? err.message : '操作失败，请稍后重试')
+        throw err
+      }
+    },
+    [chat.activeRunID, runId],
+  )
 
-  async function stopRun() {
-    if (!runId) return
+  const stopRun = useCallback(async () => {
+    const target = chat.activeRunID ?? runId
+    if (!target) return
     setActionError(null)
     try {
-      assertOk(await apiClient.POST('/runs/{id}/cancel', { params: { path: { id: runId } } }))
-      queryClient.invalidateQueries({ queryKey: ['run', runId] })
+      assertOk(await apiClient.POST('/runs/{id}/cancel', { params: { path: { id: target } } }))
+      queryClient.invalidateQueries({ queryKey: ['run', target] })
     } catch (err) {
       setActionError(err instanceof ApiError ? err.message : '停止失败，请稍后重试')
       throw err
     }
-  }
-
-  if (!runId) return null
+  }, [chat.activeRunID, runId, queryClient])
 
   const isBlackbox = run ? !run.is_owner : false
   // V1's only valid approver is the run's own triggered_by user (spec-11)
@@ -117,18 +150,28 @@ export function RunPage() {
   const canApprove = !!userId && !!run?.is_owner
 
   const runStatus: PlatformStatus =
-    run?.status === 'failed' ? 'failed' : run?.status === 'finished' ? 'done' : timeline.runStatus === 'failed' ? 'failed' : 'running'
+    run?.status === 'failed'
+      ? 'failed'
+      : run?.status === 'finished'
+        ? 'done'
+        : chat.timeline.runStatus === 'failed'
+          ? 'failed'
+          : 'running'
+
+  const gate = useMemo(() => ({ canApprove, onResolve: resolveGate }), [canApprove, resolveGate])
+
+  if (!runId) return null
 
   return (
     <div className="grid grid-cols-1 gap-space-6 lg:grid-cols-[1.08fr_.92fr]">
-      <div className="flex flex-col">
+      <div className="flex min-h-0 flex-col">
         <RunHeader
-          runId={runId}
+          runId={chat.activeRunID ?? runId}
           status={runStatus}
-          streamStatus={streamStatus}
+          streamStatus={chat.streamStatus}
           totalTokens={run?.usage?.total_tokens ?? 0}
           costUsd={run?.usage?.cost_usd ?? 0}
-          onReconnect={reconnect}
+          onReconnect={chat.reconnect}
           onStop={stopRun}
         />
 
@@ -138,66 +181,31 @@ export function RunPage() {
           </p>
         )}
 
-        <div className="relative flex-1 rounded-lg border border-border bg-surface p-space-6">
-          <div ref={scrollRef} onScroll={handleScroll} className="flex max-h-[65vh] flex-col gap-space-5 overflow-y-auto">
-            {initialInput && <UserBubble text={initialInput} />}
-
-            {timeline.entries.length === 0 && (
-              <p className="text-body-sm flex items-center gap-space-2 text-ink-500">
-                <span aria-hidden className="size-2 animate-pulse rounded-full bg-blueprint" />
-                正在启动，第一个节点马上开始…
-              </p>
-            )}
-
-            {timeline.entries.map((entry) => {
-              if (entry.kind === 'bubble-group') {
-                return (
-                  <div key={entry.key} className="flex flex-col gap-space-4 md:flex-row">
-                    {entry.nodes.map((node) => (
-                      <AgentBubble key={node} node={node} bubble={timeline.bubbles[node]} isBlackbox={isBlackbox} />
-                    ))}
-                  </div>
-                )
-              }
-              if (entry.kind === 'gate') {
-                return <GateCard key={entry.key} gate={entry} canApprove={canApprove} onResolve={resolveGate} />
-              }
-              if (entry.kind === 'render') {
-                return <PluginRenderCard key={entry.key} entry={entry} />
-              }
-              return (
-                <div
-                  key={entry.key}
-                  className={
-                    'text-body-sm rounded-sm border px-space-4 py-space-3 ' +
-                    (entry.tone === 'error'
-                      ? 'border-rust bg-rust-tint text-rust'
-                      : entry.tone === 'success'
-                        ? 'border-moss bg-moss-tint text-moss'
-                        : 'border-border text-ink-700')
-                  }
-                >
-                  {entry.text}
-                </div>
-              )
-            })}
-          </div>
-
-          {hasNewMessage && !autoScroll && (
-            <button
-              type="button"
-              onClick={scrollToBottom}
-              className="absolute bottom-space-4 right-space-4 flex items-center gap-1 rounded-full bg-blueprint px-space-4 py-space-2 text-body-sm text-white shadow-md"
-            >
-              有新消息 <ArrowDown className="size-3.5" aria-hidden />
-            </button>
-          )}
+        <div className="flex max-h-[72vh] min-h-[24rem] flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface">
+          <AgentThread
+            messages={chat.messages}
+            isRunning={chat.isRunning}
+            onSend={chat.send}
+            onCancel={stopRun}
+            gate={gate}
+            disabled={!run?.bundle_ref}
+            disabledHint={run ? undefined : '正在读取这次运行…'}
+            emptyTitle={run?.bundle_ref ?? '运行'}
+            emptyHint="接着往下问，模型看得到上文"
+            footerNote={
+              chat.error ? (
+                <p role="alert" className="text-caption text-rust">
+                  {chat.error}
+                </p>
+              ) : undefined
+            }
+          />
         </div>
       </div>
 
       <RunSidebar
-        bubbles={timeline.bubbles}
-        events={events}
+        bubbles={chat.timeline.bubbles}
+        events={chat.events}
         sharedState={(run?.shared_state as Record<string, unknown>) ?? {}}
         isBlackbox={isBlackbox}
         totalTokens={run?.usage?.total_tokens ?? 0}

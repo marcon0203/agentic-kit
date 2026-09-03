@@ -321,9 +321,12 @@ func (x *execution) Start(triggeredBy int64, sessionID string, input map[string]
 	// purpose (which should still stream normally). Explicit tools[].ui
 	// registrations (TriggerTool set, FencedLangs empty) aren't fenced-block
 	// matches at all, so they're naturally excluded here.
+	// input 一并写进事件里，而不是只落在 bundle_runs.shared_state：刷新页
+	// 面后前端要把整段对话重建出来，一次运行读一条事件流就能同时拿到"用户
+	// 问了什么"和"模型答了什么"——否则还得为每一次运行再多取一次运行详情。
 	_ = e.events.Append(persist, run.Event{
 		RunID: x.runID, Type: run.EventBundleStarted,
-		Payload: map[string]any{"renderers": rendererFencedLangs(x.renderRules)},
+		Payload: map[string]any{"renderers": rendererFencedLangs(x.renderRules), "input": input},
 	})
 
 	var usage run.Usage

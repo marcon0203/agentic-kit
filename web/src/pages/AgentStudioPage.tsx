@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, Copy, Loader2, Send } from 'lucide-react'
+import { ArrowLeft, Copy, Loader2 } from 'lucide-react'
 
 import { ErrorPanel } from '@/components/common/EmptyState'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { TabRail, TabRailItem } from '@/components/common/Page'
@@ -17,11 +16,9 @@ import { BasicInfoStep } from '@/components/agents/steps/BasicInfoStep'
 import { PersonaKnowledgeStep } from '@/components/agents/steps/PersonaKnowledgeStep'
 import { SkillsToolsStep } from '@/components/agents/steps/SkillsToolsStep'
 import { ConstraintsHandoffStep } from '@/components/agents/steps/ConstraintsHandoffStep'
-import { cn } from '@/lib/utils'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
-import { useRunEvents } from '@/lib/runs/useRunEvents'
-import { buildTimeline, type TimelineEntry } from '@/lib/runs/timeline'
-import { PluginRenderCard } from '@/components/run/PluginRenderCard'
+import { AgentThread } from '@/components/chat/AgentThread'
+import { useConversation, type StartRun } from '@/lib/runs/useConversation'
 import { validateAgentDefinition } from '@/lib/validation/validateAgent'
 import { EMPTY_FORM, formStateToDefinition, definitionToFormState, type FormState } from '@/lib/agents/definition'
 import type { components } from '@/lib/api/schema'
@@ -403,211 +400,62 @@ export function AgentStudioPage() {
   )
 }
 
-type RenderEntry = Extract<TimelineEntry, { kind: 'render' }>
-
-interface Exchange {
-  question: string
-  answer: string
-  failed: boolean
-  // 一次试运行里触发的插件渲染器（spec-20 §4.2 的 node.render，比如图表
-  // 渲染）——这个面板原来只读 timeline.bubbles 拼文本，node.render 事件
-  // 被整个丢在地上：装了图表渲染器、也在 capabilities.tools[] 里引用了，
-  // 模型也确实输出了 ```chart 代码块，运行完了却什么都看不到，问题不在
-  // 触发条件，是这个面板压根没画这类事件。RunPage.tsx（正式运行详情页）
-  // 一直是有画的，试运行这边漏了。
-  renders: RenderEntry[]
-}
-
 /**
  * 右侧试运行面板。发出去的是当前这一刻的配置（POST /runs/agent-test 收的
  * 是完整定义而不是 ref），所以不用先保存就能测。
+ *
+ * 界面是 assistant-ui 的线程；对话状态和事件流仍走 useConversation，
+ * 它把连续几条消息串成同一段会话（带上 session_id），模型因此接得住上文
+ * ——在这之前每发一条都是全新运行，问"接着上一句说"只会得到一脸茫然。
  */
 function TestPanel({ form, problems }: { form: FormState; problems: string[] }) {
-  const [history, setHistory] = useState<Exchange[]>([])
-  const [draft, setDraft] = useState('')
-  const [runId, setRunId] = useState<string | undefined>(undefined)
-  const [pending, setPending] = useState<string | null>(null)
-  const [starting, setStarting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  /** 断流时记下是哪一次运行、问的什么，好让「重连」能续上同一次。 */
-  const [interrupted, setInterrupted] = useState<{ runId: string; question: string } | null>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  const { events, status: streamStatus, reconnect } = useRunEvents(runId)
-  const timeline = useMemo(() => buildTimeline(events), [events])
-  const liveText = Object.values(timeline.bubbles)
-    .map((b) => b.text)
-    .filter(Boolean)
-    .join('\n')
-  const liveRenders = timeline.entries.filter((e): e is RenderEntry => e.kind === 'render')
-
-  useEffect(() => {
-    if (!runId || pending === null) return
-    if (timeline.runStatus !== 'finished' && timeline.runStatus !== 'failed') return
-    const failed = timeline.runStatus === 'failed'
-    setHistory((h) => [
-      ...h,
-      {
-        question: pending,
-        answer: liveText || timeline.runError || (failed ? '运行失败' : '（没有输出）'),
-        failed,
-        renders: liveRenders,
-      },
-    ])
-    setPending(null)
-    setRunId(undefined)
-  }, [timeline.runStatus, timeline.runError, runId, pending, liveText, liveRenders])
-
-  // 流断在终态事件之前时的兜底。后端那条竞态已经修掉（engine 先写终态事
-  // 件再改状态，流处理器先读状态再读事件），但网络抖动、代理超时这些外部
-  // 原因还是会断流；一旦断了又没人收尾，pending 就永远挂着，输入框跟着一
-  // 直禁用——用户看到的就是"发了一次之后再也发不出去"。这里把它落成一条
-  // 失败记录并放开输入，同时留一个「重试」让人能续上同一次运行。
-  useEffect(() => {
-    if (!runId || pending === null || streamStatus !== 'error') return
-    setHistory((h) => [
-      ...h,
-      { question: pending, answer: liveText || '连接中断，没有收到运行结果', failed: true, renders: liveRenders },
-    ])
-    setError('运行事件流中断了')
-    setInterrupted({ runId, question: pending })
-    setPending(null)
-    setRunId(undefined)
-  }, [streamStatus, runId, pending, liveText, liveRenders])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [history.length, liveText])
-
   const blocked = problems.length > 0
-  const busy = starting || pending !== null
 
-  async function send() {
-    const question = draft.trim()
-    if (!question || blocked || busy) return
-    setDraft('')
-    setError(null)
-    setInterrupted(null)
-    setStarting(true)
-    try {
-      const created = unwrap<RunSummary>(
-        await apiClient.POST('/runs/agent-test', {
-          body: { definition: formStateToDefinition(form), input: { message: question } },
-          params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
-        }),
-      )
-      setPending(question)
-      setRunId(created.run_id)
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : '试运行没能启动，请稍后重试')
-      setDraft(question)
-    } finally {
-      setStarting(false)
-    }
-  }
+  // form 每敲一个键就换引用，start 直接依赖它会让 useConversation 的
+  // send 每帧都换新的。用 ref 读最新值：发送那一刻取的就是当下的配置。
+  const formRef = useRef(form)
+  formRef.current = form
+
+  const start = useCallback<StartRun>(async (question, sessionID) => {
+    const created = unwrap<RunSummary>(
+      await apiClient.POST('/runs/agent-test', {
+        body: {
+          definition: formStateToDefinition(formRef.current),
+          input: { message: question },
+          ...(sessionID ? { session_id: sessionID } : {}),
+        },
+        params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+      }),
+    )
+    return created
+  }, [])
+
+  const chat = useConversation({ start, blocked })
 
   return (
     <aside className="flex w-[420px] shrink-0 flex-col border-l border-border bg-surface">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-space-4">
-        <span className="text-label-md text-ink-900">试运行</span>
-        <span className="text-caption text-ink-500">每次发送都是一次独立运行</span>
-      </div>
-
-      <div className="flex min-h-0 flex-1 flex-col gap-space-4 overflow-y-auto px-space-4 py-space-4">
-        {history.length === 0 && pending === null && (
-          <div className="flex flex-1 flex-col items-center justify-center gap-space-2 text-center">
-            <span className="text-label-md text-ink-900">{form.role || form.agent || '新建智能体'}</span>
-            <span className="text-body-sm text-ink-500">输入问题进行测试体验</span>
+      <AgentThread
+        messages={chat.messages}
+        isRunning={chat.isRunning}
+        onSend={chat.send}
+        disabled={blocked}
+        disabledHint={blocked ? `配置还不完整，补齐后即可试运行：${problems[0]}` : undefined}
+        emptyTitle={form.role || form.agent || '新建智能体'}
+        emptyHint="输入问题进行测试体验"
+        header={
+          <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-space-4">
+            <span className="text-label-md text-ink-900">试运行</span>
+            <span className="text-caption text-ink-500">连续发送会接着同一段对话</span>
           </div>
-        )}
-
-        {history.map((ex, i) => (
-          <div key={i} className="flex flex-col gap-space-2">
-            <p className="text-body-sm ml-auto max-w-[85%] rounded-lg bg-blueprint-tint px-space-3 py-space-2 text-ink-900">
-              {ex.question}
+        }
+        footerNote={
+          chat.error ? (
+            <p role="alert" className="text-caption text-rust">
+              {chat.error}
             </p>
-            <p
-              className={cn(
-                'text-body-sm max-w-[85%] rounded-lg px-space-3 py-space-2 whitespace-pre-wrap',
-                ex.failed ? 'bg-rust-tint text-rust' : 'bg-surface-muted text-ink-900',
-              )}
-            >
-              {ex.answer}
-            </p>
-            {ex.renders.map((r) => (
-              <PluginRenderCard key={r.key} entry={r} />
-            ))}
-          </div>
-        ))}
-
-        {pending !== null && (
-          <div className="flex flex-col gap-space-2">
-            <p className="text-body-sm ml-auto max-w-[85%] rounded-lg bg-blueprint-tint px-space-3 py-space-2 text-ink-900">
-              {pending}
-            </p>
-            <p
-              aria-busy
-              className="text-body-sm max-w-[85%] rounded-lg bg-surface-muted px-space-3 py-space-2 whitespace-pre-wrap text-ink-900"
-            >
-              {liveText || '运行中…'}
-            </p>
-            {liveRenders.map((r) => (
-              <PluginRenderCard key={r.key} entry={r} />
-            ))}
-          </div>
-        )}
-
-        <div ref={bottomRef} />
-      </div>
-
-      {blocked && (
-        <p className="text-caption border-t border-border px-space-4 py-space-2 text-ink-500">
-          配置还不完整，补齐后即可试运行：{problems[0]}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="text-caption flex items-center gap-space-2 border-t border-border px-space-4 py-space-2 text-rust">
-          <span>{error}</span>
-          {interrupted && (
-            <button
-              type="button"
-              className="underline underline-offset-2"
-              onClick={() => {
-                // 运行本身可能还在服务端跑着，重新订阅同一个 run 就能接上；
-                // 上面那条失败记录留着，作为"这里断过一次"的痕迹。
-                setError(null)
-                setPending(interrupted.question)
-                setRunId(interrupted.runId)
-                setInterrupted(null)
-                reconnect()
-              }}
-            >
-              重连
-            </button>
-          )}
-        </p>
-      )}
-
-      <div className="flex shrink-0 items-end gap-space-2 border-t border-border p-space-3">
-        <Textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              send()
-            }
-          }}
-          rows={2}
-          placeholder={blocked ? '补齐配置后可试运行' : '输入问题，Enter 发送'}
-          aria-label="试运行输入"
-          disabled={blocked}
-          className="resize-none"
-        />
-        <Button size="sm" disabled={blocked || busy || !draft.trim()} onClick={send} aria-label="发送">
-          <Send className="size-4" aria-hidden />
-        </Button>
-      </div>
+          ) : undefined
+        }
+      />
     </aside>
   )
 }

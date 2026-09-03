@@ -42,6 +42,12 @@ export interface RunTimeline {
   bubbles: Record<string, NodeBubbleState>
   runStatus: 'idle' | 'running' | 'finished' | 'failed'
   runError?: string
+  /**
+   * 这次运行的用户输入，来自 bundle.started 事件的 payload.input.message。
+   * 刷新页面后重建整段对话时，一条事件流就同时带上了"问了什么"和"答了
+   * 什么"，不必再为每次运行多取一次运行详情。
+   */
+  userMessage?: string
 }
 
 function payloadOf(ev: RunEvent): Record<string, unknown> {
@@ -118,6 +124,7 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
   let openGroup: Extract<TimelineEntry, { kind: 'bubble-group' }> | null = null
   let runStatus: RunTimeline['runStatus'] = 'idle'
   let runError: string | undefined
+  let userMessage: string | undefined
   // rawTextByNode holds each node's unfiltered accumulated text — bubble.text
   // is always filterFencedBlocks(raw, ...) of this, recomputed on every
   // delta rather than incrementally, so a fence marker split across two
@@ -168,6 +175,8 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
               hiddenLangsByNode[n] = new Set(langs)
             }
           }
+          const input = payload.input as Record<string, unknown> | undefined
+          if (typeof input?.message === 'string') userMessage = input.message
         }
         break
       case 'bundle.finished':
@@ -292,5 +301,5 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
     }
   }
 
-  return { entries, bubbles, runStatus, runError }
+  return { entries, bubbles, runStatus, runError, userMessage }
 }
