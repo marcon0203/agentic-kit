@@ -1139,6 +1139,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我的 API Key 列表
+         * @description 只列调用者自己的 key，且从不返回原文或哈希——能看到的只有名称、创建时间、
+         *     最后一次被用于调用的时间，以及是否已吊销。
+         */
+        get: operations["listAPIKeys"];
+        put?: never;
+        /**
+         * 新建一个 API Key
+         * @description 第三方 / 脚本调用本平台 API 的凭证——发布一个应用之后，无论是接给客户的
+         *     标准会话页面，还是对方自己接的 Open API，鉴权都走这里发的 key：
+         *     `Authorization: ApiKey <raw_key>`，和登录态的 `Authorization: Bearer` 并行有效，
+         *     `POST /runs` 等接口两种都认。
+         *
+         *     `raw_key` 只在这一次响应里出现，此后任何接口都不会再回显，也无法找回——
+         *     丢了只能吊销重开一个。
+         */
+        post: operations["createAPIKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api-keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 吊销一个 API Key
+         * @description 立即失效，不可撤回——和 GitHub/Stripe 的个人访问令牌一个模型，key 一旦
+         *     流出这个进程（写进了脚本、粘进了 CI 的 secret），撤销开关本身救不回泄漏，
+         *     只能让它作废。
+         */
+        delete: operations["revokeAPIKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/model-providers": {
         parameters: {
             query?: never;
@@ -1824,6 +1877,23 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ApiKeySummary: {
+            id: number;
+            /** @example 第三方系统集成 */
+            name: string;
+            /** Format: date-time */
+            last_used_at?: string | null;
+            revoked: boolean;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ApiKeyCreated: components["schemas"]["ApiKeySummary"] & {
+            /**
+             * @description 只在这一次响应里出现，此后任何接口都不会再回显
+             * @example agk_9f3c1b6e2a7d4f0891c2b3a4d5e6f708
+             */
+            raw_key: string;
+        };
         Envelope: {
             /**
              * @description 0 为成功；非 0 为五位业务错误码
@@ -4865,6 +4935,99 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listAPIKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ApiKeySummary"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createAPIKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @example 第三方系统集成 */
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 创建成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["ApiKeyCreated"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            /** @description 名称为空，或已达到可创建数量上限（10001） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    revokeAPIKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已吊销 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description 不存在 / 不是你的 / 已经吊销过（20007） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
         };
     };
     listModelProviders: {

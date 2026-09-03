@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	apispec "github.com/marcon0203/agentic-kit/api"
 	"github.com/marcon0203/agentic-kit/internal/auth"
 )
 
@@ -28,11 +29,15 @@ type RouterConfig struct {
 	AllowedOrigins []string
 	// DB backs the /ready probe's dependency check. Nil is allowed (tests
 	// that don't need it) — /ready then reports ready without checking.
-	DB                Pinger
-	IdempotencyStore  IdempotencyStore
-	Auth              *AuthHandlers
-	Tokens            *auth.TokenIssuer
-	APIKeys           APIKeyLookup
+	DB               Pinger
+	IdempotencyStore IdempotencyStore
+	Auth             *AuthHandlers
+	Tokens           *auth.TokenIssuer
+	APIKeys          APIKeyLookup
+	// APIKeyMgmt backs 系统配置 → API Key 管理 (create/list/revoke a
+	// caller's own keys) — a separate handler from APIKeys above, which
+	// only ever reads (AuthMiddleware's lookup-by-hash).
+	APIKeyMgmt        *APIKeyHandlers
 	Resources         *ResourceHandlers
 	KnowledgeBases    *KnowledgeBaseHandlers
 	Agents            *AgentHandlers
@@ -91,6 +96,14 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 			}
 		}
 		writeJSON(w, r, http.StatusOK, map[string]string{"status": "ready"})
+	})
+
+	// 未鉴权，和 /health、/plugins/assets 一个道理：这是文档，不是数据。第
+	// 三方要接 Open API，第一件事就是要能拿到这份契约本身，不该先卡在
+	// "我到底有没有权限看接口文档"上。
+	r.Get("/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		_, _ = w.Write(apispec.YAML)
 	})
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -215,6 +228,11 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Get("/users", cfg.RBAC.ListUsers)
 				r.Patch("/users/{id}/status", cfg.RBAC.UpdateUserStatus)
 				r.Patch("/users/{id}/roles", cfg.RBAC.UpdateUserRoles)
+			}
+			if cfg.APIKeyMgmt != nil {
+				r.Post("/api-keys", cfg.APIKeyMgmt.Create)
+				r.Get("/api-keys", cfg.APIKeyMgmt.List)
+				r.Delete("/api-keys/{id}", cfg.APIKeyMgmt.Revoke)
 			}
 			if cfg.Plugins != nil {
 				r.Post("/plugins/signing-key", cfg.Plugins.RegisterSigningKey)

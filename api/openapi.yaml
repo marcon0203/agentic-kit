@@ -46,6 +46,8 @@ tags:
     description: 运营中心 — 审计日志、举报处理
   - name: Plugins
     description: 插件体系 — 上传（签名校验+自动化门槛）、私有安装/卸载/更新配置
+  - name: ApiKeys
+    description: 系统配置 → API Key 管理 — 第三方 / 服务端调用本平台 API 用的个人凭证
 
 security:
   - BearerAuth: []
@@ -2223,6 +2225,92 @@ paths:
                       data: { $ref: '#/components/schemas/ModelAccess' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /api-keys:
+    get:
+      tags: [ApiKeys]
+      summary: 我的 API Key 列表
+      description: |
+        只列调用者自己的 key，且从不返回原文或哈希——能看到的只有名称、创建时间、
+        最后一次被用于调用的时间，以及是否已吊销。
+      operationId: listAPIKeys
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ApiKeySummary' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+    post:
+      tags: [ApiKeys]
+      summary: 新建一个 API Key
+      description: |
+        第三方 / 脚本调用本平台 API 的凭证——发布一个应用之后，无论是接给客户的
+        标准会话页面，还是对方自己接的 Open API，鉴权都走这里发的 key：
+        `Authorization: ApiKey <raw_key>`，和登录态的 `Authorization: Bearer` 并行有效，
+        `POST /runs` 等接口两种都认。
+
+        `raw_key` 只在这一次响应里出现，此后任何接口都不会再回显，也无法找回——
+        丢了只能吊销重开一个。
+      operationId: createAPIKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, examples: ['第三方系统集成'] }
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/ApiKeyCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422':
+          description: 名称为空，或已达到可创建数量上限（10001）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /api-keys/{id}:
+    delete:
+      tags: [ApiKeys]
+      summary: 吊销一个 API Key
+      description: |
+        立即失效，不可撤回——和 GitHub/Stripe 的个人访问令牌一个模型，key 一旦
+        流出这个进程（写进了脚本、粘进了 CI 的 secret），撤销开关本身救不回泄漏，
+        只能让它作废。
+      operationId: revokeAPIKey
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: 已吊销 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 不存在 / 不是你的 / 已经吊销过（20007）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
   /model-providers:
     get:
       tags: [ModelProviders]
@@ -3636,6 +3724,28 @@ components:
           schema: { $ref: '#/components/schemas/Envelope' }
 
   schemas:
+    # ── API Key ──
+    ApiKeySummary:
+      type: object
+      required: [id, name, revoked, created_at]
+      properties:
+        id: { type: integer }
+        name: { type: string, examples: ['第三方系统集成'] }
+        last_used_at: { type: [string, 'null'], format: date-time }
+        revoked: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    ApiKeyCreated:
+      allOf:
+        - $ref: '#/components/schemas/ApiKeySummary'
+        - type: object
+          required: [raw_key]
+          properties:
+            raw_key:
+              type: string
+              description: 只在这一次响应里出现，此后任何接口都不会再回显
+              examples: ['agk_9f3c1b6e2a7d4f0891c2b3a4d5e6f708']
+
     # ── 通用信封 ──
     Envelope:
       type: object

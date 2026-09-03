@@ -108,8 +108,8 @@ func (q *Queries) ListAPIKeysForOwner(ctx context.Context, ownerUserID int64) ([
 	return items, nil
 }
 
-const revokeAPIKey = `-- name: RevokeAPIKey :exec
-UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND owner_user_id = $2
+const revokeAPIKey = `-- name: RevokeAPIKey :execrows
+UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND owner_user_id = $2 AND revoked_at IS NULL
 `
 
 type RevokeAPIKeyParams struct {
@@ -117,9 +117,12 @@ type RevokeAPIKeyParams struct {
 	OwnerUserID int64 `json:"owner_user_id"`
 }
 
-func (q *Queries) RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error {
-	_, err := q.db.Exec(ctx, revokeAPIKey, arg.ID, arg.OwnerUserID)
-	return err
+func (q *Queries) RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeAPIKey, arg.ID, arg.OwnerUserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const touchAPIKeyLastUsed = `-- name: TouchAPIKeyLastUsed :exec

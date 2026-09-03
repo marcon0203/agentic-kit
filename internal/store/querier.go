@@ -341,7 +341,7 @@ type Querier interface {
 	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
 	ResolveHumanGate(ctx context.Context, arg ResolveHumanGateParams) (HumanGate, error)
 	ResolveReport(ctx context.Context, arg ResolveReportParams) (Report, error)
-	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
+	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) (int64, error)
 	SearchMemoryEntries(ctx context.Context, arg SearchMemoryEntriesParams) ([]SearchMemoryEntriesRow, error)
 	SetADKSessionState(ctx context.Context, arg SetADKSessionStateParams) error
 	SetAgentDisplayMeta(ctx context.Context, arg SetAgentDisplayMetaParams) error

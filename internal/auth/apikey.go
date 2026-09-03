@@ -31,3 +31,10 @@ func HashAPIKey(rawKey string) string {
 	sum := sha256.Sum256([]byte(rawKey))
 	return hex.EncodeToString(sum[:])
 }
+
+// KeyGenerator satisfies internal/domain/apikey.Generator, the same way
+// TokenIssuer (jwt.go) satisfies iam's TokenIssuer port: a concrete type
+// in this package, so main.go wires it in without an adapter shim.
+type KeyGenerator struct{}
+
+func (KeyGenerator) GenerateAPIKey() (rawKey, hash string, err error) { return GenerateAPIKey() }

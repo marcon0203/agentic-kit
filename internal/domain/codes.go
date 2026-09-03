@@ -25,6 +25,7 @@ const (
 	CodeAPIKeyRevoked          = 20004
 	CodeEmailAlreadyRegistered = 20005
 	CodeInvalidCredentials     = 20006
+	CodeAPIKeyNotFound         = 20007
 
 	// 30xxx — 资源中心
 	CodeResourceNotFound     = 30001

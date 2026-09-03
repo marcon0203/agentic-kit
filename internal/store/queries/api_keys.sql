@@ -15,5 +15,5 @@ FROM api_keys
 WHERE owner_user_id = $1
 ORDER BY created_at DESC;
 
--- name: RevokeAPIKey :exec
-UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND owner_user_id = $2;
+-- name: RevokeAPIKey :execrows
+UPDATE api_keys SET revoked_at = now() WHERE id = $1 AND owner_user_id = $2 AND revoked_at IS NULL;

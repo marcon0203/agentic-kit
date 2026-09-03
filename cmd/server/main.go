@@ -37,6 +37,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/config"
 	"github.com/marcon0203/agentic-kit/internal/crypto"
 	"github.com/marcon0203/agentic-kit/internal/domain/agent"
+	"github.com/marcon0203/agentic-kit/internal/domain/apikey"
 	"github.com/marcon0203/agentic-kit/internal/domain/bundle"
 	"github.com/marcon0203/agentic-kit/internal/domain/iam"
 	"github.com/marcon0203/agentic-kit/internal/domain/knowledgebase"
@@ -304,6 +305,11 @@ func run() error {
 		auth.NewTokenIssuer(cfg.JWTSecret),
 	)
 
+	// 系统配置 → API Key 管理: lets a user mint their own server-to-server
+	// credential — the api_keys table and AuthMiddleware's lookup path
+	// (APIKeys above) already existed, this is the write side neither had.
+	apiKeyService := apikey.NewService(postgres.NewAPIKeyRepository(queries), auth.KeyGenerator{})
+
 	// Every admin-only surface (系统配置's 用户管理/角色权限/模型提供商,
 	// 运营中心) is unreachable without at least one is_admin account, and
 	// no API can create the first one — so the server creates it itself on
@@ -331,6 +337,7 @@ func run() error {
 		Auth:              api.NewAuthHandlers(iamService),
 		Tokens:            auth.NewTokenIssuer(cfg.JWTSecret),
 		APIKeys:           api.NewPostgresAPIKeyLookup(queries),
+		APIKeyMgmt:        api.NewAPIKeyHandlers(apiKeyService),
 		Resources:         api.NewResourceHandlers(resourceService, mcp.NewProber()),
 		KnowledgeBases:    kbHandlers,
 		Agents:            api.NewAgentHandlers(agentService),
