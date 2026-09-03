@@ -1,9 +1,9 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Cpu, Globe, Server, Users, ShieldCheck } from 'lucide-react'
+import { Cpu, Globe, Server, Users, ShieldCheck, KeyRound } from 'lucide-react'
 
 import { SectionSidebar, type SectionSidebarGroup } from '@/components/layout/SectionSidebar'
 
-type Section = 'providers' | 'users' | 'roles' | 'skill-sources' | 'mcp-sources'
+type Section = 'providers' | 'users' | 'roles' | 'skill-sources' | 'mcp-sources' | 'api-keys'
 
 const SECTION_GROUPS: SectionSidebarGroup[] = [
   {
@@ -23,6 +23,10 @@ const SECTION_GROUPS: SectionSidebarGroup[] = [
       { value: 'users', label: '用户管理', icon: Users },
       { value: 'roles', label: '角色权限', icon: ShieldCheck },
     ],
+  },
+  {
+    label: '开发者',
+    items: [{ value: 'api-keys', label: 'API Key', icon: KeyRound }],
   },
 ]
 
