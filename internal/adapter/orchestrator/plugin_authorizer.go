@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	adaptercrypto "github.com/marcon0203/agentic-kit/internal/adapter/crypto"
 	"github.com/marcon0203/agentic-kit/internal/domain/plugin"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	"github.com/marcon0203/agentic-kit/internal/orchestrator/adk"
@@ -89,10 +90,21 @@ func (a *resourceAuthorizer) authorizePlugin(pluginID, name string) (adk.ToolSpe
 			config[adk.PluginConfigKeyUIEntry] = uiEntry
 		}
 
+		// 安装时填的配置整体下发给沙箱（Extism 的 config.get）。在这之前，
+		// 除了连接器那一条硬编码的 connection_ref，安装配置根本到不了插件
+		// ——需要凭据的插件因此装得上、跑不动。
+		pluginCfg, err := a.installConfigForSandbox(inst.Config)
+		if err != nil {
+			return adk.ToolSpec{}, false, err
+		}
+		// 连接器仍然走绑定：插件拿到的是一个连接句柄，而不是连接串或密码。
 		if connRef, ok, err := a.bindConnector(inst.Config); err != nil {
 			return adk.ToolSpec{}, false, err
 		} else if ok {
-			config[adk.PluginConfigKeyPluginConfig] = map[string]string{"connection_ref": connRef}
+			pluginCfg["connection_ref"] = connRef
+		}
+		if len(pluginCfg) > 0 {
+			config[adk.PluginConfigKeyPluginConfig] = pluginCfg
 		}
 
 		return adk.ToolSpec{
@@ -322,6 +334,50 @@ func findExtensionEntry(manifest map[string]any, point, name string) (entry, des
 		return entry, description, inputSchema, entry != ""
 	}
 	return "", "", nil, false
+}
+
+// installConfigForSandbox 解密安装配置并压成 Extism 只认的
+// map[string]string。
+//
+// 这里是凭据离开数据库进入沙箱的唯一一道门，所以有几条要守住：
+//
+//   - connector_resource_id 不下发。它是宿主侧的绑定输入，插件拿到一个资源
+//     主键没有任何用处，只会平白多暴露一个内部 id。
+//   - 非字符串的值序列化成 JSON 再给，而不是丢掉——插件作者写了个数字类型
+//     的配置项，不该悄无声息地变成"这个配置没生效"。
+func (a *resourceAuthorizer) installConfigForSandbox(rawInstConfig []byte) (map[string]string, error) {
+	out := map[string]string{}
+	if len(rawInstConfig) == 0 {
+		return out, nil
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(rawInstConfig, &stored); err != nil {
+		// 安装配置存坏了不该让整个运行崩掉：当作没配，插件自己会因为缺字段
+		// 报一个说得清楚的错。
+		return out, nil
+	}
+	decrypted, err := plugin.DecryptConfig(adaptercrypto.NewCipher(a.aesKey), plugin.Config(stored))
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range decrypted {
+		if k == "connector_resource_id" {
+			continue
+		}
+		switch tv := v.(type) {
+		case string:
+			out[k] = tv
+		case nil:
+			// 显式的 null 当作没填。
+		default:
+			b, err := json.Marshal(tv)
+			if err != nil {
+				continue
+			}
+			out[k] = string(b)
+		}
+	}
+	return out, nil
 }
 
 // requiresNetwork reads manifest.requires.network — the AllowedHosts

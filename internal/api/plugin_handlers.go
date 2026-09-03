@@ -84,9 +84,13 @@ type pluginInstallationDTO struct {
 	Version    string         `json:"version"`
 	Resolution string         `json:"resolution"`
 	Config     map[string]any `json:"config"`
-	Granted    []string       `json:"granted"`
-	Status     int16          `json:"status"`
-	CreatedAt  time.Time      `json:"created_at"`
+	// CredentialKeys 是这次安装填了哪几个凭据字段的名字，值一概没有。装完
+	// 之后"查看/更换密钥"的界面靠它——被 Redact 抹掉之后，前端否则既不知道
+	// 有没有、也不知道叫什么。
+	CredentialKeys []string  `json:"credential_keys"`
+	Granted        []string  `json:"granted"`
+	Status         int16     `json:"status"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func toPluginInstallationDTO(in plugin.Installation) pluginInstallationDTO {
@@ -96,8 +100,9 @@ func toPluginInstallationDTO(in plugin.Installation) pluginInstallationDTO {
 	}
 	return pluginInstallationDTO{
 		PluginID: in.PluginID, Version: in.Version, Resolution: string(in.Resolution),
-		Config: map[string]any(in.Config), Granted: granted,
-		Status: int16(in.Status), CreatedAt: in.CreatedAt,
+		Config: map[string]any(in.Config), CredentialKeys: append([]string{}, in.CredentialKeys...),
+		Granted: granted,
+		Status:  int16(in.Status), CreatedAt: in.CreatedAt,
 	}
 }
 

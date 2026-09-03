@@ -2347,8 +2347,10 @@ export interface components {
              * @enum {string}
              */
             resolution: "pinned" | "live";
-            /** @description 插件自己的配置，凭证字段永不出现在响应里（同资源中心的 Redact 约定） */
+            /** @description 插件自己的配置，凭证字段永不出现在响应里（同资源中心的 Redact 约定）。 更新时采取"凭证保留"的合并语义：这份 config 原样交回 PATCH 不会把已存的 密钥清空；要换就给新值，要清除就显式给空串。 */
             config: Record<string, never>;
+            /** @description 这次安装填了哪几个凭证字段的**名字**，值一概不返回。装完之后"查看/更换 密钥"的界面据此渲染输入框。 */
+            credential_keys?: string[];
             /** @description 实际授予的 requires.permissions 子集 */
             granted: string[];
             status: components["schemas"]["Status"];

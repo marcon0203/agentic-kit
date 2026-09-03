@@ -19,6 +19,7 @@ import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel } from '@/components/common/EmptyState'
 import { Section } from '@/components/common/Page'
 import { PAGE_SIZES, Pagination } from '@/components/common/Pagination'
+import { PluginConfigDialog, type PluginConfigField } from '@/components/plugins/PluginConfigDialog'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 import {
@@ -95,6 +96,7 @@ export function ComponentPlazaPage() {
   )
 
   const [installTarget, setInstallTarget] = useState<Plugin | null>(null)
+  const [configTarget, setConfigTarget] = useState<Plugin | null>(null)
 
   const items = useMemo(() => query.data?.items ?? [], [query.data])
 
@@ -198,6 +200,12 @@ export function ComponentPlazaPage() {
                   plugin={p}
                   installed={installedPluginIDs.has(p.plugin_id)}
                   onInstall={() => setInstallTarget(p)}
+                  onConfigure={
+                    installedPluginIDs.has(p.plugin_id) &&
+                    (pluginManifest(p).requires?.config_schema ?? []).length > 0
+                      ? () => setConfigTarget(p)
+                      : undefined
+                  }
                 />
               ))}
             </ul>
@@ -211,6 +219,19 @@ export function ComponentPlazaPage() {
               queryClient.invalidateQueries({ queryKey: ['plugins'] })
             }}
           />
+
+          {configTarget && (
+            <PluginConfigDialog
+              open
+              onOpenChange={(open) => !open && setConfigTarget(null)}
+              pluginID={configTarget.plugin_id}
+              displayName={configTarget.display_name || configTarget.plugin_id}
+              installation={(installedQuery.data?.items ?? []).find(
+                (i) => i.plugin_id === configTarget.plugin_id,
+              )}
+              fields={pluginManifest(configTarget).requires?.config_schema ?? []}
+            />
+          )}
         </>
       ) : (
         <>
@@ -439,7 +460,7 @@ function ComponentCard({
 
 type PluginManifest = {
   description?: string
-  requires?: { permissions?: string[] }
+  requires?: { permissions?: string[]; config_schema?: PluginConfigField[] }
   extensions?: { connector_hint?: { dialect: string; default_port?: number } }
 }
 
@@ -447,7 +468,18 @@ function pluginManifest(p: Plugin): PluginManifest {
   return (p.manifest ?? {}) as PluginManifest
 }
 
-function PluginCard({ plugin, installed, onInstall }: { plugin: Plugin; installed: boolean; onInstall: () => void }) {
+function PluginCard({
+  plugin,
+  installed,
+  onInstall,
+  onConfigure,
+}: {
+  plugin: Plugin
+  installed: boolean
+  onInstall: () => void
+  /** 已安装且清单声明了配置项时才给——没配置项的插件点进去是一张空表单。 */
+  onConfigure?: () => void
+}) {
   const manifest = pluginManifest(plugin)
   const name = plugin.display_name || plugin.plugin_id
 
@@ -466,9 +498,21 @@ function PluginCard({ plugin, installed, onInstall }: { plugin: Plugin; installe
           </span>
         </span>
         {installed ? (
-          <span className="text-caption -mt-1 -mr-2 flex h-7 shrink-0 items-center gap-1 px-space-2 text-emerald-600">
-            <Check className="size-3.5" aria-hidden />
-            已安装
+          <span className="-mt-1 -mr-2 flex shrink-0 items-center gap-1">
+            <span className="text-caption flex h-7 items-center gap-1 px-space-2 text-emerald-600">
+              <Check className="size-3.5" aria-hidden />
+              已安装
+            </span>
+            {onConfigure && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-caption h-7 px-space-2 text-blueprint"
+                onClick={onConfigure}
+              >
+                配置
+              </Button>
+            )}
           </span>
         ) : (
           <Button variant="ghost" size="sm" className="text-caption -mt-1 -mr-2 h-7 shrink-0 px-space-2 text-ink-500" onClick={onInstall}>
@@ -528,18 +572,25 @@ function PluginInstallDialog({
   const [installing, setInstalling] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [connectorForm, setConnectorForm] = useState(EMPTY_CONNECTOR_FORM)
+  // 清单声明的配置项各自的输入值。键名由插件自己定，所以这里只能是一个
+  // 动态的 map，不能写死字段。
+  const [configForm, setConfigForm] = useState<Record<string, string>>({})
 
   useEffect(() => {
     setError(null)
     setInstalling(false)
     const hint = plugin ? pluginManifest(plugin).extensions?.connector_hint : undefined
     setConnectorForm({ ...EMPTY_CONNECTOR_FORM, port: hint?.default_port ? String(hint.default_port) : '' })
+    // 预填清单给的默认值（凭据项不会有默认值）。
+    const fields = plugin ? (pluginManifest(plugin).requires?.config_schema ?? []) : []
+    setConfigForm(Object.fromEntries(fields.map((f) => [f.key, f.default ?? ''])))
   }, [plugin])
 
   if (!plugin) return null
   const manifest = pluginManifest(plugin)
   const permissions = manifest.requires?.permissions ?? []
   const connectorHint = manifest.extensions?.connector_hint
+  const configFields = manifest.requires?.config_schema ?? []
 
   const connectorFieldsFilled =
     connectorForm.host.trim() !== '' &&
@@ -547,7 +598,10 @@ function PluginInstallDialog({
     connectorForm.database.trim() !== '' &&
     connectorForm.username.trim() !== '' &&
     connectorForm.password.trim() !== ''
-  const canInstall = !connectorHint || connectorFieldsFilled
+  const configFieldsFilled = configFields
+    .filter((f) => f.required)
+    .every((f) => (configForm[f.key] ?? '').trim() !== '')
+  const canInstall = (!connectorHint || connectorFieldsFilled) && configFieldsFilled
 
   function setConnectorField<K extends keyof typeof EMPTY_CONNECTOR_FORM>(key: K, value: (typeof EMPTY_CONNECTOR_FORM)[K]) {
     setConnectorForm((prev) => ({ ...prev, [key]: value }))
@@ -580,6 +634,17 @@ function PluginInstallDialog({
           }),
         )
         installConfig = { connector_resource_id: resource.id }
+      }
+
+      // 清单声明的配置项。空的可选项不提交——省得 config 里攒下一堆空串，
+      // 插件那边还得再判一次"填了但是空的"。
+      const declared: Record<string, unknown> = {}
+      for (const f of configFields) {
+        const v = (configForm[f.key] ?? '').trim()
+        if (v !== '') declared[f.key] = v
+      }
+      if (Object.keys(declared).length > 0) {
+        installConfig = { ...(installConfig ?? {}), ...declared }
       }
 
       unwrap(
@@ -624,6 +689,32 @@ function PluginInstallDialog({
               </ul>
             )}
           </div>
+
+          {configFields.length > 0 && (
+            <div className="flex flex-col gap-space-3">
+              <p className="text-body-sm text-ink-700">这个插件需要你提供以下信息：</p>
+              {configFields.map((f) => (
+                <label key={f.key} className="flex flex-col gap-space-1">
+                  <span className="text-caption text-ink-500">
+                    {f.label}
+                    {f.required && <span className="ml-1 text-rust">*</span>}
+                  </span>
+                  <Input
+                    type={f.secret ? 'password' : 'text'}
+                    autoComplete={f.secret ? 'new-password' : undefined}
+                    value={configForm[f.key] ?? ''}
+                    onChange={(e) => setConfigForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                    placeholder={f.placeholder}
+                    className="h-9"
+                  />
+                  {f.description && <span className="text-caption text-ink-500">{f.description}</span>}
+                </label>
+              ))}
+              <p className="text-caption text-ink-500">
+                标记为密码的字段加密保存，之后任何页面和接口都不会再显示出来——但可以随时更换。
+              </p>
+            </div>
+          )}
 
           {connectorHint && (
             <div className="flex flex-col gap-space-3">

@@ -199,6 +199,11 @@ func (s *Service) validateAndStore(ctx context.Context, pluginID, version string
 	if manifestVersion, _ := manifest["version"].(string); manifestVersion != version {
 		return "", domain.Invalid(domain.CodePluginManifestInvalid, "manifest version does not match upload version")
 	}
+	// JSON Schema 管得了形状，管不了"secret 的键名得让宿主认出来"这种跨字
+	// 段的一致性，只能在这里判。
+	if err := validateConfigSchema(manifest); err != nil {
+		return "", err
+	}
 
 	// Automated gate (spec-20 §5.3): a manifest can *claim* its
 	// tools/connectors/hooks entries exist — only actually resolving them
@@ -402,6 +407,10 @@ func (s *Service) Install(ctx context.Context, ownerID int64, cmd InstallCommand
 		return Installation{}, domain.Forbidden(domain.CodeForbidden, "this plugin version is not available to install")
 	}
 
+	if err := ValidateInstallConfig(target.Manifest, cmd.Config); err != nil {
+		return Installation{}, err
+	}
+
 	encrypted, err := s.encryptConfig(cmd.Config)
 	if err != nil {
 		return Installation{}, domain.Invalid(domain.CodeValidationFailed, "invalid config")
@@ -417,7 +426,7 @@ func (s *Service) Install(ctx context.Context, ownerID int64, cmd InstallCommand
 		}
 		return Installation{}, domain.Internal(err)
 	}
-	created.Config = created.Config.Redact()
+	created.redactConfig()
 	return created, nil
 }
 
@@ -454,7 +463,15 @@ func (s *Service) UpdateInstallation(ctx context.Context, ownerID int64, pluginI
 		current.Resolution = *cmd.Resolution
 	}
 	if cmd.Config != nil {
-		encrypted, err := s.encryptConfig(cmd.Config)
+		// 与资源那边同一条规矩：读路径 Redact 过，凭据根本不在返回的
+		// config 里。直接整体替换的话，用户在界面上改一个非凭据字段（比如换
+		// 个 bucket）就把密钥静默清空了。先解出存量再合并。
+		decrypted, derr := s.DecryptConfig(current.Config)
+		if derr != nil {
+			return Installation{}, domain.Internal(derr)
+		}
+		merged := cmd.Config.MergePreservingCredentials(decrypted)
+		encrypted, err := s.encryptConfig(merged)
 		if err != nil {
 			return Installation{}, domain.Invalid(domain.CodeValidationFailed, "invalid config")
 		}
@@ -468,7 +485,7 @@ func (s *Service) UpdateInstallation(ctx context.Context, ownerID int64, pluginI
 	if err != nil {
 		return Installation{}, domain.Internal(err)
 	}
-	updated.Config = updated.Config.Redact()
+	updated.redactConfig()
 	return updated, nil
 }
 
@@ -492,7 +509,7 @@ func (s *Service) GetInstallation(ctx context.Context, ownerID int64, pluginID s
 		}
 		return Installation{}, domain.Internal(err)
 	}
-	in.Config = in.Config.Redact()
+	in.redactConfig()
 	return in, nil
 }
 
@@ -506,7 +523,7 @@ func (s *Service) ListInstallations(ctx context.Context, ownerID int64) ([]Insta
 		rows = []Installation{}
 	}
 	for i := range rows {
-		rows[i].Config = rows[i].Config.Redact()
+		rows[i].redactConfig()
 	}
 	return rows, nil
 }
@@ -546,14 +563,14 @@ func (s *Service) ListInstalledTools(ctx context.Context, ownerID int64) ([]Inst
 			out = append(out, InstalledTool{
 				Ref: "plugin:" + inst.PluginID + "/" + t.name, PluginID: inst.PluginID,
 				PluginDisplayName: displayName,
-				ToolName: t.name, Description: t.description,
+				ToolName:          t.name, Description: t.description,
 			})
 		}
 		for _, r := range manifestRenderers(ver.Manifest) {
 			out = append(out, InstalledTool{
 				Ref: "plugin:" + inst.PluginID + "/" + r.name, PluginID: inst.PluginID,
 				PluginDisplayName: displayName,
-				ToolName: r.name, Description: r.description,
+				ToolName:          r.name, Description: r.description,
 			})
 		}
 	}
@@ -673,6 +690,13 @@ func (s *Service) encryptConfig(config Config) (Config, error) {
 // DecryptConfig reverses encryptConfig — used only to build a real plugin
 // instance from stored config at run time.
 func (s *Service) DecryptConfig(config Config) (Config, error) {
+	return DecryptConfig(s.cipher, config)
+}
+
+// DecryptConfig is the Service-free form, for the run-time path that has an
+// AES key but no plugin.Service — mirrors resource.DecryptConfig. 加解密对
+// "什么算凭据"的判断仍然只有 IsCredentialKey 一处，两边不会各说各话。
+func DecryptConfig(cipher CredentialCipher, config Config) (Config, error) {
 	out := make(Config, len(config))
 	for k, v := range config {
 		if !IsCredentialKey(k) {
@@ -683,7 +707,7 @@ func (s *Service) DecryptConfig(config Config) (Config, error) {
 		if !ok {
 			return nil, domain.Invalid(domain.CodeValidationFailed, "credential field must be a string")
 		}
-		plaintext, err := s.cipher.Decrypt(str)
+		plaintext, err := cipher.Decrypt(str)
 		if err != nil {
 			return nil, err
 		}

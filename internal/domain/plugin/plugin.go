@@ -7,6 +7,7 @@
 package plugin
 
 import (
+	"sort"
 	"strings"
 	"time"
 )
@@ -108,17 +109,59 @@ func (c Config) Redact() Config {
 	return out
 }
 
+// CredentialKeys 返回这份配置里凭据字段的名字，排序后返回。
+//
+// 名字得露出来，值不能。没有它，"装完之后查看/更换密钥"这件事在界面上是做
+// 不出来的：凭据被 Redact 抹得一干二净，前端既不知道有没有、也不知道叫什
+// 么，连一个输入框都渲染不出来。
+func (c Config) CredentialKeys() []string {
+	keys := make([]string, 0, len(c))
+	for k := range c {
+		if IsCredentialKey(k) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// MergePreservingCredentials 把一份"从接口读出来又改过"的配置合回存量，凭
+// 据不因为读不到而丢失。与 resource.Config 上的同名方法是同一套规则，理由
+// 也一样：读路径 Redact 过，而更新是整体替换，两者一凑，用户改个别的字段
+// 就把密钥静默清空了。
+//
+//   - 凭据键缺席   → 保留库里的值（"我没改密钥"）
+//   - 给了非空新值 → 替换
+//   - 显式给空串   → 清除
+//
+// 非凭据字段一律以提交为准，包括删除。
+func (c Config) MergePreservingCredentials(stored Config) Config {
+	out := make(Config, len(c))
+	for k, v := range c {
+		out[k] = v
+	}
+	for k, storedVal := range stored {
+		if !IsCredentialKey(k) {
+			continue
+		}
+		if _, present := c[k]; !present {
+			out[k] = storedVal
+		}
+	}
+	return out
+}
+
 // InstalledTool is one capabilities.tools[]-referenceable action an
 // installed plugin version exposes (its manifest's extensions.tools[]
 // entries) — what the Agent editor's capability picker needs to let a
 // user add "plugin:{plugin_id}/{tool_name}" to an Agent the same way they
 // pick any other resource ref (spec-20 §5.1: "不新增字段").
 type InstalledTool struct {
-	Ref                string // "plugin:{plugin_id}/{tool_name}"
-	PluginID           string
-	PluginDisplayName  string // manifest.display_name，中文展示名
-	ToolName           string
-	Description        string
+	Ref               string // "plugin:{plugin_id}/{tool_name}"
+	PluginID          string
+	PluginDisplayName string // manifest.display_name，中文展示名
+	ToolName          string
+	Description       string
 }
 
 // Installation is one account's install of one plugin, pinned to a version.
@@ -135,4 +178,15 @@ type Installation struct {
 	Granted   []string
 	Status    Status
 	CreatedAt time.Time
+	// CredentialKeys 是这次安装填了哪几个凭据字段的名字，值一概没有。界面
+	// 靠它渲染"更换密钥"的位置——被 Redact 抹掉之后，前端否则既不知道有没
+	// 有、也不知道叫什么。
+	CredentialKeys []string
+}
+
+// redactConfig 记下凭据键的名字，再把值抹掉。顺序不能反，两件事也不能分
+// 开——所有对外返回安装记录的路径都走这一个方法。
+func (i *Installation) redactConfig() {
+	i.CredentialKeys = i.Config.CredentialKeys()
+	i.Config = i.Config.Redact()
 }

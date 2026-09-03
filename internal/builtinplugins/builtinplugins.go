@@ -23,6 +23,9 @@ var mysqlConnectorFS embed.FS
 //go:embed chartrenderer/plugin.json chartrenderer/plugin.wasm chartrenderer/ui/chart.html
 var chartRendererFS embed.FS
 
+//go:embed aliyunoss/plugin.json aliyunoss/plugin.wasm
+var aliyunOSSFS embed.FS
+
 // seedService is the one plugin.Service method SeedAll needs — narrowed to
 // a port so this package doesn't have to import the concrete Service type
 // just to be testable.
@@ -59,8 +62,12 @@ func SeedAll(ctx context.Context, svc seedService) error {
 			"plugin.wasm":   "chartrenderer/plugin.wasm",
 			"ui/chart.html": "chartrenderer/ui/chart.html",
 		}},
+		{fs: aliyunOSSFS, files: map[string]string{"plugin.wasm": "aliyunoss/plugin.wasm"}},
 	}
-	manifestPaths := []string{"postgresconnector/plugin.json", "mysqlconnector/plugin.json", "chartrenderer/plugin.json"}
+	manifestPaths := []string{
+		"postgresconnector/plugin.json", "mysqlconnector/plugin.json",
+		"chartrenderer/plugin.json", "aliyunoss/plugin.json",
+	}
 
 	for i, b := range builtins {
 		cmd, err := loadEmbedded(b.fs, manifestPaths[i], b.files)
