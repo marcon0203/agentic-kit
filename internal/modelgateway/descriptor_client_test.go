@@ -7,6 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/marcon0203/agentic-kit/internal/channeltemplates"
+	"github.com/marcon0203/agentic-kit/internal/modelgateway/descriptor"
 )
 
 // 这一组走的是真实链路：内置的 deepseek 描述符 → descriptorClient → 一个
@@ -315,5 +319,114 @@ func TestZhipu_StreamsReasoningAsTextButKeepsItOutOfTheFinalContent(t *testing.T
 func TestZhipu_HasNoGuessedPricing(t *testing.T) {
 	if cost := EstimateCost("zhipu", "glm-4.6", 1_000_000, 1_000_000); cost != 0 {
 		t.Fatalf("没有价格表的渠道应按 0 计费，得到 %v", cost)
+	}
+}
+
+// 404 是这套东西最常见的故障，而它几乎总是"接口地址或线协议选错了"——比
+// 如拿 OpenAI 模板去打一个 Anthropic 兼容端点。只报一个状态码的话，用户手
+// 里没有任何可查的线索，所以错误里必须带上完整请求地址和那句提示。
+func TestHTTPError_CarriesTheRequestURLAndA404Hint(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"error":"not found"}`))
+	}))
+	defer srv.Close()
+
+	_, err := deepSeekClient(t, srv).Complete(context.Background(), "sk", "", "m", CompletionRequest{})
+	if err == nil {
+		t.Fatal("404 应该报错")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, srv.URL+gotPath) {
+		t.Errorf("错误里必须带完整请求地址，得到: %s", msg)
+	}
+	if !strings.Contains(msg, "线协议") {
+		t.Errorf("404 要提示可能是地址或协议不对，得到: %s", msg)
+	}
+	if !strings.Contains(msg, "not found") {
+		t.Errorf("上游正文也要带出来，得到: %s", msg)
+	}
+}
+
+// 连不上（DNS 写错、内网地址不通）时同样要说清楚打的是哪个地址。
+func TestUpstreamUnreachable_ErrorNamesTheURL(t *testing.T) {
+	def, _ := providerByName("deepseek")
+	// 指向一个不会有人监听的地址。
+	client := def.NewClient(&http.Client{Timeout: 2 * time.Second}, "http://127.0.0.1:1")
+
+	_, err := client.Complete(context.Background(), "sk", "", "m", CompletionRequest{})
+	if err == nil {
+		t.Fatal("连不上应该报错")
+	}
+	if !strings.Contains(err.Error(), "http://127.0.0.1:1/chat/completions") {
+		t.Errorf("连不上时也要带上地址，得到: %s", err)
+	}
+}
+
+// 拿 OpenAI 模板去接一个 Anthropic 兼容端点，就是用户遇到的那个 404：请求
+// 打到 /chat/completions，而对方只有 /v1/messages。这条把"选对模板就打对
+// 路径"钉住——两个模板同一个 base_url，路径必须不同。
+func TestAnthropicAndOpenAITemplates_HitDifferentPaths(t *testing.T) {
+	for _, tc := range []struct {
+		template, key, wantPath string
+	}{
+		{"openai-compatible", "oa", "/chat/completions"},
+		{"anthropic-messages", "an", "/v1/messages"},
+		{"kimi-anthropic", "kimi", "/v1/messages"},
+		{"openai-responses", "resp", "/responses"},
+	} {
+		var gotPath string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			// 三套线协议各自能解析的最小成功响应。
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}],
+			                       "content":[{"type":"text","text":"ok"}],
+			                       "output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`))
+		}))
+
+		d, _, err := channeltemplates.Instantiate(tc.template, tc.key, tc.key, srv.URL)
+		if err != nil {
+			srv.Close()
+			t.Fatalf("模板 %s 实例化失败: %v", tc.template, err)
+		}
+		SetChannels([]*descriptor.Descriptor{d})
+		def, ok := providerByName(tc.key)
+		if !ok {
+			srv.Close()
+			t.Fatalf("渠道 %s 没注册", tc.key)
+		}
+		_, err = def.NewClient(srv.Client(), srv.URL).
+			Complete(context.Background(), "k", "", "m", CompletionRequest{
+				Messages: []Message{{Role: "user", Content: "hi"}},
+			})
+		srv.Close()
+		if err != nil {
+			t.Errorf("%s 调用失败: %v", tc.template, err)
+		}
+		if gotPath != tc.wantPath {
+			t.Errorf("%s 应该打 %s，实际打了 %s", tc.template, tc.wantPath, gotPath)
+		}
+	}
+	restoreTestChannels(t)
+}
+
+// Kimi 那个地址（https://api.kimi.com/coding）后面没有 /v1，要靠模板补上。
+// 用户填的地址原样拼接、不多不少，这是 404 与否的分界。
+func TestKimiTemplate_AppendsV1MessagesToTheGivenBase(t *testing.T) {
+	d, _, err := channeltemplates.Instantiate("kimi-anthropic", "kimi", "Kimi", "")
+	if err != nil {
+		t.Fatalf("实例化失败: %v", err)
+	}
+	if d.BaseURL != "https://api.kimi.com/coding" {
+		t.Errorf("默认地址不对: %s", d.BaseURL)
+	}
+	if d.Complete.Path != "/v1/messages" {
+		t.Errorf("路径应为 /v1/messages，得到 %s", d.Complete.Path)
+	}
+	// Anthropic 兼容端点里 Kimi 用的是 bearer 而不是官方的 x-api-key。
+	if d.Auth.Driver != "bearer" {
+		t.Errorf("Kimi 的鉴权应为 bearer，得到 %s", d.Auth.Driver)
 	}
 }

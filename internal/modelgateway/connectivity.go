@@ -8,6 +8,7 @@ package modelgateway
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -63,7 +64,7 @@ func (e *validationError) Error() string { return e.msg }
 func doAuthProbe(client *http.Client, req *http.Request) error {
 	resp, err := client.Do(req)
 	if err != nil {
-		return &validationError{"could not reach provider: " + err.Error()}
+		return &validationError{"连不上这个接口地址：" + err.Error() + "（确认地址可达、且这台服务器出得了网）"}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -73,6 +74,8 @@ func doAuthProbe(client *http.Client, req *http.Request) error {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		return nil
 	default:
-		return &validationError{"provider returned unexpected status"}
+		return &validationError{fmt.Sprintf(
+			"接口返回 %d（%s）。404 多半是接口地址或协议模板不对——比如拿 OpenAI 模板去接一个 Anthropic 兼容端点",
+			resp.StatusCode, req.URL.String())}
 	}
 }

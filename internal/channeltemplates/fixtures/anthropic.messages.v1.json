@@ -1,0 +1,153 @@
+[
+  {
+    "name": "基础文本 + usage（system 抽到顶层）",
+    "request": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "system",
+          "content": "你是一个助手"
+        },
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ],
+      "max_tokens": 100,
+      "temperature": 0.7
+    },
+    "expect_http": {
+      "method": "POST",
+      "path": "/v1/messages",
+      "body": {
+        "model": "claude-sonnet-4",
+        "max_tokens": 100,
+        "temperature": 0.7,
+        "system": "你是一个助手",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "你好"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "complete_response": {
+      "id": "msg_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "你好，有什么可以帮你？"
+        }
+      ],
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 8
+      }
+    },
+    "stream_response": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":12}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"你好\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"，有什么可以帮你？\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":8}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    "expect_result": {
+      "content": "你好，有什么可以帮你？",
+      "input_tokens": 12,
+      "output_tokens": 8
+    }
+  },
+  {
+    "name": "工具调用（定义是扁平的 input_schema，参数流式分片攒）",
+    "request": {
+      "model": "claude-sonnet-4",
+      "messages": [
+        {
+          "role": "user",
+          "content": "北京天气"
+        }
+      ],
+      "max_tokens": 1024,
+      "tools": [
+        {
+          "name": "get_weather",
+          "description": "查询天气",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      ]
+    },
+    "expect_http": {
+      "method": "POST",
+      "path": "/v1/messages",
+      "body": {
+        "tools": [
+          {
+            "name": "get_weather",
+            "description": "查询天气",
+            "input_schema": {
+              "type": "object",
+              "properties": {
+                "city": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "city"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "complete_response": {
+      "id": "msg_2",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "我来查一下"
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_1",
+          "name": "get_weather",
+          "input": {
+            "city": "北京"
+          }
+        }
+      ],
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 15
+      }
+    },
+    "stream_response": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":20}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"我来查一下\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"get_weather\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"ci\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"ty\\\": \\\"北京\\\"}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":15}}\n\n",
+    "expect_result": {
+      "content": "我来查一下",
+      "input_tokens": 20,
+      "output_tokens": 15,
+      "tool_calls": [
+        {
+          "id": "toolu_1",
+          "name": "get_weather",
+          "arguments": {
+            "city": "北京"
+          }
+        }
+      ]
+    }
+  }
+]

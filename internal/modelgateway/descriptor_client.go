@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/marcon0203/agentic-kit/internal/modelgateway/descriptor"
 )
@@ -85,12 +87,12 @@ func (c *descriptorClient) Complete(ctx context.Context, apiKey, baseURL, model 
 	if err != nil {
 		return CompletionResult{}, err
 	}
-	body, status, err := c.do(ctx, spec, apiKey, baseURL, false)
+	body, status, url, err := c.do(ctx, spec, apiKey, baseURL, false)
 	if err != nil {
 		return CompletionResult{}, err
 	}
 	if status < 200 || status >= 300 {
-		return CompletionResult{}, httpError(c.desc.ID, status, body)
+		return CompletionResult{}, httpError(c.desc.ID, url, status, body)
 	}
 	result, err := c.desc.ParseComplete(body)
 	if err != nil {
@@ -112,17 +114,22 @@ func (c *descriptorClient) CompleteStream(ctx context.Context, apiKey, baseURL, 
 	if err != nil {
 		return CompletionResult{}, err
 	}
+	url := httpReq.URL.String()
+	started := time.Now()
+
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return CompletionResult{}, err
+		logUpstream(c.desc.ID, httpReq.Method, url, 0, started, err)
+		return CompletionResult{}, fmt.Errorf("%s: 请求 %s 失败: %w", c.desc.ID, url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	logUpstream(c.desc.ID, httpReq.Method, url, resp.StatusCode, started, nil)
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// 错误响应不是流，一次性读完再报——否则错误信息会被当成事件帧
 		// 丢掉，只剩一个光秃秃的状态码。
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		return CompletionResult{}, httpError(c.desc.ID, resp.StatusCode, raw)
+		return CompletionResult{}, httpError(c.desc.ID, url, resp.StatusCode, raw)
 	}
 
 	result, err := c.desc.RunStream(resp.Body, func(d descriptor.Delta) {
@@ -151,31 +158,40 @@ func (c *descriptorClient) Embed(ctx context.Context, apiKey, baseURL, model str
 	if err != nil {
 		return nil, err
 	}
-	body, status, err := c.do(ctx, spec, apiKey, baseURL, false)
+	body, status, url, err := c.do(ctx, spec, apiKey, baseURL, false)
 	if err != nil {
 		return nil, err
 	}
 	if status < 200 || status >= 300 {
-		return nil, httpError(c.desc.ID, status, body)
+		return nil, httpError(c.desc.ID, url, status, body)
 	}
 	return c.desc.ParseEmbed(body)
 }
 
-func (c *descriptorClient) do(ctx context.Context, spec descriptor.HTTPRequest, apiKey, baseURL string, stream bool) ([]byte, int, error) {
+// do 发一次非流式请求。返回的 url 供调用方拼错误信息用——出错时没有它，
+// 用户不知道请求到底打到哪去了。
+func (c *descriptorClient) do(ctx context.Context, spec descriptor.HTTPRequest, apiKey, baseURL string, stream bool) (body []byte, status int, url string, err error) {
 	req, err := c.newRequest(ctx, spec, apiKey, baseURL, stream)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", err
 	}
+	url = req.URL.String()
+	started := time.Now()
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, 0, err
+		logUpstream(c.desc.ID, req.Method, url, 0, started, err)
+		// 连不上时把地址也带进错误：DNS 写错、内网地址不通都长这样。
+		return nil, 0, url, fmt.Errorf("%s: 请求 %s 失败: %w", c.desc.ID, url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+
+	body, err = io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	logUpstream(c.desc.ID, req.Method, url, resp.StatusCode, started, err)
 	if err != nil {
-		return nil, resp.StatusCode, err
+		return nil, resp.StatusCode, url, err
 	}
-	return body, resp.StatusCode, nil
+	return body, resp.StatusCode, url, nil
 }
 
 func (c *descriptorClient) newRequest(ctx context.Context, spec descriptor.HTTPRequest, apiKey, baseURL string, stream bool) (*http.Request, error) {
@@ -244,15 +260,46 @@ func applyDescriptorAuth(req *http.Request, auth descriptor.Auth, apiKey string)
 
 // httpError 把上游的错误体截断后带出来。只给一个状态码的话，"模型名写错
 // 了"和"key 过期了"看起来一模一样。
-func httpError(id string, status int, body []byte) error {
+// httpError 把上游的失败拼成一条能直接排查的错误。
+//
+// 带上**完整请求地址**是有意的：这套东西最常见的故障就是 404，而 404 几
+// 乎总是"接口地址或线协议选错了"（比如拿 OpenAI 模板去打一个 Anthropic 兼
+// 容端点）。只报一个状态码的话，用户手里没有任何可查的线索。
+//
+// url 里不会有凭据——鉴权一律走请求头，描述符的表达式作用域碰不到 secret
+// 字段（见 toDescriptorRequest）。
+func httpError(id, url string, status int, body []byte) error {
 	msg := strings.TrimSpace(string(body))
 	if len(msg) > 512 {
 		msg = msg[:512] + "…"
 	}
-	if msg == "" {
-		return fmt.Errorf("%s: http %d", id, status)
+	hint := ""
+	if status == http.StatusNotFound {
+		hint = "（404 多半是接口地址或线协议不对：确认 base_url 和这个渠道的协议模板匹配）"
 	}
-	return fmt.Errorf("%s: http %d: %s", id, status, msg)
+	if msg == "" {
+		return fmt.Errorf("%s: http %d %s%s", id, status, url, hint)
+	}
+	return fmt.Errorf("%s: http %d %s%s: %s", id, status, url, hint, msg)
+}
+
+// logUpstream 把每次上游调用记一条结构化日志。
+//
+// 之前出问题时日志里连打到哪个地址都没有，只能靠猜。这里记的是方法、完整
+// URL、状态码和耗时——凭据在请求头里，不在这几样里。
+func logUpstream(id, method, url string, status int, started time.Time, err error) {
+	attrs := []any{
+		"channel", id, "method", method, "url", url,
+		"elapsed_ms", time.Since(started).Milliseconds(),
+	}
+	switch {
+	case err != nil:
+		slog.Error("model_upstream_call_failed", append(attrs, "err", err)...)
+	case status < 200 || status >= 300:
+		slog.Warn("model_upstream_call_non_2xx", append(attrs, "status", status)...)
+	default:
+		slog.Debug("model_upstream_call", append(attrs, "status", status)...)
+	}
 }
 
 // credOf 只是把 Client 接口那两个位置参数收拢成 Credential——Client 的签

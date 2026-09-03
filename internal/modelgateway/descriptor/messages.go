@@ -171,6 +171,26 @@ func (d *Descriptor) renderTools(tools []Tool) []any {
 		if params == nil {
 			params = map[string]any{"type": "object", "properties": map[string]any{}}
 		}
+		if d.Messages.ToolsWrapper == "openai_responses" {
+			// Responses API 把 function 那一层摊平，但保留了 type。
+			out = append(out, map[string]any{
+				"type":        "function",
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  params,
+			})
+			continue
+		}
+		if d.Messages.ToolsWrapper == "flat" {
+			// Anthropic Messages：不包一层 function，schema 的键也叫
+			// input_schema。
+			out = append(out, map[string]any{
+				"name":         t.Name,
+				"description":  t.Description,
+				"input_schema": params,
+			})
+			continue
+		}
 		out = append(out, map[string]any{
 			"type": "function",
 			"function": map[string]any{

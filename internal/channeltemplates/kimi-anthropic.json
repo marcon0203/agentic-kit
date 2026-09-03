@@ -1,0 +1,141 @@
+{
+  "descriptor_version": 1,
+  "id": "kimi-anthropic",
+  "label": "Kimi（Anthropic 兼容端点）",
+  "wire": "anthropic.messages.v1",
+  "description": "Kimi 开放平台的 Anthropic 兼容端点，线协议就是 Anthropic Messages，完整路径是 {base_url}/v1/messages。base_url 填 https://api.kimi.com/coding（不要带尾斜杠、也不要自己补 /v1）。\n\n这里最容易踩的是选错模板：这个地址长得像个普通 OpenAI 端点，但它不认 /chat/completions——拿「OpenAI 兼容端点」模板去接会一路 404。鉴权用 Authorization: Bearer（不是 Anthropic 官方的 x-api-key）。\n\n价格表留空，成本按 0 记，token 数照常。",
+  "capabilities": [
+    "text",
+    "tools",
+    "stream"
+  ],
+  "base_url": "https://api.kimi.com/coding",
+  "credentials": [
+    {
+      "name": "api_key",
+      "type": "secret",
+      "label": "API Key",
+      "required": true
+    },
+    {
+      "name": "base_url",
+      "type": "url",
+      "label": "接口地址（留空用 https://api.kimi.com/coding）",
+      "required": false
+    }
+  ],
+  "auth": {
+    "driver": "bearer",
+    "credential": "api_key"
+  },
+  "messages": {
+    "system": "hoist",
+    "content": "parts",
+    "text_part": {
+      "type": "text",
+      "text": "$.text"
+    },
+    "tool_calls": "inline_parts",
+    "tool_call_part": {
+      "type": "tool_use",
+      "id": "$.id",
+      "name": "$.name",
+      "input": "$.arguments"
+    },
+    "tool_result_part": {
+      "type": "tool_result",
+      "tool_use_id": "$.id",
+      "content": "$.content"
+    },
+    "tool_result_role": "user",
+    "tools_wrapper": "flat"
+  },
+  "complete": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "headers": {
+      "anthropic-version": "2023-06-01"
+    },
+    "body": {
+      "model": "$.model",
+      "system": "$.system",
+      "messages": "$.messages",
+      "tools": "$.tools",
+      "max_tokens": "$.max_tokens",
+      "temperature": "$.temperature"
+    },
+    "response": {
+      "text": [
+        "content.0.text",
+        "content.1.text"
+      ],
+      "tool_calls": {
+        "each": "content",
+        "id": "id",
+        "name": "name",
+        "arguments": "input"
+      },
+      "usage": {
+        "input": "usage.input_tokens",
+        "output": "usage.output_tokens"
+      },
+      "error": {
+        "when": "error",
+        "code": "error.type",
+        "message": "error.message"
+      }
+    }
+  },
+  "stream": {
+    "request": {
+      "patch": {
+        "stream": true
+      }
+    },
+    "transport": "sse",
+    "event_type": "$event",
+    "on": [
+      {
+        "match": "message_start",
+        "usage_in": "$.message.usage.input_tokens"
+      },
+      {
+        "match": "content_block_start",
+        "open": {
+          "index": "$.index",
+          "kind": "$.content_block.type",
+          "set_id": "$.content_block.id",
+          "set_name": "$.content_block.name"
+        }
+      },
+      {
+        "match": "content_block_delta",
+        "index": "$.index",
+        "switch": "$.delta.type",
+        "cases": {
+          "text_delta": {
+            "emit_text": "$.delta.text"
+          },
+          "thinking_delta": {
+            "emit_reasoning": "$.delta.thinking"
+          },
+          "input_json_delta": {
+            "append_args": "$.delta.partial_json"
+          }
+        }
+      },
+      {
+        "match": "content_block_stop",
+        "close": "$.index"
+      },
+      {
+        "match": "message_delta",
+        "usage_out": "$.usage.output_tokens"
+      },
+      {
+        "match": "error",
+        "fail": "$.error.message"
+      }
+    ]
+  }
+}

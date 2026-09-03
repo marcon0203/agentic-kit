@@ -1,0 +1,141 @@
+{
+  "descriptor_version": 1,
+  "id": "anthropic-messages-bearer",
+  "label": "Anthropic 兼容（Bearer 鉴权）",
+  "wire": "anthropic.messages.v1",
+  "description": "和「Anthropic Messages（通用）」同一套线协议，只是鉴权用 Authorization: Bearer 而不是 x-api-key。大量第三方兼容端点、中转网关是这个组合——官方模板连不上、报 401 的时候换成它试一次。base_url 填到 /v1 之前那一段。",
+  "capabilities": [
+    "text",
+    "tools",
+    "stream"
+  ],
+  "base_url": "",
+  "credentials": [
+    {
+      "name": "api_key",
+      "type": "secret",
+      "label": "API Key",
+      "required": true
+    },
+    {
+      "name": "base_url",
+      "type": "url",
+      "label": "接口地址（填到 /v1 之前那一段）",
+      "required": true
+    }
+  ],
+  "auth": {
+    "driver": "bearer",
+    "credential": "api_key"
+  },
+  "messages": {
+    "system": "hoist",
+    "content": "parts",
+    "text_part": {
+      "type": "text",
+      "text": "$.text"
+    },
+    "tool_calls": "inline_parts",
+    "tool_call_part": {
+      "type": "tool_use",
+      "id": "$.id",
+      "name": "$.name",
+      "input": "$.arguments"
+    },
+    "tool_result_part": {
+      "type": "tool_result",
+      "tool_use_id": "$.id",
+      "content": "$.content"
+    },
+    "tool_result_role": "user",
+    "tools_wrapper": "flat"
+  },
+  "complete": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "headers": {
+      "anthropic-version": "2023-06-01"
+    },
+    "body": {
+      "model": "$.model",
+      "system": "$.system",
+      "messages": "$.messages",
+      "tools": "$.tools",
+      "max_tokens": "$.max_tokens",
+      "temperature": "$.temperature"
+    },
+    "response": {
+      "text": [
+        "content.0.text",
+        "content.1.text"
+      ],
+      "tool_calls": {
+        "each": "content",
+        "id": "id",
+        "name": "name",
+        "arguments": "input"
+      },
+      "usage": {
+        "input": "usage.input_tokens",
+        "output": "usage.output_tokens"
+      },
+      "error": {
+        "when": "error",
+        "code": "error.type",
+        "message": "error.message"
+      }
+    }
+  },
+  "stream": {
+    "request": {
+      "patch": {
+        "stream": true
+      }
+    },
+    "transport": "sse",
+    "event_type": "$event",
+    "on": [
+      {
+        "match": "message_start",
+        "usage_in": "$.message.usage.input_tokens"
+      },
+      {
+        "match": "content_block_start",
+        "open": {
+          "index": "$.index",
+          "kind": "$.content_block.type",
+          "set_id": "$.content_block.id",
+          "set_name": "$.content_block.name"
+        }
+      },
+      {
+        "match": "content_block_delta",
+        "index": "$.index",
+        "switch": "$.delta.type",
+        "cases": {
+          "text_delta": {
+            "emit_text": "$.delta.text"
+          },
+          "thinking_delta": {
+            "emit_reasoning": "$.delta.thinking"
+          },
+          "input_json_delta": {
+            "append_args": "$.delta.partial_json"
+          }
+        }
+      },
+      {
+        "match": "content_block_stop",
+        "close": "$.index"
+      },
+      {
+        "match": "message_delta",
+        "usage_out": "$.usage.output_tokens"
+      },
+      {
+        "match": "error",
+        "fail": "$.error.message"
+      }
+    ]
+  }
+}

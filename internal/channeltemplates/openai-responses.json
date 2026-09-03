@@ -1,0 +1,122 @@
+{
+  "descriptor_version": 1,
+  "id": "openai-responses",
+  "label": "OpenAI Responses API（通用）",
+  "wire": "openai.responses.v1",
+  "description": "OpenAI 的 Responses 线协议（POST {base_url}/responses），不是 Chat Completions。两者最显眼的差别：system 走顶层 instructions、消息叫 input、上限叫 max_output_tokens、回复在 output[] 数组里而不是 choices[]。base_url 填到 /responses 之前那一段（官方是 https://api.openai.com/v1）。\n\n已覆盖：文本、流式、工具定义与工具调用。**多轮工具回填尚未覆盖**——Responses 把工具调用和工具结果作为顶层 input 项（function_call / function_call_output）而不是带角色的消息，本模板按消息形状回填，长工具循环可能对不上；纯对话和单轮工具调用不受影响。要跑长工具循环的话，先用 Chat Completions 那套模板。\n\n价格表留空，成本按 0 记，token 数照常。",
+  "capabilities": [
+    "text",
+    "tools",
+    "stream"
+  ],
+  "base_url": "https://api.openai.com/v1",
+  "credentials": [
+    {
+      "name": "api_key",
+      "type": "secret",
+      "label": "API Key",
+      "required": true
+    },
+    {
+      "name": "base_url",
+      "type": "url",
+      "label": "接口地址（填到 /responses 之前那一段）",
+      "required": false
+    }
+  ],
+  "auth": {
+    "driver": "bearer",
+    "credential": "api_key"
+  },
+  "messages": {
+    "system": "hoist",
+    "content": "string",
+    "tool_calls": "sibling_field",
+    "tool_calls_field": "tool_calls",
+    "tool_call_part": {
+      "type": "function_call",
+      "call_id": "$.id",
+      "name": "$.name",
+      "arguments": {
+        "$json": "$.arguments"
+      }
+    },
+    "tool_result_part": {
+      "type": "function_call_output",
+      "call_id": "$.id",
+      "output": "$.content"
+    },
+    "tools_wrapper": "openai_responses"
+  },
+  "complete": {
+    "method": "POST",
+    "path": "/responses",
+    "body": {
+      "model": "$.model",
+      "instructions": "$.system",
+      "input": "$.messages",
+      "tools": "$.tools",
+      "max_output_tokens": "$.max_tokens",
+      "temperature": "$.temperature"
+    },
+    "response": {
+      "text": [
+        "output.0.content.0.text",
+        "output.1.content.0.text"
+      ],
+      "tool_calls": {
+        "each": "output",
+        "id": "call_id",
+        "name": "name",
+        "arguments_json": "arguments"
+      },
+      "usage": {
+        "input": "usage.input_tokens",
+        "output": "usage.output_tokens"
+      },
+      "error": {
+        "when": "error",
+        "code": "error.code",
+        "message": "error.message"
+      }
+    }
+  },
+  "stream": {
+    "request": {
+      "patch": {
+        "stream": true
+      }
+    },
+    "transport": "sse",
+    "event_type": "$event",
+    "on": [
+      {
+        "match": "response.output_text.delta",
+        "emit_text": "$.delta"
+      },
+      {
+        "match": "response.output_item.added",
+        "open": {
+          "index": "$.output_index",
+          "kind": "$.item.type",
+          "set_id": "$.item.call_id",
+          "set_name": "$.item.name"
+        }
+      },
+      {
+        "match": "response.function_call_arguments.delta",
+        "index": "$.output_index",
+        "append_args": "$.delta"
+      },
+      {
+        "match": "response.completed",
+        "usage_in": "$.response.usage.input_tokens",
+        "usage_out": "$.response.usage.output_tokens"
+      },
+      {
+        "match": "error",
+        "fail": "$.error.message"
+      }
+    ]
+  }
+}

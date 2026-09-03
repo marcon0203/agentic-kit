@@ -19,7 +19,7 @@ import { Panel, Ref, Section } from '@/components/common/Page'
 import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
-import { ProviderIcon } from '@/components/models/ProviderIcon'
+import { LOBEHUB_ICON_NAMES, ProviderIcon, isLobehubIconName } from '@/components/models/ProviderIcon'
 import { cn } from '@/lib/utils'
 import { Can, useHasPermission } from '@/lib/rbac/usePermissions'
 import type { components } from '@/lib/api/schema'
@@ -35,17 +35,6 @@ const MODALITY_LABEL: Record<CatalogModality, string> = {
   video: '视频',
   vision: '图文理解',
   embedding: '向量',
-}
-
-const MAX_ICON_BYTES = 200 * 1024
-
-function readFileAsDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(file)
-  })
 }
 
 /**
@@ -481,15 +470,6 @@ function CreateProviderDialog({
     setError(null)
   }
 
-  async function handleIconFile(file: File | undefined) {
-    if (!file) return
-    if (file.size > MAX_ICON_BYTES) {
-      setError('图标文件太大，请用 200KB 以内的图片')
-      return
-    }
-    setIcon(await readFileAsDataURL(file))
-  }
-
   async function submit() {
     setPending(true)
     setError(null)
@@ -587,20 +567,38 @@ function CreateProviderDialog({
           </label>
           <Input id="provider-key" value={key} onChange={(e) => setKey(e.target.value)} className="h-12 rounded-sm" />
 
-          {/* 图标默认取自 @lobehub/icons-static-svg，按供应商匹配；这里是给
-              自建/中转端点用的可选覆盖。 */}
+          {/* 填名字而不是传文件：绝大多数情况要的就是那个厂商的官方图标，
+              而它已经在 @lobehub/icons-static-svg 里（900 多个）。留空时按
+              协议模板名再试一次，deepseek 模板正好配上 deepseek 图标。 */}
           <label htmlFor="provider-icon" className="text-label-md text-ink-700">
             图标（可选）
           </label>
           <div className="flex items-center gap-space-3">
             <ProviderIcon template={template} icon={icon} name={displayName || key || '?'} className="size-10" />
-            <input
-              id="provider-icon"
-              type="file"
-              accept="image/*"
-              onChange={(e) => handleIconFile(e.target.files?.[0])}
-              className="text-body-sm text-ink-700"
-            />
+            <div className="flex min-w-0 flex-1 flex-col gap-space-1">
+              <Input
+                id="provider-icon"
+                list="lobehub-icon-names"
+                value={icon}
+                onChange={(e) => setIcon(e.target.value)}
+                placeholder="kimi / zhipu / deepseek，或一个图片地址"
+                className="h-12 rounded-sm"
+              />
+              <datalist id="lobehub-icon-names">
+                {LOBEHUB_ICON_NAMES.map((n) => (
+                  <option key={n} value={n} />
+                ))}
+              </datalist>
+              <span className="text-caption text-ink-500">
+                {icon.trim() === ''
+                  ? `留空则按协议模板匹配。可填 lobehub 图标名（共 ${LOBEHUB_ICON_NAMES.length} 个，输入时有补全），也可以填 http(s)/data: 图片地址。`
+                  : /^(https?:|data:|\/)/.test(icon.trim())
+                    ? '按图片地址加载。'
+                    : isLobehubIconName(icon)
+                      ? '已匹配到 lobehub 图标。'
+                      : '没有这个名字的 lobehub 图标——左侧会退回首字母；换一个名字或填图片地址。'}
+              </span>
+            </div>
           </div>
 
           {error && (

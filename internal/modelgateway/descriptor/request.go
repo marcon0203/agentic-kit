@@ -199,6 +199,15 @@ func parseToolCalls(payload any, m *ToolCallsMap) ([]ToolCall, error) {
 			ID:   toString(lookup(row, m.ID)),
 			Name: toString(lookup(row, m.Name)),
 		}
+		// 没有名字的不是工具调用。Anthropic 的 content[] 里文本块和
+		// tool_use 块混在一起，each 会把两种都遍历到——不挡的话每条带文字
+		// 的回复都会多出一个空工具调用，模型下一轮会试着去"执行"它。
+		//
+		// 流式那条路早就是这么判的（见 stream.go 的 slot 收口），这里跟上，
+		// 免得同一个响应走两条路得出不同结果。
+		if call.Name == "" {
+			continue
+		}
 		switch {
 		case m.ArgumentsJSON != "":
 			raw := toString(lookup(row, m.ArgumentsJSON))

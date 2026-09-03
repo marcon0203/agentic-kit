@@ -76,6 +76,13 @@ type MessagesConfig struct {
 	// ToolResultRole 是工具结果消息用哪个角色发。Anthropic 把它塞进 user
 	// 消息，OpenAI 用独立的 tool 角色。
 	ToolResultRole string `json:"tool_result_role"`
+	// ToolsWrapper 是工具**定义**铺成什么形状：
+	//   "openai"（默认）{"type":"function","function":{name,description,parameters}}
+	//   "flat"          {name,description,input_schema}（Anthropic Messages）
+	//   "openai_responses" {"type":"function",name,description,parameters}
+	//                   （Responses API 把 function 那一层摊平了）
+	// 各家的差异只有这一层包装，所以用一个枚举而不是再给一份模板。
+	ToolsWrapper string `json:"tools_wrapper"`
 }
 
 // Operation 是一次 HTTP 调用的模板 + 响应映射。
@@ -415,6 +422,11 @@ func validateOps(label string, ops Ops, inheritsIndex bool) []string {
 func (d *Descriptor) validateMessages() []string {
 	var errs []string
 	m := d.Messages
+	switch m.ToolsWrapper {
+	case "", "openai", "flat", "openai_responses":
+	default:
+		errs = append(errs, fmt.Sprintf("messages.tools_wrapper 只支持 openai/flat/openai_responses，得到 %q", m.ToolsWrapper))
+	}
 	if m.System != "" && m.System != "hoist" && m.System != "inline" {
 		errs = append(errs, fmt.Sprintf("messages.system 只支持 hoist/inline，得到 %q", m.System))
 	}

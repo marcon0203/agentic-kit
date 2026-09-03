@@ -19,13 +19,32 @@ export interface FieldError {
 export class ApiError extends Error {
   code: number
   details?: FieldError[]
+  /** 后端给的那句顶层 message，不含字段明细。 */
+  summary: string
 
   constructor(code: number, message: string, details?: FieldError[]) {
-    super(message)
+    // message 里并进逐字段理由。后端对校验失败回的顶层 message 常常是一句
+    // "validation failed"，真正有用的是 details 里那几条；而界面上绝大多数
+    // 地方展示的是 err.message。在这里合并一次，所有展示点一起变清楚，好过
+    // 逐个页面记得去读 details（记不住，也确实一直没读）。
+    super(withFieldReasons(message, details))
     this.name = 'ApiError'
     this.code = code
     this.details = details
+    this.summary = message
   }
+}
+
+/** 把 details 拼成 "字段：理由" 挂到顶层 message 后面。 */
+function withFieldReasons(message: string, details?: FieldError[]): string {
+  if (!details || details.length === 0) return message
+  const reasons = details
+    .map((d) => (d.field ? `${d.field}：${d.reason}` : d.reason))
+    .filter(Boolean)
+  if (reasons.length === 0) return message
+  // 顶层 message 本身就是那几条理由之一时（有的接口这么回）不再重复一遍。
+  if (reasons.length === 1 && message.includes(reasons[0])) return message
+  return `${message}（${reasons.join('；')}）`
 }
 
 export const apiClient = createClient<paths>({ baseUrl: '/api/v1' })

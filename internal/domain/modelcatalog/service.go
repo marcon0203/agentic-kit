@@ -176,7 +176,9 @@ func (s *Service) CreateProvider(ctx context.Context, userID int64, in NewProvid
 		fields = append(fields, domain.FieldError{Field: "template", Reason: "required"})
 	}
 	if len(fields) > 0 {
-		return Provider{}, domain.Invalid(domain.CodeValidationFailed, "validation failed").WithDetails(fields...)
+		// 顶层 message 也说人话：details 会被前端并进来，但只有这一句能被
+		// 日志、审计和不读 details 的调用方看到。
+		return Provider{}, domain.Invalid(domain.CodeValidationFailed, "模型提供商的信息填得不完整").WithDetails(fields...)
 	}
 
 	if s.templates == nil {
@@ -319,7 +321,7 @@ func (s *Service) CreateModel(ctx context.Context, userID, providerID int64, mod
 		fields = append(fields, domain.FieldError{Field: "modality", Reason: "must be one of text, image, video, vision, embedding"})
 	}
 	if len(fields) > 0 {
-		return Model{}, domain.Invalid(domain.CodeValidationFailed, "validation failed").WithDetails(fields...)
+		return Model{}, domain.Invalid(domain.CodeValidationFailed, "模型信息填得不完整").WithDetails(fields...)
 	}
 
 	created, err := s.repo.CreateModel(ctx, providerID, model, displayName, description, modality, featured)
