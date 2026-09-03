@@ -9,6 +9,7 @@ import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { AppCard } from '@/components/marketplace/AppCard'
 import { MarketSkillCard } from '@/components/resources/MarketSkillCard'
+import { MarketMcpServerCard } from '@/components/resources/MarketMcpServerCard'
 import { PAGE_SIZES, Pagination } from '@/components/common/Pagination'
 import { RegisterResourceDialog } from '@/components/resources/RegisterResourceDialog'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
@@ -21,6 +22,7 @@ type Resource = components['schemas']['Resource']
 type ListingResourceType = components['schemas']['ListingResourceType']
 type ListingSummary = components['schemas']['ListingSummary']
 type MarketSkill = components['schemas']['MarketSkill']
+type MarketMCPServer = components['schemas']['MarketMCPServer']
 
 /* Each kind gets its own empty-state copy. "还没有资源" is the same sentence
    four times over and helps nobody; what a person needs to know is what this
@@ -95,7 +97,10 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
   // Skill / MCP 有市场分发（bundle/agent/skill/mcp 可发布），页面给
   // 市场/自定义 两个视图；其余资源类型只有自定义列表，不显示切换。
   const hasMarket = type === 'skill' || type === 'mcp'
-  const [view, setView] = useState<'market' | 'custom'>(hasMarket ? 'market' : 'custom')
+  // MCP 有两个来源的"市场"：外部注册中心同步来的（market）和本平台用户发布
+  // 到广场的（listings）。它们不是同一批东西，合成一个列表只会让人分不清
+  // "这条是谁维护的"，所以给三个视图而不是两个。
+  const [view, setView] = useState<'market' | 'listings' | 'custom'>(hasMarket ? 'market' : 'custom')
   // 市场是纯前端分页：一次拉全量缓存，按页切片展示。搜索/标签也在前端
   // 过滤——缓存本来就全在本机，不值得为此打后端。
   const [marketPage, setMarketPage] = useState(1)
@@ -107,6 +112,17 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
   const { knowledgeBaseEnabled, skillUploadEnabled, isLoading: featuresLoading } = useFeatures()
 
   const showCustom = !hasMarket || view === 'custom'
+  const isMcp = type === 'mcp'
+  const VIEWS: { value: 'market' | 'listings' | 'custom'; label: string }[] = isMcp
+    ? [
+        { value: 'market', label: '市场' },
+        { value: 'listings', label: '平台广场' },
+        { value: 'custom', label: '自定义' },
+      ]
+    : [
+        { value: 'market', label: '市场' },
+        { value: 'custom', label: '我的 Skill' },
+      ]
 
   // MCP Server has its own multi-field page (URL, header list, a 检测
   // button that needs room to show probed results), and Skill only
@@ -145,6 +161,13 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
       unwrap<{ items: MarketSkill[]; has_more: boolean }>(await apiClient.GET('/skill-market', {})),
     enabled: isSkill && view === 'market',
   })
+  // MCP 的市场吃外部注册中心（系统设置 → MCP 源 同步下来的公开 Server）。
+  const mcpMarketQuery = useQuery({
+    queryKey: ['mcp-market'],
+    queryFn: async () =>
+      unwrap<{ items: MarketMCPServer[]; has_more: boolean }>(await apiClient.GET('/mcp-market', {})),
+    enabled: type === 'mcp' && view === 'market',
+  })
   const platformMarketQuery = useQuery({
     queryKey: ['marketplace-listings', type],
     queryFn: async () =>
@@ -153,7 +176,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
           params: { query: { resource_type: type as ListingResourceType } },
         }),
       ),
-    enabled: type === 'mcp' && view === 'market',
+    enabled: type === 'mcp' && view === 'listings',
   })
 
   if (type === 'knowledge_base' && !featuresLoading && !knowledgeBaseEnabled) {
@@ -195,7 +218,12 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
 
   // 市场搜索/标签过滤 + 高频标签清单（全部标签动辄上百个，只列出现频率
   // 最高的 12 个，长尾靠搜索框兜底）。条目只有千级，直接算不 memo。
-  const marketItems = skillMarketQuery.data?.items ?? []
+  // 两个市场查询同形（都是 {items, has_more}），下面的加载/错误/空态共用
+  // 这一个引用，免得每处都写一遍 isSkill ? … : …。
+  const marketQuery = isSkill ? skillMarketQuery : mcpMarketQuery
+  const marketItems: (MarketSkill | MarketMCPServer)[] = isSkill
+    ? (skillMarketQuery.data?.items ?? [])
+    : (mcpMarketQuery.data?.items ?? [])
   const keyword = marketSearch.trim().toLowerCase()
   const marketFiltered = marketItems
     .filter((s) => marketTopic === 'all' || s.topics.includes(marketTopic))
@@ -222,7 +250,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
             role="tablist"
             className="flex w-fit items-center gap-space-1 rounded-sm border border-border bg-surface-muted p-1"
           >
-            {(['market', 'custom'] as const).map((v) => (
+            {VIEWS.map(({ value: v, label }) => (
               <button
                 key={v}
                 type="button"
@@ -237,7 +265,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
                   view === v ? 'bg-surface text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-900',
                 )}
               >
-                {v === 'market' ? '市场' : isSkill ? '我的 Skill' : '自定义'}
+                {label}
               </button>
             ))}
           </div>
@@ -261,22 +289,27 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
       }
     >
       {hasMarket && view === 'market' ? (
-        isSkill ? (
-          <>
-            {skillMarketQuery.isLoading && <ListSkeleton />}
+        <>
+          {/* Skill 和 MCP 的市场共用这一段：都是"外部源同步来的、审核通过
+              的条目"，筛选、分页、空状态的逻辑一模一样，只有卡片不同。 */}
+          {marketQuery.isLoading && <ListSkeleton />}
 
-            {skillMarketQuery.isError && (
-              <ErrorPanel message="Skill 市场没能加载出来" onRetry={() => skillMarketQuery.refetch()} />
-            )}
+          {marketQuery.isError && (
+            <ErrorPanel message={`${kind.label}市场没能加载出来`} onRetry={() => marketQuery.refetch()} />
+          )}
 
-            {skillMarketQuery.isSuccess && (skillMarketQuery.data?.items.length ?? 0) === 0 && (
-              <EmptyRail
-                title="市场里还没有公开 Skill"
-                description="让管理员在 系统设置 → Skill 源 登记并同步一个公开市场（例如 https://clawhub.ai），它的公开 Skill 会出现在这里，可以查看用法、作者和更新记录。"
-              />
-            )}
+          {marketQuery.isSuccess && marketItems.length === 0 && (
+            <EmptyRail
+              title={isSkill ? '市场里还没有公开 Skill' : '市场里还没有公开 MCP Server'}
+              description={
+                isSkill
+                  ? '让管理员在 系统设置 → Skill 源 登记并同步一个公开市场（例如 https://clawhub.ai），它的公开 Skill 会出现在这里，可以查看用法、作者和更新记录。'
+                  : '让管理员在 系统设置 → MCP 源 登记并同步一个公开注册中心（官方是 https://registry.modelcontextprotocol.io），审核通过的 Server 会出现在这里，点一下就能接入。'
+              }
+            />
+          )}
 
-            {skillMarketQuery.isSuccess && marketItems.length > 0 && (
+          {marketQuery.isSuccess && marketItems.length > 0 && (
               <>
                 <div className="flex flex-col gap-space-3">
                   <Input
@@ -285,7 +318,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
                       setMarketSearch(e.target.value)
                       setMarketPage(1)
                     }}
-                    placeholder="搜索名称、slug 或简介"
+                    placeholder={isSkill ? '搜索名称、slug 或简介' : '搜索名称、限定名或简介'}
                     className="max-w-xs"
                   />
                   {marketTopics.length > 0 && (
@@ -320,9 +353,13 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
                     <div className="grid grid-cols-1 gap-space-4 md:grid-cols-2 xl:grid-cols-3">
                       {marketFiltered
                         .slice((marketPage - 1) * marketPageSize, marketPage * marketPageSize)
-                        .map((s) => (
-                          <MarketSkillCard key={`${s.source_id}/${s.slug}`} skill={s} />
-                        ))}
+                        .map((s) =>
+                          isSkill ? (
+                            <MarketSkillCard key={`${s.source_id}/${s.slug}`} skill={s as MarketSkill} />
+                          ) : (
+                            <MarketMcpServerCard key={(s as MarketMCPServer).id} server={s as MarketMCPServer} />
+                          ),
+                        )}
                     </div>
                     {marketFiltered.length > marketPageSize && (
                       <Pagination
@@ -339,7 +376,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
                   </>
                 ) : (
                   <EmptyRail
-                    title="没有匹配的公开 Skill"
+                    title={isSkill ? '没有匹配的公开 Skill' : '没有匹配的 MCP Server'}
                     description="换个关键词，或点「全部标签」重置筛选。"
                     action={
                       <Button
@@ -358,8 +395,8 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
                 )}
               </>
             )}
-          </>
-        ) : (
+        </>
+      ) : hasMarket && view === 'listings' ? (
           <>
             {platformMarketQuery.isLoading && <ListSkeleton />}
 
@@ -382,7 +419,6 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
               </div>
             )}
           </>
-        )
       ) : (
         <>
           {items.length > 0 && (

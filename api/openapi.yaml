@@ -3126,6 +3126,309 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
 
+  # ────────────────────────── MCP 源 ──────────────────────────
+  # 系统配置 → MCP 源：管理员登记公开 MCP 注册中心（如官方
+  # https://registry.modelcontextprotocol.io），同步后过审的 Server 出现在
+  # MCP 管理 → 市场视图（GET /mcp-market），可一键接入成本账号的 MCP 资源。
+  #
+  # 条目一律按行 id 寻址而不是 slug：上游限定名形如
+  # io.github.owner/server，带点和斜杠，做不了 URL 路径参数。
+  /mcp-sources/servers:
+    get:
+      tags: [MCPSources]
+      summary: 审核台：同步进来的全部 MCP 条目，管理员
+      description: >-
+        和 /mcp-market 的区别：这里不过滤审核状态、也不过滤源是否停用，管理
+        员要看得到"同步进来了什么"才能审。分页、搜索都在库里做——一个公开注
+        册中心同步下来动辄上千条。counts 是三种状态的条目数（传了 source_id
+        就按该源统计），供页面顶部的筛选标签直接用；total 是当前筛选条件下
+        的总数，供前端算总页数。
+      operationId: listMCPServersForReview
+      parameters:
+        - name: review_status
+          in: query
+          schema: { $ref: '#/components/schemas/SkillReviewStatus' }
+        - name: source_id
+          in: query
+          schema: { type: string }
+        - name: q
+          in: query
+          description: 在 slug / 名称 / 简介里做不区分大小写的模糊匹配
+          schema: { type: string }
+        - name: page
+          in: query
+          description: 从 1 开始
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: page_size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 15 }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, counts, total, page, page_size, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/MarketMCPServer' }
+                          total:
+                            type: integer
+                            format: int64
+                            description: 当前筛选条件下的条目总数
+                          page: { type: integer }
+                          page_size: { type: integer }
+                          has_more: { type: boolean }
+                          counts:
+                            type: object
+                            required: [pending, approved, rejected]
+                            properties:
+                              pending: { type: integer, format: int64 }
+                              approved: { type: integer, format: int64 }
+                              rejected: { type: integer, format: int64 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /mcp-sources/servers/review:
+    post:
+      tags: [MCPSources]
+      summary: 批量审核同步条目，管理员
+      description: >-
+        整批用同一个结论——"通过这一批"和"驳回这一批"是两个动作。批量是主路
+        径而非附加优化：一个公开注册中心同步下来动辄上千条，逐条点审不完。
+      operationId: reviewMarketMCPServers
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, status]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  items: { type: integer, format: int64 }
+                status: { $ref: '#/components/schemas/SkillReviewStatus' }
+                note: { type: string, description: 驳回理由等，会展示在审核台 }
+      responses:
+        '200':
+          description: 已审核
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [reviewed]
+                        properties:
+                          reviewed: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /mcp-sources:
+    get:
+      tags: [MCPSources]
+      summary: 源列表，管理员
+      operationId: listMCPSources
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/MCPSource' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [MCPSources]
+      summary: 登记一个源，管理员
+      operationId: createMCPSource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, base_url]
+              properties:
+                name: { type: string, maxLength: 64 }
+                base_url: { type: string, format: uri }
+      responses:
+        '201':
+          description: 登记成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MCPSource' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: 源地址已登记
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /mcp-sources/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [MCPSources]
+      summary: 删除源（连同缓存条目），管理员
+      description: |
+        只清缓存。已经接入成本地 MCP 资源的条目不受影响——那是用户自己的资
+        源，不是这个源的副本。
+      operationId: deleteMCPSource
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /mcp-sources/{id}/sync:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [MCPSources]
+      summary: 手动同步一个源，管理员
+      description: |
+        按 MCP Registry 协议（GET /v0/servers，游标翻页）拉取上游全量列表并
+        整体替换本地缓存；失败写进 last_sync_error 返回。审核结论不会被同步
+        重置。
+      operationId: syncMCPSource
+      responses:
+        '200':
+          description: 同步完成
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MCPSource' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502':
+          description: 上游不可达（last_sync_error 里带原因）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /mcp-market:
+    get:
+      tags: [MCPSources]
+      summary: 所有启用源里过审的公开 MCP Server（缓存快照）
+      operationId: listMCPMarket
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        required: [items, has_more]
+                        properties:
+                          items:
+                            type: array
+                            items: { $ref: '#/components/schemas/MarketMCPServer' }
+                          has_more: { type: boolean }
+
+  /mcp-market/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [MCPSources]
+      summary: 市场条目详情
+      operationId: getMCPMarketDetail
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/MarketMCPServer' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /mcp-market/{id}/install:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [MCPSources]
+      summary: 把市场里的 MCP Server 接入当前账号
+      description: |
+        按快照里的远端地址建一条本账号的 mcp 资源，走与手工接入完全相同的
+        管线（连通性探测、凭据加密、ref 校验）；config.installed_from 记录
+        来源。只提供本地运行包、没有远端地址的条目接入不了，返回 400。重复
+        接入返回 409。
+      operationId: installMCPMarketServer
+      responses:
+        '201':
+          description: 接入成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Resource' }
+        '400':
+          description: 参数不合法，或这个条目没有远端地址、平台接入不了
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: 已接入过（或 ref 已被占用）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
 components:
   securitySchemes:
     BearerAuth:
@@ -3996,3 +4299,66 @@ components:
             versions:
               type: array
               items: { $ref: '#/components/schemas/MarketSkillVersion' }
+    # ── MCP 源 ──────────────────────────────────────────────────────
+    MCPSource:
+      type: object
+      required: [id, name, base_url, status, server_count]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        base_url:
+          type: string
+          description: 注册中心根地址，不带路径与尾斜杠
+        status: { $ref: '#/components/schemas/Status' }
+        last_synced_at:
+          type: [string, 'null']
+          format: date-time
+          description: 上次同步时间；null = 从未同步
+        last_sync_error:
+          type: [string, 'null']
+          description: 非空 = 上次同步失败，直接展示给管理员
+        server_count:
+          type: integer
+          format: int64
+          description: 当前缓存条目数
+
+    MarketMCPServer:
+      type: object
+      required: [id, source_id, source_name, source_base_url, slug, name, topics, installable]
+      properties:
+        id: { type: string }
+        source_id: { type: string }
+        source_name: { type: string }
+        source_base_url: { type: string }
+        slug:
+          type: string
+          description: 上游限定名，如 io.github.owner/airtable-mcp-server
+          example: 'io.github.domdomegg/airtable-mcp-server'
+        name: { type: string }
+        summary: { type: string }
+        version: { type: string }
+        license: { type: string }
+        repository_url: { type: string }
+        remote_url:
+          type: string
+          description: 远端 MCP 地址；空 = 上游只给了本地运行包，平台接入不了
+        remote_type:
+          type: string
+          description: 远端传输方式
+          enum: [streamable-http, sse]
+        topics:
+          type: array
+          items: { type: string }
+        installable:
+          type: boolean
+          description: >-
+            能不能一键接入。等价于 remote_url 非空——这条规则的出处只在后端，
+            前端直接用这个字段，不要自己再判一遍。
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+        review_status:
+          $ref: '#/components/schemas/SkillReviewStatus'
+        review_note: { type: string }
+        reviewed_at: { type: string, format: date-time }
+        synced_at: { type: string, format: date-time }

@@ -1575,6 +1575,172 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp-sources/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 审核台：同步进来的全部 MCP 条目，管理员
+         * @description 和 /mcp-market 的区别：这里不过滤审核状态、也不过滤源是否停用，管理 员要看得到"同步进来了什么"才能审。分页、搜索都在库里做——一个公开注 册中心同步下来动辄上千条。counts 是三种状态的条目数（传了 source_id 就按该源统计），供页面顶部的筛选标签直接用；total 是当前筛选条件下 的总数，供前端算总页数。
+         */
+        get: operations["listMCPServersForReview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-sources/servers/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量审核同步条目，管理员
+         * @description 整批用同一个结论——"通过这一批"和"驳回这一批"是两个动作。批量是主路 径而非附加优化：一个公开注册中心同步下来动辄上千条，逐条点审不完。
+         */
+        post: operations["reviewMarketMCPServers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 源列表，管理员 */
+        get: operations["listMCPSources"];
+        put?: never;
+        /** 登记一个源，管理员 */
+        post: operations["createMCPSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 删除源（连同缓存条目），管理员
+         * @description 只清缓存。已经接入成本地 MCP 资源的条目不受影响——那是用户自己的资
+         *     源，不是这个源的副本。
+         */
+        delete: operations["deleteMCPSource"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-sources/{id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 手动同步一个源，管理员
+         * @description 按 MCP Registry 协议（GET /v0/servers，游标翻页）拉取上游全量列表并
+         *     整体替换本地缓存；失败写进 last_sync_error 返回。审核结论不会被同步
+         *     重置。
+         */
+        post: operations["syncMCPSource"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-market": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 所有启用源里过审的公开 MCP Server（缓存快照） */
+        get: operations["listMCPMarket"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-market/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        /** 市场条目详情 */
+        get: operations["getMCPMarketDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-market/{id}/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 把市场里的 MCP Server 接入当前账号
+         * @description 按快照里的远端地址建一条本账号的 mcp 资源，走与手工接入完全相同的
+         *     管线（连通性探测、凭据加密、ref 校验）；config.installed_from 记录
+         *     来源。只提供本地运行包、没有远端地址的条目接入不了，返回 400。重复
+         *     接入返回 409。
+         */
+        post: operations["installMCPMarketServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2208,6 +2374,59 @@ export interface components {
             /** @description 上网页面地址，供外链"去源站查看" */
             upstream_url?: string;
             versions: components["schemas"]["MarketSkillVersion"][];
+        };
+        MCPSource: {
+            id: string;
+            name: string;
+            /** @description 注册中心根地址，不带路径与尾斜杠 */
+            base_url: string;
+            status: components["schemas"]["Status"];
+            /**
+             * Format: date-time
+             * @description 上次同步时间；null = 从未同步
+             */
+            last_synced_at?: string | null;
+            /** @description 非空 = 上次同步失败，直接展示给管理员 */
+            last_sync_error?: string | null;
+            /**
+             * Format: int64
+             * @description 当前缓存条目数
+             */
+            server_count: number;
+        };
+        MarketMCPServer: {
+            id: string;
+            source_id: string;
+            source_name: string;
+            source_base_url: string;
+            /**
+             * @description 上游限定名，如 io.github.owner/airtable-mcp-server
+             * @example io.github.domdomegg/airtable-mcp-server
+             */
+            slug: string;
+            name: string;
+            summary?: string;
+            version?: string;
+            license?: string;
+            repository_url?: string;
+            /** @description 远端 MCP 地址；空 = 上游只给了本地运行包，平台接入不了 */
+            remote_url?: string;
+            /**
+             * @description 远端传输方式
+             * @enum {string}
+             */
+            remote_type?: "streamable-http" | "sse";
+            topics: string[];
+            /** @description 能不能一键接入。等价于 remote_url 非空——这条规则的出处只在后端， 前端直接用这个字段，不要自己再判一遍。 */
+            installable: boolean;
+            /** Format: date-time */
+            updated_at?: string | null;
+            review_status?: components["schemas"]["SkillReviewStatus"];
+            review_note?: string;
+            /** Format: date-time */
+            reviewed_at?: string;
+            /** Format: date-time */
+            synced_at?: string;
         };
     };
     responses: {
@@ -5474,6 +5693,308 @@ export interface operations {
             };
             /** @description 上游下载失败 */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    listMCPServersForReview: {
+        parameters: {
+            query?: {
+                review_status?: components["schemas"]["SkillReviewStatus"];
+                source_id?: string;
+                /** @description 在 slug / 名称 / 简介里做不区分大小写的模糊匹配 */
+                q?: string;
+                /** @description 从 1 开始 */
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["MarketMCPServer"][];
+                            /**
+                             * Format: int64
+                             * @description 当前筛选条件下的条目总数
+                             */
+                            total: number;
+                            page: number;
+                            page_size: number;
+                            has_more: boolean;
+                            counts: {
+                                /** Format: int64 */
+                                pending: number;
+                                /** Format: int64 */
+                                approved: number;
+                                /** Format: int64 */
+                                rejected: number;
+                            };
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    reviewMarketMCPServers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    ids: number[];
+                    status: components["schemas"]["SkillReviewStatus"];
+                    /** @description 驳回理由等，会展示在审核台 */
+                    note?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 已审核 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            reviewed: number;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listMCPSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["MCPSource"][];
+                        };
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createMCPSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** Format: uri */
+                    base_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 登记成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPSource"];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            403: components["responses"]["Forbidden"];
+            /** @description 源地址已登记 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    deleteMCPSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    syncMCPSource: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 同步完成 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MCPSource"];
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 上游不可达（last_sync_error 里带原因） */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+        };
+    };
+    listMCPMarket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: {
+                            items: components["schemas"]["MarketMCPServer"][];
+                            has_more: boolean;
+                        };
+                    };
+                };
+            };
+        };
+    };
+    getMCPMarketDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["MarketMCPServer"];
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    installMCPMarketServer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 接入成功 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Resource"];
+                    };
+                };
+            };
+            /** @description 参数不合法，或这个条目没有远端地址、平台接入不了 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description 已接入过（或 ref 已被占用） */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

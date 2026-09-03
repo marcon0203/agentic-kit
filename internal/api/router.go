@@ -42,6 +42,7 @@ type RouterConfig struct {
 	ModelCatalog      *ModelCatalogHandlers
 	ModelCatalogAdmin *ModelCatalogAdminHandlers
 	SkillSources      *SkillSourceHandlers
+	MCPSources        *MCPSourceHandlers
 	Usage             *UsageHandlers
 	Runs              *RunHandlers
 	Operations        *OperationHandlers
@@ -178,6 +179,17 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 				r.Get("/skill-market", cfg.SkillSources.ListMarket)
 				r.Get("/skill-market/{source_id}/{slug}", cfg.SkillSources.MarketDetail)
 				r.Post("/skill-market/{source_id}/{slug}/install", cfg.SkillSources.MarketInstall)
+			}
+			if cfg.MCPSources != nil {
+				r.Get("/mcp-sources", cfg.MCPSources.List)
+				r.Post("/mcp-sources", cfg.MCPSources.Create)
+				r.Post("/mcp-sources/{id}/sync", cfg.MCPSources.Sync)
+				r.Delete("/mcp-sources/{id}", cfg.MCPSources.Delete)
+				r.Get("/mcp-sources/servers", cfg.MCPSources.ListForReview)
+				r.Post("/mcp-sources/servers/review", cfg.MCPSources.ReviewServers)
+				r.Get("/mcp-market", cfg.MCPSources.ListMarket)
+				r.Get("/mcp-market/{id}", cfg.MCPSources.MarketDetail)
+				r.Post("/mcp-market/{id}/install", cfg.MCPSources.MarketInstall)
 			}
 			if cfg.ModelCatalogAdmin != nil {
 				r.Get("/model-catalog/providers", cfg.ModelCatalogAdmin.ListProviders)

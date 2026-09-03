@@ -26,6 +26,8 @@ import { McpServerEditorPage } from '@/pages/McpServerEditorPage'
 import { SkillUploadPage } from '@/pages/SkillUploadPage'
 import { SkillSourcesPage } from '@/pages/SkillSourcesPage'
 import { SkillSourceDetailPage } from '@/pages/SkillSourceDetailPage'
+import { McpSourcesPage } from '@/pages/McpSourcesPage'
+import { McpSourceDetailPage } from '@/pages/McpSourceDetailPage'
 import { SkillMarketDetailPage } from '@/pages/SkillMarketDetailPage'
 import { ComponentWizardPage } from '@/pages/ComponentWizardPage'
 import { ComponentPlazaPage } from '@/pages/ComponentPlazaPage'
@@ -190,6 +192,8 @@ export default function App() {
               <Route path="providers" element={<ModelCatalogAdminPage />} />
               <Route path="skill-sources" element={<SkillSourcesPage />} />
               <Route path="skill-sources/:id" element={<SkillSourceDetailPage />} />
+              <Route path="mcp-sources" element={<McpSourcesPage />} />
+              <Route path="mcp-sources/:id" element={<McpSourceDetailPage />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="roles" element={<RolesPage />} />
             </Route>

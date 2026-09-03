@@ -21,6 +21,7 @@ import (
 	esstore "github.com/marcon0203/agentic-kit/internal/adapter/elasticsearch"
 	"github.com/marcon0203/agentic-kit/internal/adapter/extism"
 	"github.com/marcon0203/agentic-kit/internal/adapter/mcp"
+	adaptermcpregistry "github.com/marcon0203/agentic-kit/internal/adapter/mcpregistry"
 	"github.com/marcon0203/agentic-kit/internal/adapter/milvus"
 	"github.com/marcon0203/agentic-kit/internal/adapter/modelchannels"
 	adaptermodelgateway "github.com/marcon0203/agentic-kit/internal/adapter/modelgateway"
@@ -40,6 +41,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/domain/iam"
 	"github.com/marcon0203/agentic-kit/internal/domain/knowledgebase"
 	"github.com/marcon0203/agentic-kit/internal/domain/marketplace"
+	"github.com/marcon0203/agentic-kit/internal/domain/mcpsource"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcatalog"
 	"github.com/marcon0203/agentic-kit/internal/domain/modelcenter"
 	"github.com/marcon0203/agentic-kit/internal/domain/operation"
@@ -341,6 +343,12 @@ func run() error {
 			postgres.NewSkillSourceRepository(queries, pool),
 			adminDirectory,
 			adapterclawhub.NewFetcher(),
+			resourceService,
+		)),
+		MCPSources: api.NewMCPSourceHandlers(mcpsource.NewService(
+			postgres.NewMCPSourceRepository(queries, pool),
+			adminDirectory,
+			adaptermcpregistry.NewFetcher(),
 			resourceService,
 		)),
 		Usage:    api.NewUsageHandlers(modelCenter),

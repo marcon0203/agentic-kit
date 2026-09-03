@@ -14,6 +14,11 @@ type Querier interface {
 	CountActiveSubscribedListingsForAgentRef(ctx context.Context, arg CountActiveSubscribedListingsForAgentRefParams) (int64, error)
 	CountActiveSubscribedListingsForBundleRef(ctx context.Context, arg CountActiveSubscribedListingsForBundleRefParams) (int64, error)
 	CountAdminUsers(ctx context.Context) (int64, error)
+	// 审核台顶部的状态计数。source_id 为空时统计全部源；审核台是按源进的，
+	// 那里必须传源 ID，否则顶部计数和下面的列表对不上。
+	CountMarketMCPServersByReview(ctx context.Context, sourceID pgtype.Int8) ([]CountMarketMCPServersByReviewRow, error)
+	// 与 ListMarketMCPServersForReview 同一套筛选条件下的总数，供前端算总页数。
+	CountMarketMCPServersForReview(ctx context.Context, arg CountMarketMCPServersForReviewParams) (int64, error)
 	// 审核台顶部的状态计数，一次查完免得前端按状态各拉一遍。source_id 为空时
 	// 统计全部源；审核台是按源进的，那里必须传源 ID，否则顶部计数和下面的列表
 	// 对不上。
@@ -49,6 +54,7 @@ type Querier interface {
 	// only an admin delisting actually removes it from the graph.
 	CreateListing(ctx context.Context, arg CreateListingParams) (MarketplaceListing, error)
 	CreateMCPServer(ctx context.Context, arg CreateMCPServerParams) (McpServer, error)
+	CreateMCPSource(ctx context.Context, arg CreateMCPSourceParams) (McpSource, error)
 	CreateMemory(ctx context.Context, arg CreateMemoryParams) (Memory, error)
 	CreateModelProvider(ctx context.Context, arg CreateModelProviderParams) (CreateModelProviderRow, error)
 	CreatePlugin(ctx context.Context, arg CreatePluginParams) (Plugin, error)
@@ -70,10 +76,12 @@ type Querier interface {
 	DeleteCatalogModel(ctx context.Context, id int64) error
 	DeleteCatalogProvider(ctx context.Context, id int64) error
 	DeleteExpiredIdempotencyKeys(ctx context.Context) error
+	DeleteMCPSource(ctx context.Context, id int64) (int64, error)
 	DeletePluginInstallation(ctx context.Context, arg DeletePluginInstallationParams) (int64, error)
 	DeleteRole(ctx context.Context, id int64) error
 	DeleteRolePermissions(ctx context.Context, roleID int64) error
 	DeleteSkillSource(ctx context.Context, id int64) (int64, error)
+	DeleteStaleMarketMCPServers(ctx context.Context, arg DeleteStaleMarketMCPServersParams) (int64, error)
 	DeleteStaleMarketSkills(ctx context.Context, arg DeleteStaleMarketSkillsParams) (int64, error)
 	DeleteSubscription(ctx context.Context, arg DeleteSubscriptionParams) error
 	DeleteUserRoles(ctx context.Context, userID int64) error
@@ -146,6 +154,10 @@ type Querier interface {
 	GetMCPServerLatestStatusByRef(ctx context.Context, arg GetMCPServerLatestStatusByRefParams) (int16, error)
 	GetMCPServerListingDisplayByListingID(ctx context.Context, id int64) (GetMCPServerListingDisplayByListingIDRow, error)
 	GetMCPServerListingForOwnerByRef(ctx context.Context, arg GetMCPServerListingForOwnerByRefParams) (MarketplaceListing, error)
+	GetMCPSource(ctx context.Context, id int64) (McpSource, error)
+	GetMCPSourceByURL(ctx context.Context, baseUrl string) (McpSource, error)
+	// 对外一律用行 id 寻址：上游的限定名带点和斜杠，做不了 URL 路径参数。
+	GetMarketMCPServer(ctx context.Context, id int64) (GetMarketMCPServerRow, error)
 	GetMarketSkill(ctx context.Context, arg GetMarketSkillParams) (GetMarketSkillRow, error)
 	GetMemoryByIDForOwner(ctx context.Context, arg GetMemoryByIDForOwnerParams) (Memory, error)
 	GetModelProviderCredentials(ctx context.Context, arg GetModelProviderCredentialsParams) ([]byte, error)
@@ -241,6 +253,14 @@ type Querier interface {
 	ListKnowledgeBasesForOwnerPage(ctx context.Context, arg ListKnowledgeBasesForOwnerPageParams) ([]KnowledgeBasis, error)
 	ListListingVersionHistory(ctx context.Context, listingRef string) ([]ListListingVersionHistoryRow, error)
 	ListMCPServersForOwnerPage(ctx context.Context, arg ListMCPServersForOwnerPageParams) ([]McpServer, error)
+	// 左联 market_mcp_servers 只为拿每个源的条目数，设置页直接展示。
+	ListMCPSources(ctx context.Context) ([]ListMCPSourcesRow, error)
+	// MCP 管理 → 市场视图：所有启用源里**审核通过**的缓存条目。未过审的条目
+	// 对普通用户根本不存在（审核台走 ListMarketMCPServersForReview）。
+	ListMarketMCPServers(ctx context.Context) ([]ListMarketMCPServersRow, error)
+	// 审核台（系统配置 → MCP 源）：不筛源状态、不筛审核状态地列出同步条目。
+	// 分页和搜索都在库里做——一个公开注册中心动辄上千条。
+	ListMarketMCPServersForReview(ctx context.Context, arg ListMarketMCPServersForReviewParams) ([]ListMarketMCPServersForReviewRow, error)
 	// 组件广场"插件" Tab 用的市场列表：只列公开且审核通过的，每个 plugin_id 一行（最新版本）。
 	ListMarketPlugins(ctx context.Context) ([]Plugin, error)
 	// Skill 管理 → 市场视图：所有启用源里**审核通过**的缓存条目，附源信息供
@@ -286,6 +306,8 @@ type Querier interface {
 	MarkBundleRunCancelRequested(ctx context.Context, id string) error
 	MarkKnowledgeBaseImmutable(ctx context.Context, id int64) error
 	MarkMCPServerImmutable(ctx context.Context, id int64) error
+	MarkMCPSourceSyncError(ctx context.Context, arg MarkMCPSourceSyncErrorParams) (McpSource, error)
+	MarkMCPSourceSynced(ctx context.Context, id int64) (McpSource, error)
 	MarkSkillImmutable(ctx context.Context, id int64) error
 	MarkSkillSourceSyncError(ctx context.Context, arg MarkSkillSourceSyncErrorParams) (SkillSource, error)
 	MarkSkillSourceSynced(ctx context.Context, id int64) (SkillSource, error)
@@ -309,6 +331,7 @@ type Querier interface {
 	SetListingDistribution(ctx context.Context, arg SetListingDistributionParams) error
 	SetMCPServerDisplayMeta(ctx context.Context, arg SetMCPServerDisplayMetaParams) error
 	SetMCPServerStatusByID(ctx context.Context, arg SetMCPServerStatusByIDParams) error
+	SetMarketMCPServerReview(ctx context.Context, arg SetMarketMCPServerReviewParams) (int64, error)
 	SetMarketSkillReview(ctx context.Context, arg SetMarketSkillReviewParams) (int64, error)
 	SetModelProviderStatus(ctx context.Context, arg SetModelProviderStatusParams) error
 	SetPluginReviewStatus(ctx context.Context, arg SetPluginReviewStatusParams) (Plugin, error)
@@ -327,6 +350,12 @@ type Querier interface {
 	UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill, error)
 	UpdateSubscriptionListing(ctx context.Context, arg UpdateSubscriptionListingParams) (Subscription, error)
 	UpdateTool(ctx context.Context, arg UpdateToolParams) (Tool, error)
+	// 同步落库：同一 (source, slug) 覆盖刷新，上次同步后被上游下架的条目由
+	// Sync 清理（见 DeleteStaleMarketMCPServers）。
+	//
+	// review_* 刻意不在 DO UPDATE 里：审核结论是本地判断，不是上游字段。每次
+	// 同步都重置的话，管理员批准过的条目会在下次同步后集体打回待审。
+	UpsertMarketMCPServer(ctx context.Context, arg UpsertMarketMCPServerParams) (MarketMcpServer, error)
 	// 同步落库：同一 (source, slug) 覆盖刷新，上次同步后被上游下架的条目由
 	// Sync 清理（见 DeleteStaleMarketSkills）。
 	//
