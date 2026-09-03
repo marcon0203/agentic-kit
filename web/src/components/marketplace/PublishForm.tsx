@@ -18,10 +18,23 @@ const TYPES: { value: ListingResourceType; label: string }[] = [
   { value: 'mcp', label: 'MCP Server' },
 ]
 
-export function PublishForm({ onPublished }: { onPublished: () => void }) {
-  const [resourceType, setResourceType] = useState<ListingResourceType>('bundle')
-  const [resourceRef, setResourceRef] = useState('')
-  const [version, setVersion] = useState('')
+/** 从依赖引导链接（DependencyErrorPanel）带过来的预填值。 */
+export interface PublishFormInitial {
+  type: ListingResourceType
+  ref: string
+  version?: string
+}
+
+export function PublishForm({
+  onPublished,
+  initial,
+}: {
+  onPublished: () => void
+  initial?: PublishFormInitial
+}) {
+  const [resourceType, setResourceType] = useState<ListingResourceType>(initial?.type ?? 'bundle')
+  const [resourceRef, setResourceRef] = useState(initial?.ref ?? '')
+  const [version, setVersion] = useState(initial?.version ?? '')
   const [displayName, setDisplayName] = useState('')
   const [description, setDescription] = useState('')
   const [usage, setUsage] = useState('')
@@ -86,6 +99,12 @@ export function PublishForm({ onPublished }: { onPublished: () => void }) {
 
   return (
     <div className="flex w-full max-w-[720px] flex-col gap-space-6">
+      {initial && (
+        <p className="text-body-sm rounded-sm bg-blueprint-tint px-space-4 py-space-3 text-blueprint">
+          从依赖引导跳转过来，已经帮你填好了 {initial.type}/{initial.ref}
+          {initial.version ? `@${initial.version}` : ''}——发布完这一个，回到刚才那个页面重新校验即可。
+        </p>
+      )}
       <div className="flex flex-col gap-space-2">
         <label htmlFor="publish-type" className="text-label-md text-ink-700">
           资源类型
