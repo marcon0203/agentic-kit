@@ -38,6 +38,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/public/guest-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 匿名访客身份（"立即体验"独立对话页专用）
+         * @description 面向 C 端的匿名"立即体验"独立对话页专用——完全独立于平台自己的
+         *     登录体系。每次调用都会创建一个全新的一次性账号并直接签发登录态，
+         *     不需要请求体。拿到的 access_token 之后按平台标准的
+         *     `Authorization: Bearer` 用法去调 `POST /runs`、
+         *     `GET /runs/{id}`、`GET /runs/{id}/stream` 这些既有接口即可——
+         *     黑盒事件过滤、run 归属校验都是同一套代码，访客只是背后一个从未
+         *     被人用来登录过的真实账号。
+         *
+         *     访客账号只能运行"正在分发中"的已发布 Bundle（按 listing_ref），
+         *     不需要、也不能订阅。
+         */
+        post: operations["createGuestSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/marketplace/listings": {
         parameters: {
             query?: never;
@@ -2768,6 +2797,28 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    createGuestSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已创建访客身份 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["AuthResult"];
+                    };
+                };
+            };
         };
     };
     browseMarketplace: {

@@ -64,6 +64,7 @@ const ComponentDetailPage = lazy(() =>
   import('@/pages/ComponentDetailPage').then((m) => ({ default: m.ComponentDetailPage })),
 )
 const AgentStudioPage = lazy(() => import('@/pages/AgentStudioPage').then((m) => ({ default: m.AgentStudioPage })))
+const TryPage = lazy(() => import('@/pages/TryPage').then((m) => ({ default: m.TryPage })))
 const RunMonitorTab = lazy(() => import('@/pages/operations/RunMonitorTab').then((m) => ({ default: m.RunMonitorTab })))
 const CostAnalysisTab = lazy(() =>
   import('@/pages/operations/CostAnalysisTab').then((m) => ({ default: m.CostAnalysisTab })),
@@ -125,6 +126,10 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            {/* "立即体验"独立对话页：面向从没打开过这个平台的匿名访客，
+                鉴权（lib/guest）和视觉都和平台自己那套不相交，所以既不套
+                AppShell 也不套 ProtectedRoute——它本来就不该要求登录。 */}
+            <Route path="/try/:listingRef" element={<TryPage />} />
             <Route element={<AppShell />}>
               <Route path="/" element={<HomePage />} />
               <Route path="/marketplace" element={<MarketplaceRedirect />} />

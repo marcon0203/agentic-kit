@@ -23,6 +23,9 @@ export interface ConversationOptions {
   initialActiveRunID?: string
   /** 配置不完整之类的原因，暂时不让发。 */
   blocked?: boolean
+  /** 见 useRunEvents 同名参数——匿名"立即体验"页用自己的访客 token 源
+   * 顶替平台的 useAuthStore，两套鉴权体系不能互相感知。 */
+  getAccessToken?: () => string | null
 }
 
 /**
@@ -39,6 +42,7 @@ export function useConversation({
   initialTurns,
   initialActiveRunID,
   blocked,
+  getAccessToken,
 }: ConversationOptions) {
   const [sessionID, setSessionID] = useState<string | undefined>(initialSessionID)
   const [turns, setTurns] = useState<ChatTurn[]>(initialTurns ?? [])
@@ -70,7 +74,7 @@ export function useConversation({
     setActiveRunID((cur) => cur ?? initialActiveRunID)
   }, [initialActiveRunID])
 
-  const { events, status: streamStatus, reconnect } = useRunEvents(activeRunID)
+  const { events, status: streamStatus, reconnect } = useRunEvents(activeRunID, getAccessToken)
   const timeline = useMemo(() => buildTimeline(events), [events])
 
   // 接管来的那一轮，问题原话要等事件流里的 bundle.started 才知道。

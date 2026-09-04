@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronUp, Flag, Lock, Play, TriangleAlert } from 'lucide-react'
+import { ChevronDown, ChevronUp, Flag, Lock, Play, Sparkles, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Ref } from '@/components/common/Page'
@@ -130,8 +130,15 @@ export function ListingDetailPage() {
             <Section title="调用方式">
               <div className="flex flex-col gap-space-4">
                 <p className="text-body-sm text-ink-500">
-                  这个应用有两种调用方式：平台内的标准会话页面，或者第三方系统直接调 Open API。
+                  这个应用能被调用的方式有三种：不想注册的话直接"立即体验"，平台内的标准会话页面，或者第三方系统直接调
+                  Open API。
                 </p>
+                <Button asChild variant="outline" className="self-start">
+                  <Link to={`/try/${encodeURIComponent(listing.listing_ref)}`} target="_blank" rel="noopener noreferrer">
+                    <Sparkles className="mr-1 size-4" aria-hidden />
+                    立即体验
+                  </Link>
+                </Button>
                 {canRun ? (
                   <Button asChild className="self-start bg-gradient-cta text-white hover:opacity-90">
                     <Link to={`/runs/new?bundle=${encodeURIComponent(listing.listing_ref)}`}>

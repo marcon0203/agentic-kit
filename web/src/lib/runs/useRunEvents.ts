@@ -27,7 +27,13 @@ interface UseRunEventsResult {
  * every state update behind the `cancelled` closure variable (not just a
  * ref check on unmount) is what spec-14 explicitly requires.
  */
-export function useRunEvents(runId: string | undefined): UseRunEventsResult {
+/**
+ * getAccessToken lets a caller outside the platform's own auth (the
+ * anonymous "立即体验" guest page, see lib/guest) point this at its own
+ * token source instead of the platform's useAuthStore — the two must stay
+ * completely independent, so this can't just always read useAuthStore.
+ */
+export function useRunEvents(runId: string | undefined, getAccessToken?: () => string | null): UseRunEventsResult {
   const [events, setEvents] = useState<RunEvent[]>([])
   const [status, setStatus] = useState<StreamStatus>('connecting')
   const [reconnectNonce, setReconnectNonce] = useState(0)
@@ -62,7 +68,7 @@ export function useRunEvents(runId: string | undefined): UseRunEventsResult {
     async function run() {
       setStatus((s) => (s === 'error' ? 'reconnecting' : 'connecting'))
       try {
-        const token = useAuthStore.getState().accessToken
+        const token = getAccessToken ? getAccessToken() : useAuthStore.getState().accessToken
         const url = `/api/v1/runs/${runId}/stream${lastIdRef.current > 0 ? `?after_id=${lastIdRef.current}` : ''}`
         const res = await fetch(url, {
           signal: controller.signal,
@@ -126,6 +132,12 @@ export function useRunEvents(runId: string | undefined): UseRunEventsResult {
       cancelled = true
       controller.abort()
     }
+    // getAccessToken 故意不进依赖数组：它是个稳定的读取函数（平台的
+    // useAuthStore.getState 或访客那边的 getGuestAccessToken），调用方
+    // 不会传一个每次渲染都换引用的内联箭头函数。真正要读的是"当下调用
+    // 它拿到的值"，而不是"这个函数引用变了要不要重连"——重连只应该由
+    // runId/reconnectNonce 驱动。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId, reconnectNonce])
 
   return {
