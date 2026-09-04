@@ -9,44 +9,44 @@
 /*
  * Design tokens — single source of truth, mirrored in design-system.md.
  *
- * The palette is drafting-table, not dashboard: warm paper, blueprint ink,
- * and one signal colour reserved for the single thing on this platform that
- * genuinely needs a human — an approval gate. Nothing else is allowed to
- * shout, which is what makes the gate readable across a busy run.
- *
- * Every colour/spacing/radius/font value used anywhere in the app comes from
- * a token below. No hardcoded values in components.
+ * Repointed to the "Soft SaaS" system: cool near-white surfaces, a single
+ * violet accent (no second brand hue), and status colour reserved strictly
+ * for success/warning/error/info. Variable NAMES are kept as-is on purpose
+ * — every component in the app already consumes these through the @theme
+ * mapping below (bg-surface, text-ink-900, border-border, p-space-6, …) —
+ * only the VALUES move to the new palette, so the whole app re-skins from
+ * this one file without touching call sites.
  */
 :root {
-  /* ── Color: the six + marketing violet ───────────────────────────── */
-  --color-paper: #f8fafc; /* page ground — cool white, matches reference */
-  --color-blueprint: #2563eb; /* primary: structure, links, running   */
-  --color-violet: #7c3aed; /* marketing accent: gradients, hero, cta   */
-  --color-signal: #f59e0b; /* the ONLY attention colour: needs a human */
-  --color-moss: #10b981; /* finished, healthy, approved               */
-  --color-rust: #f43f5e; /* failed, rejected, destructive             */
-  --color-graphite: #0f172a; /* ink                                     */
+  /* ── Color: single accent (violet) + status hues ─────────────────── */
+  --color-paper: #f6f7fb; /* bg-canvas — cool near-white, not warm paper */
+  --color-blueprint: #7c5cfc; /* accent-500 — primary: buttons, links, active nav, running */
+  --color-violet: #6a47f0; /* accent-600 — hover/darker stop for the one gradient */
+  --color-signal: #e09000; /* warning-600 — the one attention colour: needs a human */
+  --color-moss: #22c55e; /* success-500 — finished, healthy, approved */
+  --color-rust: #f04438; /* error-500 — failed, rejected, destructive */
+  --color-graphite: #1a1a22; /* neutral-900 — near-black ink, never pure black */
 
   /* Tints derived from the six — never new hues, only these at strength. */
-  --color-blueprint-tint: #dbeafe;
-  --color-blueprint-edge: #bfdbfe;
-  --color-violet-tint: #ede9fe;
-  --color-signal-tint: #fef3c7;
-  --color-moss-tint: #d1fae5;
-  --color-rust-tint: #ffe4e6;
+  --color-blueprint-tint: #ebe5fe;
+  --color-blueprint-edge: #d9cefd;
+  --color-violet-tint: #f4f1fe;
+  --color-signal-tint: #fff4db;
+  --color-moss-tint: #e7f8ee;
+  --color-rust-tint: #feecea;
 
   /* ── Color: ink ranks ────────────────────────────────────────────── */
   --color-ink-900: var(--color-graphite);
-  --color-ink-700: #475569;
-  --color-ink-500: #94a3b8;
+  --color-ink-700: #6e7079; /* text-secondary */
+  --color-ink-500: #a0a3ae; /* text-tertiary — 2.7:1, captions/placeholders only */
 
   /* ── Color: surfaces + rules ─────────────────────────────────────── */
   --color-surface: #ffffff;
   --color-surface-page: var(--color-paper);
-  --color-surface-muted: #f1f5f9;
-  --color-surface-ink: #0b1220; /* dark surfaces: hero, cta, code       */
-  --color-border: #e2e8f0;
-  --color-border-strong: #cbd5e1;
+  --color-surface-muted: #f1f1f5;
+  --color-surface-ink: #1a1a22; /* dark surfaces: hero, cta, code       */
+  --color-border: #f0f0f4; /* border-subtle — cards, dividers */
+  --color-border-strong: #c9cbd3; /* border hover/strong state */
 
   /* ── Platform semantic status (design-system.md §1.2) ────────────── */
   --color-status-pending: var(--color-ink-500);
@@ -56,19 +56,19 @@
   --color-status-failed: var(--color-rust);
   --color-status-blackbox: var(--color-ink-700);
 
-  /* ── Radius — small and consistent; this is an instrument, not a toy */
-  --radius-xs: 3px;
-  --radius-sm: 5px;
-  --radius-md: 7px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
-  --radius-full: 9999px;
+  /* ── Radius — layering signal: outer bigger than inner, five tiers ── */
+  --radius-xs: 6px; /* checkboxes */
+  --radius-sm: 10px; /* control — buttons, inputs, icon chips */
+  --radius-md: 12px; /* tile — nested blocks, list-row hover area */
+  --radius-lg: 16px; /* card — top-level cards, dialogs */
+  --radius-xl: 24px; /* shell — outermost app containers */
+  --radius-full: 999px;
   --radius: var(--radius-sm); /* shadcn/ui default control radius */
 
-  /* ── Shadow — used only for true elevation (popover, modal, drag) ── */
-  --shadow-sm: 0 1px 2px 0 rgb(22 24 29 / 0.06);
-  --shadow-md: 0 6px 20px -6px rgb(22 24 29 / 0.14), 0 2px 6px -2px rgb(22 24 29 / 0.06);
-  --shadow-lg: 0 24px 48px -16px rgb(22 24 29 / 0.24), 0 6px 14px -6px rgb(22 24 29 / 0.08);
+  /* ── Shadow — cool blue-gray, almost invisible; never plain black ── */
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.04);
+  --shadow-md: 0 8px 24px rgb(16 24 40 / 0.06);
+  --shadow-lg: 0 24px 64px rgb(16 24 40 / 0.1);
 
   /* ── Spacing (4px baseline) ──────────────────────────────────────── */
   --space-1: 4px;
@@ -88,10 +88,10 @@
   --container-app: 1320px;
 
   /* ── Typography ──────────────────────────────────────────────────── */
-  --font-display: 'Space Grotesk', 'Noto Sans SC', -apple-system, sans-serif;
+  --font-display: 'Plus Jakarta Sans', 'Noto Sans SC', -apple-system, sans-serif;
   --font-sans:
-    'Inter', 'Noto Sans SC', 'PingFang SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
+    'Plus Jakarta Sans', 'Inter', 'Noto Sans SC', 'PingFang SC', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
 
   /* ── shadcn/ui variable contract ─────────────────────────────────── */
@@ -239,6 +239,7 @@
   :focus-visible {
     outline: 2px solid var(--color-blueprint);
     outline-offset: 2px;
+    box-shadow: 0 0 0 3px rgb(124 92 252 / 0.2);
   }
 }
 
@@ -336,21 +337,29 @@
      only behind the hero rail and the Bundle canvas, never as page chrome. */
   .bg-blueprint-grid {
     background-image:
-      linear-gradient(to right, rgb(37 99 235 / 0.06) 1px, transparent 1px),
-      linear-gradient(to bottom, rgb(37 99 235 / 0.06) 1px, transparent 1px);
+      linear-gradient(to right, rgb(124 92 252 / 0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(124 92 252 / 0.06) 1px, transparent 1px);
     background-size: 22px 22px;
   }
 
-  /* Marketing gradients — reserved for hero headlines and CTA banners. */
+  /* The single global gradient this system allows — shared by the primary
+     button, the active nav pill, and marketing/hero surfaces. Never a
+     second gradient elsewhere: that's the rule soft-saas-ui enforces. */
   .text-gradient {
-    background: linear-gradient(92deg, var(--color-blueprint), var(--color-violet));
+    background: linear-gradient(90deg, #9c82f8, var(--color-blueprint));
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
 
   .bg-gradient-cta {
-    background: linear-gradient(120deg, var(--color-blueprint), var(--color-violet));
+    background: linear-gradient(90deg, #9c82f8, var(--color-blueprint));
+  }
+
+  /* Keyboard focus ring — soft violet halo instead of a hard outline,
+     matching shadow-focus from the token table. */
+  .shadow-focus-ring {
+    box-shadow: 0 0 0 3px rgb(124 92 252 / 0.2);
   }
 }
 
@@ -387,10 +396,10 @@
 @keyframes gate-await {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgb(245 158 11 / 0.4);
+    box-shadow: 0 0 0 0 rgb(224 144 0 / 0.4);
   }
   50% {
-    box-shadow: 0 0 0 7px rgb(245 158 11 / 0);
+    box-shadow: 0 0 0 7px rgb(224 144 0 / 0);
   }
 }
 
