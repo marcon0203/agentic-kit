@@ -674,6 +674,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/bundles/{ref}/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 独立聊天页（/chat/bundle/:bundleId）左侧的历史对话列表
+         * @description 按 session_id 把调用者在这个 Bundle 下的多次运行折成一段段对话，最近活跃
+         *     的排最前。标题取每段对话第一次运行的用户原话。
+         *
+         *     鉴权走的是和 `POST /runs` 完全相同的 Bundle 解析（所有权 / 订阅 / 匿名
+         *     访客三选一）：谁能对着这个 ref 发起新运行，谁就能看到自己在它下面攒的
+         *     历史对话；解析失败时返回和 `POST /runs` 一样的错误。
+         */
+        get: operations["listBundleConversations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/runs/agent-test": {
         parameters: {
             query?: never;
@@ -2161,6 +2186,21 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             finished_at?: string | null;
+        };
+        Conversation: {
+            /** @example sess-9e67931d5c38024e */
+            session_id: string;
+            /**
+             * @description 这段对话第一次运行时用户发的原话；还没有任何记录时是空串。
+             * @example 帮我写一份周报
+             */
+            title: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            last_active_at: string;
+            /** Format: int64 */
+            run_count: number;
         };
         RunDetail: components["schemas"]["RunSummary"] & {
             /**
@@ -4087,6 +4127,32 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    listBundleConversations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope"] & {
+                        data?: components["schemas"]["Conversation"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     createAgentTestRun: {

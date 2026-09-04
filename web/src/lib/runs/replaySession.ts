@@ -9,9 +9,16 @@ import { useAuthStore } from '@/lib/auth/store'
  * /runs/{id}/stream 对终态的运行会把全部事件补发一遍然后立刻关闭——它本
  * 来就是断线重连用的补发通道，重建历史正好复用，不必再造一个"取运行全部
  * 事件"的接口。
+ *
+ * getAccessToken 同 useRunEvents——独立聊天页用访客 token 源顶替平台的
+ * useAuthStore，两套鉴权体系不能互相感知。
  */
-export async function fetchRunEvents(runID: string, signal?: AbortSignal): Promise<RunEvent[]> {
-  const token = useAuthStore.getState().accessToken
+export async function fetchRunEvents(
+  runID: string,
+  signal?: AbortSignal,
+  getAccessToken?: () => string | null,
+): Promise<RunEvent[]> {
+  const token = getAccessToken ? getAccessToken() : useAuthStore.getState().accessToken
   const res = await fetch(`/api/v1/runs/${runID}/stream`, {
     signal,
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -51,11 +58,12 @@ export async function replayFinishedTurns(
   runIDs: string[],
   skipRunID: string | undefined,
   signal?: AbortSignal,
+  getAccessToken?: () => string | null,
 ): Promise<ChatTurn[]> {
   const turns: ChatTurn[] = []
   for (const runID of runIDs) {
     if (runID === skipRunID) continue
-    const events = await fetchRunEvents(runID, signal)
+    const events = await fetchRunEvents(runID, signal, getAccessToken)
     const timeline = buildTimeline(events)
     turns.push({
       id: `run:${runID}`,

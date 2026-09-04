@@ -134,7 +134,7 @@ export function ListingDetailPage() {
                   Open API。
                 </p>
                 <Button asChild variant="outline" className="self-start">
-                  <Link to={`/try/${encodeURIComponent(listing.listing_ref)}`} target="_blank" rel="noopener noreferrer">
+                  <Link to={`/chat/bundle/${encodeURIComponent(listing.listing_ref)}`} target="_blank" rel="noopener noreferrer">
                     <Sparkles className="mr-1 size-4" aria-hidden />
                     立即体验
                   </Link>

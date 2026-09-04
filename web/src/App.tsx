@@ -128,8 +128,11 @@ export default function App() {
             />
             {/* "立即体验"独立对话页：面向从没打开过这个平台的匿名访客，
                 鉴权（lib/guest）和视觉都和平台自己那套不相交，所以既不套
-                AppShell 也不套 ProtectedRoute——它本来就不该要求登录。 */}
-            <Route path="/try/:listingRef" element={<TryPage />} />
+                AppShell 也不套 ProtectedRoute——它本来就不该要求登录。
+                路由按 Bundle 而不是按某一次运行寻址——一个 Bundle 下面可
+                以有多段历史对话，这和 /runs/:runId 那种"看某一次具体运
+                行"的审计场景是两回事，后者原样保留在下面。 */}
+            <Route path="/chat/bundle/:bundleId" element={<TryPage />} />
             <Route element={<AppShell />}>
               <Route path="/" element={<HomePage />} />
               <Route path="/marketplace" element={<MarketplaceRedirect />} />
