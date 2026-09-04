@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -196,12 +196,30 @@ function makeParts(gate: AgentThreadProps['gate']) {
 }
 
 /**
- * 模型的思维链——默认折叠，点开才看正文。这是运行时才有的东西（只有
- * 资源作者能看到，node.reasoning 是黑盒过滤会拦下的内部事件），和答案
- * 正文分开渲染，不会被误当成回答的一部分。
+ * 模型的思维链。这是运行时才有的东西（只有资源作者能看到，node.reasoning
+ * 是黑盒过滤会拦下的内部事件），和答案正文分开渲染，不会被误当成回答的
+ * 一部分。
+ *
+ * 展开状态跟 status 走，不是纯手动开关：threadMessages.ts 在模型还纯在
+ * 思考、一个答案字都没吐的时候标 running，这时候自动展开——用户能看见
+ * "正在想"；一旦开始吐正文或者这一轮结束就是 complete，自动收起成一行，
+ * 跟 Claude.ai/ChatGPT 那种思考气泡的观感一致。收起之后用户随时能再点开
+ * 回看，手动切换不会被这条自动收起逻辑覆盖。
  */
-function ReasoningBlock({ text }: ReasoningMessagePartProps) {
-  const [open, setOpen] = useState(false)
+function ReasoningBlock({ text, status }: ReasoningMessagePartProps) {
+  const running = status?.type === 'running'
+  const [open, setOpen] = useState(running)
+  const wasRunning = useRef(running)
+  useEffect(() => {
+    if (running) {
+      setOpen(true)
+    } else if (wasRunning.current) {
+      // 从 running 掉到别的状态：这一轮的思考刚结束，自动收起。
+      setOpen(false)
+    }
+    wasRunning.current = running
+  }, [running])
+
   if (!text) return null
   return (
     <div className="text-body-sm rounded-md border border-border bg-surface-muted">
@@ -211,7 +229,7 @@ function ReasoningBlock({ text }: ReasoningMessagePartProps) {
         className="flex w-full items-center gap-space-2 px-space-3 py-space-2 text-ink-500 hover:text-ink-700"
       >
         <Lightbulb className="size-3.5 shrink-0" aria-hidden />
-        <span>思考过程</span>
+        <span>{running ? '思考中…' : '思考过程'}</span>
         {open ? <ChevronDown className="ml-auto size-3.5" aria-hidden /> : <ChevronRight className="ml-auto size-3.5" aria-hidden />}
       </button>
       {open && (

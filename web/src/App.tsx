@@ -17,7 +17,6 @@ import { OpsLayout, RequireAdmin } from '@/pages/OpsLayout'
 // OpsLayout/RequireAdmin 例外：RequireAdmin 是结构性的权限门禁组件，会在
 // JSX 里反复包裹其他路由元素，懒加载它换不来什么，还平添一层 Suspense。
 const HomePage = lazy(() => import('@/pages/HomePage').then((m) => ({ default: m.HomePage })))
-const NewRunPage = lazy(() => import('@/pages/NewRunPage').then((m) => ({ default: m.NewRunPage })))
 const RunPage = lazy(() => import('@/pages/RunPage').then((m) => ({ default: m.RunPage })))
 const AppsLayout = lazy(() => import('@/pages/AppsLayout').then((m) => ({ default: m.AppsLayout })))
 const SettingsLayout = lazy(() => import('@/pages/SettingsLayout').then((m) => ({ default: m.SettingsLayout })))
@@ -165,14 +164,6 @@ export default function App() {
                 <Route path="publish" element={<MyListingsPage />} />
                 <Route path="subscriptions" element={<MySubscriptionsPage />} />
               </Route>
-              <Route
-                path="/runs/new"
-                element={
-                  <ProtectedRoute>
-                    <NewRunPage />
-                  </ProtectedRoute>
-                }
-              />
               <Route
                 path="/runs/:runId"
                 element={

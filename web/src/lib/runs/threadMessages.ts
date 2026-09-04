@@ -99,10 +99,19 @@ type Part = Exclude<ThreadMessageLike['content'], string>[number]
 function answerParts(answer: FrozenAnswer | undefined, isLive: boolean): Part[] {
   const parts: Part[] = []
   const reasoningText = answer?.reasoningText ?? ''
-  // 思维链要排在正文前面——assistant-ui 的 ReasoningPrimitive 就是按"先
-  // 想后答"的顺序渲染折叠块的，放反了看起来会像模型读完答案才去思考。
-  if (reasoningText) parts.push({ type: 'reasoning', text: reasoningText })
   const text = answer?.text ?? ''
+  // 思维链要排在正文前面——assistant-ui 是按"先想后答"的顺序渲染折叠块
+  // 的，放反了看起来会像模型读完答案才去思考。status 驱动折叠块的自动
+  // 展开/收起：还在跑而且答案正文一个字都没出来，说明模型还纯在思考，
+  // 这时候是 running（前端据此自动展开）；一旦开始吐正文或者这一轮已经
+  // 结束，就是 complete（自动收起成一行摘要）。
+  if (reasoningText) {
+    parts.push({
+      type: 'reasoning',
+      text: reasoningText,
+      status: isLive && !text ? { type: 'running' } : { type: 'complete' },
+    })
+  }
   // 正在跑但还没吐字时也要占一个空文本 part：一条 part 都没有的助手消息
   // 在 assistant-ui 里什么都不画，用户会以为发送没生效。
   if (text || isLive) parts.push({ type: 'text', text })
