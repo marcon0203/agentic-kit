@@ -1,4 +1,4 @@
-import { Pencil, Play, Trash2, Workflow, GitBranch, Box } from 'lucide-react'
+import { Pencil, Play, Trash2, Workflow, GitBranch, Box, Rocket } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Ref } from '@/components/common/Page'
@@ -22,6 +22,7 @@ interface BundleCardProps {
   onRun: (ref: string) => void
   onEdit: (ref: string) => void
   onDelete: (ref: string) => void
+  onPublish: (bundle: Bundle) => void
 }
 
 /**
@@ -29,7 +30,7 @@ interface BundleCardProps {
  * 顶部，描述占中间的固定两行（缺省时也占位，卡片高度才不会参差），底部是
  * 这张卡自己的动作。
  */
-export function BundleCard({ bundle, runBlocked, onRun, onEdit, onDelete }: BundleCardProps) {
+export function BundleCard({ bundle, runBlocked, onRun, onEdit, onDelete, onPublish }: BundleCardProps) {
   const definition = bundle.definition as BundleDefinition
   const runType = RUN_TYPE_META[definition.type ?? 'graph'] ?? RUN_TYPE_META.graph
   const agentCount = definition.agents?.length ?? 0
@@ -73,6 +74,10 @@ export function BundleCard({ bundle, runBlocked, onRun, onEdit, onDelete }: Bund
         <Button variant="outline" size="sm" onClick={() => onEdit(bundle.bundle_ref)}>
           <Pencil className="mr-1 size-3.5" aria-hidden />
           编辑
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => onPublish(bundle)}>
+          <Rocket className="mr-1 size-3.5" aria-hidden />
+          发布
         </Button>
         <Button
           variant="ghost"

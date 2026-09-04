@@ -94,6 +94,11 @@ export function BundleListPage() {
                 onRun={(ref) => navigate(`/runs/new?bundle=${encodeURIComponent(ref)}`)}
                 onEdit={(ref) => navigate(`/apps/bundles/${encodeURIComponent(ref)}/edit`)}
                 onDelete={setPendingDelete}
+                onPublish={(bundle) =>
+                  navigate(
+                    `/apps/publish?type=bundle&ref=${encodeURIComponent(bundle.bundle_ref)}&version=${encodeURIComponent(bundle.version)}`,
+                  )
+                }
               />
             ))}
           </div>

@@ -1,4 +1,4 @@
-import { Pencil, Copy } from 'lucide-react'
+import { Pencil, Copy, Rocket } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Ref } from '@/components/common/Page'
@@ -12,9 +12,10 @@ interface AgentCardProps {
   agent: Agent
   onEdit: (id: string) => void
   onCopy: (agent: Agent) => void
+  onPublish: (agent: Agent) => void
 }
 
-export function AgentCard({ agent, onEdit, onCopy }: AgentCardProps) {
+export function AgentCard({ agent, onEdit, onCopy, onPublish }: AgentCardProps) {
   const definition = agent.definition as AgentDefinition
   const subtitle = definition.persona ?? `${definition.model?.provider ?? ''}/${definition.model?.name ?? ''}`
 
@@ -44,6 +45,14 @@ export function AgentCard({ agent, onEdit, onCopy }: AgentCardProps) {
       </p>
 
       <div className="mt-auto flex items-center justify-end gap-space-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPublish(agent)}
+        >
+          <Rocket className="mr-1 size-3.5" aria-hidden />
+          发布
+        </Button>
         <Button
           variant="outline"
           size="sm"

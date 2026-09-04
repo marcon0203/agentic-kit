@@ -93,6 +93,11 @@ export function AgentDefinitionPage() {
               agent={a}
               onEdit={(id) => navigate(`/agents/${id}/edit`)}
               onCopy={handleCopy}
+              onPublish={(agent) =>
+                navigate(
+                  `/apps/publish?type=agent&ref=${encodeURIComponent(agent.agent_ref)}&version=${encodeURIComponent(agent.version)}`,
+                )
+              }
             />
           ))}
         </div>
