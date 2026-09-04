@@ -291,6 +291,29 @@ func (s *Service) ListSession(ctx context.Context, userID int64, sessionID strin
 	return rows, nil
 }
 
+// ListConversations 返回访问者在某个 Bundle 下的历史对话列表，供
+// /chat/bundle/:bundleId 的侧栏使用。
+//
+// 复用 Resolve 而不是直接按 bundle_ref 查表，是为了让"这个人到底能不能
+// 看到这个 Bundle 的对话"走和"能不能对它发起一次新运行"完全同一条判定
+// ——所有权、订阅、访客三条路径都已经在 BundleResolver 里，这里没有理由
+// 重新判一遍。resolve 失败（未订阅/不存在）就照旧返回 ErrNotSubscribed，
+// 不特殊处理。
+func (s *Service) ListConversations(ctx context.Context, userID int64, bundleRef string) ([]Conversation, error) {
+	resolved, err := s.bundles.Resolve(ctx, userID, bundleRef, "")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.runs.ListConversations(ctx, userID, resolved.BundleID, 50)
+	if err != nil {
+		return nil, domain.Internal(err)
+	}
+	if rows == nil {
+		rows = []Conversation{}
+	}
+	return rows, nil
+}
+
 func (s *Service) List(ctx context.Context, userID int64, q ListQuery) (domain.Page[Run], error) {
 	limit := domain.PageQuery{Limit: q.Limit}.Normalize().Limit
 	q.TriggeredBy, q.Limit = userID, limit+1

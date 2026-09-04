@@ -569,6 +569,87 @@ func (q *Queries) ListBundleRunsInSession(ctx context.Context, arg ListBundleRun
 	return items, nil
 }
 
+const listConversationsForUserBundle = `-- name: ListConversationsForUserBundle :many
+WITH sessions AS (
+  SELECT
+    br.session_id,
+    -- run id 是随机十六进制串，MIN(id) 不代表"最早的那次运行"——要按
+    -- created_at 排序取第一个，用 array_agg 而不是再一次相关子查询。
+    (array_agg(br.id ORDER BY br.created_at ASC))[1] AS first_run_id,
+    MIN(br.created_at)::timestamptz AS started_at,
+    MAX(br.created_at)::timestamptz AS last_active_at,
+    COUNT(*) AS run_count
+  FROM bundle_runs br
+  WHERE br.triggered_by = $1 AND br.bundle_id = $2 AND br.session_id IS NOT NULL
+  GROUP BY br.session_id
+)
+SELECT
+  s.session_id,
+  s.started_at,
+  s.last_active_at,
+  s.run_count,
+  -- COALESCE 到空串而不是留 NULL：万一某个 session 的首次运行还没落下
+  -- bundle.started 事件（理论上不该发生，但标题这种展示字段没必要因为
+  -- 一行脏数据让整个列表接口报错），前端拿到空串就照 threadMessages 的
+  -- 老规矩显示"新的对话"。
+  CAST(COALESCE((
+    SELECT e.payload->'input'->>'message'
+    FROM bundle_run_events e
+    WHERE e.run_id = s.first_run_id AND e.type = 'bundle.started'
+    ORDER BY e.id ASC LIMIT 1
+  ), '') AS text) AS title
+FROM sessions s
+ORDER BY s.last_active_at DESC
+LIMIT $3
+`
+
+type ListConversationsForUserBundleParams struct {
+	TriggeredBy int64 `json:"triggered_by"`
+	BundleID    int64 `json:"bundle_id"`
+	Limit       int32 `json:"limit"`
+}
+
+type ListConversationsForUserBundleRow struct {
+	SessionID    pgtype.Text        `json:"session_id"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	LastActiveAt pgtype.Timestamptz `json:"last_active_at"`
+	RunCount     int64              `json:"run_count"`
+	Title        string             `json:"title"`
+}
+
+// 独立聊天页（/chat/bundle/:bundleId）左侧的"最近对话"列表：按
+// session_id 把同一个人在同一个 Bundle 下的多次运行折成一段段对话，最近
+// 活跃的排最前。标题取这段对话里最早一次运行的 bundle.started 事件
+// payload.input.message（用户发的第一句原话）——这是运行时早就写好的
+// 事件，不用额外存一份标题。
+// 老运行没有 session_id（B1 迁移之前），本来就不归属任何一段"对话"，天
+// 然被 session_id IS NOT NULL 排除在外。
+func (q *Queries) ListConversationsForUserBundle(ctx context.Context, arg ListConversationsForUserBundleParams) ([]ListConversationsForUserBundleRow, error) {
+	rows, err := q.db.Query(ctx, listConversationsForUserBundle, arg.TriggeredBy, arg.BundleID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListConversationsForUserBundleRow{}
+	for rows.Next() {
+		var i ListConversationsForUserBundleRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.StartedAt,
+			&i.LastActiveAt,
+			&i.RunCount,
+			&i.Title,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markBundleRunCancelRequested = `-- name: MarkBundleRunCancelRequested :exec
 UPDATE bundle_runs SET cancel_requested_at = now() WHERE id = $1 AND status = 'running'
 `

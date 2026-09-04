@@ -48,6 +48,9 @@ func (s *stubRunRepo) ListInSession(_ context.Context, triggeredBy int64, sessio
 	}
 	return out, nil
 }
+func (s *stubRunRepo) ListConversations(context.Context, int64, int64, int) ([]run.Conversation, error) {
+	return nil, nil
+}
 func (s *stubRunRepo) UpdateStatus(context.Context, string, run.Status, string) error { return nil }
 func (s *stubRunRepo) MarkCancelRequested(context.Context, string) error              { return nil }
 func (s *stubRunRepo) AddUsage(context.Context, string, int64, float64) error         { return nil }

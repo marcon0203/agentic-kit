@@ -65,6 +65,34 @@ func (f *fakeRepo) ListInSession(_ context.Context, triggeredBy int64, sessionID
 	return out, nil
 }
 
+func (f *fakeRepo) ListConversations(_ context.Context, triggeredBy, bundleID int64, limit int) ([]run.Conversation, error) {
+	bySession := map[string]*run.Conversation{}
+	order := []string{}
+	for _, r := range f.list {
+		if r.TriggeredBy != triggeredBy || r.BundleID != bundleID || r.SessionID == "" {
+			continue
+		}
+		c, ok := bySession[r.SessionID]
+		if !ok {
+			c = &run.Conversation{SessionID: r.SessionID, StartedAt: r.CreatedAt, LastActiveAt: r.CreatedAt}
+			bySession[r.SessionID] = c
+			order = append(order, r.SessionID)
+		}
+		c.RunCount++
+		if r.CreatedAt.After(c.LastActiveAt) {
+			c.LastActiveAt = r.CreatedAt
+		}
+	}
+	out := make([]run.Conversation, 0, len(order))
+	for _, id := range order {
+		out = append(out, *bySession[id])
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) UpdateStatus(_ context.Context, runID string, status run.Status, _ string) error {
 	f.statuses[runID] = status
 	return nil

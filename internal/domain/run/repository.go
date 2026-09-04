@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Port sentinels. Adapters translate their storage's own signals into
@@ -22,9 +23,24 @@ type Repository interface {
 	// 它把整段对话重建出来——一段对话由多次运行组成，每次运行只对应其中
 	// 一问一答。
 	ListInSession(ctx context.Context, triggeredBy int64, sessionID string) ([]Run, error)
+	// ListConversations 是 /chat/bundle/:bundleId 左侧"最近对话"列表的数据
+	// 来源：同一个人在同一个 Bundle 下按 session_id 折出来的多段对话，最
+	// 近活跃的排最前。
+	ListConversations(ctx context.Context, triggeredBy, bundleID int64, limit int) ([]Conversation, error)
 	UpdateStatus(ctx context.Context, runID string, status Status, errMsg string) error
 	MarkCancelRequested(ctx context.Context, runID string) error
 	AddUsage(ctx context.Context, runID string, tokens int64, costUSD float64) error
+}
+
+// Conversation is one session_id's worth of runs against a single Bundle,
+// folded into the summary the chat page's sidebar needs — it never needs
+// every run row just to render a list of past threads.
+type Conversation struct {
+	SessionID    string
+	Title        string
+	StartedAt    time.Time
+	LastActiveAt time.Time
+	RunCount     int64
 }
 
 // ListQuery filters GET /runs. Runs paginate by offset rather than keyset:

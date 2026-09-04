@@ -93,6 +93,24 @@ func (r *RunRepository) ListInSession(ctx context.Context, triggeredBy int64, se
 	return out, nil
 }
 
+func (r *RunRepository) ListConversations(ctx context.Context, triggeredBy, bundleID int64, limit int) ([]run.Conversation, error) {
+	rows, err := r.q.ListConversationsForUserBundle(ctx, store.ListConversationsForUserBundleParams{
+		TriggeredBy: triggeredBy, BundleID: bundleID, Limit: int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]run.Conversation, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, run.Conversation{
+			SessionID: row.SessionID.String, Title: row.Title,
+			StartedAt: row.StartedAt.Time, LastActiveAt: row.LastActiveAt.Time,
+			RunCount: row.RunCount,
+		})
+	}
+	return out, nil
+}
+
 func (r *RunRepository) UpdateStatus(ctx context.Context, runID string, status run.Status, errMsg string) error {
 	params := store.UpdateBundleRunStatusParams{
 		ID: runID, Status: string(status), FinishedAt: pgtype.Timestamptz{Valid: true, Time: time.Now()},

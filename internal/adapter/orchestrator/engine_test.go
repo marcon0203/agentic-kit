@@ -64,6 +64,9 @@ func (r recordingRuns) ListPage(context.Context, run.ListQuery) ([]run.Run, erro
 func (r recordingRuns) ListInSession(context.Context, int64, string) ([]run.Run, error) {
 	return nil, nil
 }
+func (r recordingRuns) ListConversations(context.Context, int64, int64, int) ([]run.Conversation, error) {
+	return nil, nil
+}
 func (r recordingRuns) UpdateStatus(_ context.Context, _ string, status run.Status, _ string) error {
 	*r.log = append(*r.log, "status:"+string(status))
 	return nil

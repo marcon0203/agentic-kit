@@ -274,6 +274,14 @@ type Querier interface {
 	ListCatalogProviderDefaultCredentials(ctx context.Context) ([]ListCatalogProviderDefaultCredentialsRow, error)
 	// descriptor 一并取回：管理端列表要从中解析 request_params 给添加模型表单用。
 	ListCatalogProviders(ctx context.Context) ([]ListCatalogProvidersRow, error)
+	// 独立聊天页（/chat/bundle/:bundleId）左侧的"最近对话"列表：按
+	// session_id 把同一个人在同一个 Bundle 下的多次运行折成一段段对话，最近
+	// 活跃的排最前。标题取这段对话里最早一次运行的 bundle.started 事件
+	// payload.input.message（用户发的第一句原话）——这是运行时早就写好的
+	// 事件，不用额外存一份标题。
+	// 老运行没有 session_id（B1 迁移之前），本来就不归属任何一段"对话"，天
+	// 然被 session_id IS NOT NULL 排除在外。
+	ListConversationsForUserBundle(ctx context.Context, arg ListConversationsForUserBundleParams) ([]ListConversationsForUserBundleRow, error)
 	// 进程启动和每次提供商增删改后，modelgateway 的渠道注册表从这里整体重
 	// 建。停用的提供商不出现——停用就该立刻调不通，而不是等下次重启。
 	ListEnabledChannelDescriptors(ctx context.Context) ([]ListEnabledChannelDescriptorsRow, error)

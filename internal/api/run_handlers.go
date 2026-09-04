@@ -160,6 +160,42 @@ func (h *RunHandlers) ListSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, items)
 }
 
+// ── Conversations ────────────────────────────────────────────────────
+
+type conversationDTO struct {
+	SessionID    string    `json:"session_id"`
+	Title        string    `json:"title"`
+	StartedAt    time.Time `json:"started_at"`
+	LastActiveAt time.Time `json:"last_active_at"`
+	RunCount     int64     `json:"run_count"`
+}
+
+// ListConversations handles GET /bundles/{ref}/conversations — the独立
+// 聊天页（/chat/bundle/:bundleId）左侧"最近对话"列表。走的是和 POST
+// /runs 完全一样的 Bundle 解析（所有权/订阅/访客三选一），所以谁能对着
+// 这个 ref 发起新运行，谁就能看到自己在它下面攒的历史对话；反过来也一
+// 样，没资格运行的人这里直接拿到和 POST /runs 相同的错误。
+func (h *RunHandlers) ListConversations(w http.ResponseWriter, r *http.Request) {
+	userID, ok := UserIDFromContext(r.Context())
+	if !ok {
+		writeErr(w, r, http.StatusUnauthorized, ErrTokenInvalid, "unauthorized")
+		return
+	}
+	rows, err := h.svc.ListConversations(r.Context(), userID, chi.URLParam(r, "ref"))
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	items := make([]conversationDTO, 0, len(rows))
+	for _, c := range rows {
+		items = append(items, conversationDTO{
+			SessionID: c.SessionID, Title: c.Title,
+			StartedAt: c.StartedAt, LastActiveAt: c.LastActiveAt, RunCount: c.RunCount,
+		})
+	}
+	writeJSON(w, r, http.StatusOK, items)
+}
+
 // ── List ─────────────────────────────────────────────────────────────
 
 // List handles GET /runs.
