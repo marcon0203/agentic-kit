@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ChevronDown, ChevronUp } from 'lucide-react'
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Ref } from '@/components/common/Page'
 import { EmptyState, ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
 import { PublishForm, type PublishFormInitial } from '@/components/marketplace/PublishForm'
+import { ApiUsagePanel } from '@/components/marketplace/ApiUsagePanel'
 import { apiClient, unwrap, assertOk, ApiError } from '@/lib/api/client'
 import { useAuthStore } from '@/lib/auth/store'
 import type { components } from '@/lib/api/schema'
@@ -137,7 +138,11 @@ export function MyListingsPage() {
                         停止分发
                       </Button>
                     </div>
-                    {apiOpen && <ApiUsagePanel listingRef={l.listing_ref} />}
+                    {apiOpen && (
+                      <div className="border-t border-border bg-surface-muted px-space-5 py-space-4">
+                        <ApiUsagePanel listingRef={l.listing_ref} />
+                      </div>
+                    )}
                   </li>
                 )
               })}
@@ -145,57 +150,6 @@ export function MyListingsPage() {
           )}
         </>
       )}
-    </div>
-  )
-}
-
-/**
- * 一个 Bundle 发布成功之后，能被调用的方式有两种：平台自带的标准会话页面
- * （订阅之后在"应用广场"里点开就是），和这里说的 Open API——第三方自己的
- * 系统直接调 POST /runs，不经过这个前端。
- *
- * curl 示例里的 bundle_ref 就是这条 listing 的 listing_ref：作者自己调用
- * 时它按所有权直接解析，其他人调用时按订阅解析（run.BundleResolver），
- * 同一个值两条路都通，不用在这里分情况写两段示例。
- */
-function ApiUsagePanel({ listingRef }: { listingRef: string }) {
-  const curl = [
-    `curl -X POST ${window.location.origin}/api/v1/runs \\`,
-    `  -H "Authorization: ApiKey <你的 API Key>" \\`,
-    `  -H "Content-Type: application/json" \\`,
-    `  -H "Idempotency-Key: $(uuidgen)" \\`,
-    `  -d '{"bundle_ref": "${listingRef}", "input": {"message": "你好"}}'`,
-  ].join('\n')
-
-  return (
-    <div className="flex flex-col gap-space-3 border-t border-border bg-surface-muted px-space-5 py-space-4">
-      <p className="text-body-sm text-ink-700">
-        这个应用有两种调用方式：订阅后在应用广场里打开标准会话页面，或者第三方系统直接调
-        Open API——鉴权、事件流读取都和平台自己用的是同一套接口，不是单独开的口子。
-      </p>
-      <pre className="text-ref-sm overflow-x-auto rounded-md bg-ink-900 px-space-4 py-space-3 text-white">
-        <code>{curl}</code>
-      </pre>
-      <p className="text-body-sm text-ink-500">
-        响应里的 <code className="text-ref-sm">run_id</code> 再拿去调
-        <code className="text-ref-sm mx-1">GET /runs/&#123;id&#125;/stream</code>
-        读事件流，或轮询 <code className="text-ref-sm">GET /runs/&#123;id&#125;</code> 拿最终状态。调用方需要先订阅这个应用（作者本人除外）。
-      </p>
-      <div className="flex items-center gap-space-4">
-        <Button asChild variant="outline" size="sm">
-          <Link to="/settings/api-keys" target="_blank" rel="noopener noreferrer">
-            去生成 API Key
-          </Link>
-        </Button>
-        <a
-          href="/openapi.yaml"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-body-sm text-blueprint hover:underline"
-        >
-          完整接口文档（OpenAPI）
-        </a>
-      </div>
     </div>
   )
 }
