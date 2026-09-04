@@ -117,16 +117,9 @@ export function AppShell() {
 
       {/* flex 列 + 子页面根节点 flex-1：把 main 的高度传下去，二级布局
           （如应用中心侧栏）才能拉伸到整个内容区高度，右边的分隔线才贯穿。 */}
-      <main id="main" className="flex w-full flex-1 flex-col px-space-6 pt-space-6 pb-space-8">
+      <main id="main" className="flex min-h-0 w-full flex-1 flex-col px-space-6 pt-space-6 pb-space-8">
         <Outlet />
       </main>
-
-      <footer className="border-t border-border">
-        <div className="text-caption mx-auto flex max-w-container-app flex-wrap items-center justify-between gap-space-3 px-space-6 py-space-5 text-ink-500">
-          <span>Agentic Kit · Agent 编排与运行平台</span>
-          <span className="text-ref text-ink-500">v1</span>
-        </div>
-      </footer>
     </div>
   )
 }

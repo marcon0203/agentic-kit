@@ -185,10 +185,10 @@ export function RunPage() {
 
   if (!runId) return null
 
-  // 还没真正开始过（草稿态、或者正常态还没连上任何一次运行）就没有 run
-  // id 可显示——RunHeader 这时候不画，和试运行面板"跑起来之前压根没有
-  // header"是同一个道理。
-  const headerRunId = chat.activeRunID ?? (isDraft ? undefined : runId)
+  // 还没真正开始过（草稿态、或者正常态还没连上任何一次运行）就还没有
+  // "运行中/断线"这类需要用户做点什么的状态——RunHeader 这时候不画，
+  // 和试运行面板"跑起来之前压根没有 header"是同一个道理。
+  const showHeader = !!chat.activeRunID || !isDraft
 
   const disabledHint = noProvider
     ? '尚未接入任何模型 Provider，请先去模型广场接入'
@@ -199,11 +199,10 @@ export function RunPage() {
         : undefined
 
   return (
-    <div className="grid grid-cols-1 gap-space-6 lg:grid-cols-[1.08fr_.92fr]">
+    <div className="grid min-h-0 flex-1 grid-cols-1 gap-space-6 lg:grid-cols-[1.08fr_.92fr]">
       <div className="flex min-h-0 flex-col">
-        {headerRunId && (
+        {showHeader && (
           <RunHeader
-            runId={headerRunId}
             status={runStatus}
             streamStatus={chat.streamStatus}
             totalTokens={run?.usage?.total_tokens ?? 0}
@@ -219,7 +218,7 @@ export function RunPage() {
           </p>
         )}
 
-        <div className="flex max-h-[72vh] min-h-[24rem] flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface">
+        <div className="flex min-h-[24rem] flex-1 flex-col overflow-hidden rounded-lg border border-border bg-surface">
           <AgentThread
             messages={chat.messages}
             isRunning={chat.isRunning}
