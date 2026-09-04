@@ -12,7 +12,16 @@ import (
 // persistence) emit directly, since ADK has no event of its own for "a
 // node is about to start" or "a human gate is waiting".
 const (
-	EventNodeThinking         = "node.thinking"
+	EventNodeThinking = "node.thinking"
+	// EventNodeReasoning is the model's actual chain-of-thought/reasoning
+	// trace (a thinking-capable provider's distinct reasoning channel —
+	// modelgateway.StreamDelta.ReasoningDelta / CompletionResult.Reasoning),
+	// not to be confused with EventNodeThinking, which is really just
+	// "streamed answer text before the turn is final" (a typewriter
+	// effect). Kept separate so the frontend can render genuine reasoning
+	// distinctly instead of it being indistinguishable from partial answer
+	// text.
+	EventNodeReasoning        = "node.reasoning"
 	EventNodeToolCallStarted  = "node.tool_call.started"
 	EventNodeToolCallFinished = "node.tool_call.finished"
 	EventNodeFinished         = "node.finished"
@@ -95,7 +104,7 @@ func TranslateEvent(node string, ev *session.Event) []PlatformEvent {
 			case part.Thought:
 				// The model's own internal reasoning trace — never
 				// forwarded to a black-box subscriber.
-				out = append(out, withUsage(PlatformEvent{Type: EventNodeThinking, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: true}))
+				out = append(out, withUsage(PlatformEvent{Type: EventNodeReasoning, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: true}))
 			case part.Text != "":
 				if ev.IsFinalResponse() {
 					out = append(out, withUsage(PlatformEvent{Type: EventNodeFinished, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: false}))

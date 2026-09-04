@@ -74,6 +74,7 @@ func (c *descriptorClient) toDescriptorRequest(model string, req CompletionReque
 func fromDescriptorResult(r descriptor.Result) CompletionResult {
 	out := CompletionResult{
 		Content:      r.Content,
+		Reasoning:    r.Reasoning,
 		InputTokens:  r.InputTokens,
 		OutputTokens: r.OutputTokens,
 	}
@@ -170,12 +171,15 @@ func (c *descriptorClient) CompleteStream(ctx context.Context, apiKey, baseURL, 
 		if onDelta == nil {
 			return
 		}
-		// 思维链也当文字往外推：现在 StreamDelta 只有 TextDelta 一个通
-		// 道，把 reasoning 吞掉的话前端在模型思考期间是完全静止的。
+		// 思维链走独立的 ReasoningDelta 通道，和正文的 TextDelta 分开——
+		// 上游一个 chunk 里两者互斥，但分开转发让调用方能区分"模型还在
+		// 想"和"模型在作答"，而不是像以前那样把两者拼成一条不可区分的
+		// 文字流。
+		if d.Reasoning != "" {
+			onDelta(StreamDelta{ReasoningDelta: d.Reasoning})
+		}
 		if d.Text != "" {
 			onDelta(StreamDelta{TextDelta: d.Text})
-		} else if d.Reasoning != "" {
-			onDelta(StreamDelta{TextDelta: d.Reasoning})
 		}
 	})
 	if err != nil {

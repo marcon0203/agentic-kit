@@ -2157,10 +2157,12 @@ export interface components {
         };
         /**
          * @description 事件流中的单条事件。前端 Chat 界面据此驱动：
-         *     `node.thinking` → 打字机效果；`node.tool_call.*` → 气泡内工具调用状态条；
-         *     `human_gate.waiting` → 内联审批卡片；`node.render`（spec-20 §4.2）→
-         *     插件渲染 iframe 卡片，payload 带 `plugin`/`version`/`renderer`/
-         *     `resource_uri`/`entry`/`data`。
+         *     `node.thinking` → 打字机效果；`node.reasoning` → 模型真正的思维链/
+         *     推理过程（和 `node.thinking` 不是一回事：后者只是答案文字提前逐字
+         *     显示，前者是模型"在想什么"，两者分开渲染）；`node.tool_call.*` →
+         *     气泡内工具调用状态条；`human_gate.waiting` → 内联审批卡片；
+         *     `node.render`（spec-20 §4.2）→ 插件渲染 iframe 卡片，payload 带
+         *     `plugin`/`version`/`renderer`/`resource_uri`/`entry`/`data`。
          */
         RunEvent: {
             /**
@@ -2169,7 +2171,7 @@ export interface components {
              */
             id: number;
             /** @enum {string} */
-            type: "bundle.started" | "bundle.finished" | "bundle.failed" | "node.queued" | "node.started" | "node.thinking" | "node.tool_call.started" | "node.tool_call.finished" | "node.finished" | "node.failed" | "node.render" | "human_gate.waiting" | "human_gate.resolved" | "shared_state.updated" | "stream.error";
+            type: "bundle.started" | "bundle.finished" | "bundle.failed" | "node.queued" | "node.started" | "node.thinking" | "node.reasoning" | "node.tool_call.started" | "node.tool_call.finished" | "node.finished" | "node.failed" | "node.render" | "human_gate.waiting" | "human_gate.resolved" | "shared_state.updated" | "stream.error";
             run_id: string;
             /** @description 事件关联的节点（bundle 级事件为空） */
             node?: string;

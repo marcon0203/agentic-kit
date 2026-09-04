@@ -268,16 +268,11 @@ func TestZhipu_UsesTheV4PrefixVerbatim(t *testing.T) {
 	}
 }
 
-// GLM 的思考型号会额外返回 reasoning_content，这条盯住它被怎么处理。
-//
-// 现状是**有意为之**的（见 descriptorClient.CompleteStream）：StreamDelta
-// 只有 TextDelta 一个通道，思维链也照文字往外推——吞掉的话前端在模型思考
-// 期间完全静止。但最终结果里 Content 只能是答案，思维链归 reasoning 槽，
-// 否则它会被当成正文写进对话记录、并跟着进下一轮上下文。
-//
-// 两半都钉住：哪天给 StreamDelta 加了 reasoning 通道，上半条会红，提醒改
-// 的人来看这段说明；而下半条无论如何都不该红。
-func TestZhipu_StreamsReasoningAsTextButKeepsItOutOfTheFinalContent(t *testing.T) {
+// GLM 的思考型号会额外返回 reasoning_content，这条盯住它被怎么处理：思维
+// 链走 StreamDelta.ReasoningDelta 这条独立通道（不混进 TextDelta），最终
+// 结果里 Content 只是答案、思维链归 Result.Reasoning 槽——否则它会被当成
+// 正文写进对话记录、并跟着进下一轮上下文。
+func TestZhipu_StreamsReasoningOnItsOwnChannelAndKeepsItOutOfTheFinalContent(t *testing.T) {
 	def, _ := providerByName("zhipu")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, chunk := range []string{
@@ -295,20 +290,32 @@ func TestZhipu_StreamsReasoningAsTextButKeepsItOutOfTheFinalContent(t *testing.T
 	if !ok {
 		t.Fatal("智谱渠道必须实现 StreamingClient")
 	}
-	var streamed string
+	var reasoned, streamed string
 	result, err := sc.CompleteStream(context.Background(), "sk-zhipu", "", "glm-4.6",
 		CompletionRequest{Messages: []Message{{Role: "user", Content: "hi"}}},
-		func(d StreamDelta) { streamed += d.TextDelta })
+		func(d StreamDelta) {
+			reasoned += d.ReasoningDelta
+			streamed += d.TextDelta
+		})
 	if err != nil {
 		t.Fatalf("流式调用失败: %v", err)
 	}
-	// 思考期间也要有东西往外冒，不能静止。
-	if !strings.Contains(streamed, "先想一下") {
-		t.Errorf("思维链应照文字推出去（否则思考期间前端是静止的）: %q", streamed)
+	// 思维链只能从 ReasoningDelta 冒出来，不能混进 TextDelta。
+	if reasoned != "先想一下" {
+		t.Errorf("思维链应该从 ReasoningDelta 单独推出去: %q", reasoned)
 	}
-	// 但它不能进最终正文——那会被写进对话记录并带进下一轮上下文。
+	if strings.Contains(streamed, "先想一下") {
+		t.Errorf("思维链不该混进 TextDelta: %q", streamed)
+	}
+	if streamed != "答案是42" {
+		t.Errorf("TextDelta 应该只有答案: %q", streamed)
+	}
+	// 最终正文里也不该有思维链——那会被写进对话记录并带进下一轮上下文。
 	if result.Content != "答案是42" {
 		t.Errorf("最终正文里不该有思维链: %q", result.Content)
+	}
+	if result.Reasoning != "先想一下" {
+		t.Errorf("思维链应该落进 Result.Reasoning: %q", result.Reasoning)
 	}
 	if result.InputTokens != 3 || result.OutputTokens != 4 {
 		t.Errorf("用量不对: %+v", result)

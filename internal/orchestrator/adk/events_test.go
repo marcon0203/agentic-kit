@@ -41,8 +41,8 @@ func TestTranslateEvent_Thought_IsInternal(t *testing.T) {
 	}, genai.RoleModel)
 
 	events := TranslateEvent("architect", ev)
-	if len(events) != 1 || events[0].Type != EventNodeThinking || !events[0].IsInternal {
-		t.Fatalf("expected an internal node.thinking event, got %+v", events)
+	if len(events) != 1 || events[0].Type != EventNodeReasoning || !events[0].IsInternal {
+		t.Fatalf("expected an internal node.reasoning event, got %+v", events)
 	}
 }
 

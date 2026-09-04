@@ -96,15 +96,31 @@ func (m *gatewayLLM) GenerateContent(ctx context.Context, req *model.LLMRequest,
 			// chunks) has something incremental to accumulate instead of
 			// one response arriving all at once at the very end.
 			result, err = m.gateway.CompleteStream(ctx, m.primary, m.fallbacks, m.creds, gwReq, func(d modelgateway.StreamDelta) {
-				if stopped || d.TextDelta == "" {
+				if stopped {
 					return
 				}
-				if !yield(&model.LLMResponse{
-					Content:      genai.NewContentFromText(d.TextDelta, genai.RoleModel),
-					Partial:      true,
-					TurnComplete: false,
-				}, nil) {
-					stopped = true
+				// ReasoningDelta 单独标 Thought:true，走events.go 的
+				// part.Thought 分支变成 node.reasoning；TextDelta 保持
+				// 原样，走非 Thought 分支——events.go 据 IsFinalResponse
+				// 判断它是不是 node.thinking 的打字机效果。
+				if d.ReasoningDelta != "" {
+					if !yield(&model.LLMResponse{
+						Content:      &genai.Content{Role: string(genai.RoleModel), Parts: []*genai.Part{{Text: d.ReasoningDelta, Thought: true}}},
+						Partial:      true,
+						TurnComplete: false,
+					}, nil) {
+						stopped = true
+						return
+					}
+				}
+				if d.TextDelta != "" {
+					if !yield(&model.LLMResponse{
+						Content:      genai.NewContentFromText(d.TextDelta, genai.RoleModel),
+						Partial:      true,
+						TurnComplete: false,
+					}, nil) {
+						stopped = true
+					}
 				}
 			})
 		} else {
@@ -120,6 +136,18 @@ func (m *gatewayLLM) GenerateContent(ctx context.Context, req *model.LLMRequest,
 		}
 		slog.Info("model_generate_content_result", "provider", result.Provider, "model", result.Model,
 			"content_chars", len(result.Content), "tool_calls", toolCallNames(result.ToolCalls))
+
+		// stream=true 已经把 Reasoning 拆成增量 Thought part 逐条 yield
+		// 过了（result.Reasoning 只是那些增量的聚合，重放一遍会把同一段
+		// 思维链在前端重复展示一次）；只有 stream=false 这条从没推过任何
+		// 中间 part 的路径，才需要在这里把它补上。
+		if !stream && result.Reasoning != "" {
+			yield(&model.LLMResponse{
+				Content:      &genai.Content{Role: string(genai.RoleModel), Parts: []*genai.Part{{Text: result.Reasoning, Thought: true}}},
+				Partial:      true,
+				TurnComplete: false,
+			}, nil)
+		}
 
 		yield(&model.LLMResponse{
 			Content: resultToContent(result),

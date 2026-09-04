@@ -79,6 +79,7 @@ type CompletionRequest struct {
 // more of the Tools it was offered.
 type CompletionResult struct {
 	Content      string
+	Reasoning    string
 	ToolCalls    []ToolCall
 	InputTokens  int64
 	OutputTokens int64
@@ -287,13 +288,18 @@ func asFloat(v any) (float64, bool) {
 	return 0, false
 }
 
-// StreamDelta is one incremental chunk of a streaming completion — just the
-// text piece a provider just produced. Tool calls are never streamed
-// incrementally here (a partial function-call argument string isn't
-// meaningful to display or act on); they still arrive complete on the
-// terminal CompletionResult exactly as Complete already returns them.
+// StreamDelta is one incremental chunk of a streaming completion. TextDelta
+// is the answer text a provider just produced; ReasoningDelta is a separate
+// channel for a thinking-capable provider's chain-of-thought/reasoning
+// content, kept apart from TextDelta so a caller can tell "the model is
+// still reasoning" from "the model is answering" instead of the two being
+// indistinguishable text. Tool calls are never streamed incrementally here
+// (a partial function-call argument string isn't meaningful to display or
+// act on); they still arrive complete on the terminal CompletionResult
+// exactly as Complete already returns them.
 type StreamDelta struct {
-	TextDelta string
+	TextDelta      string
+	ReasoningDelta string
 }
 
 // StreamingClient is implemented by Clients that can speak their
@@ -347,6 +353,9 @@ func (g *Gateway) CompleteStream(ctx context.Context, primary ModelSpec, fallbac
 			return sc.CompleteStream(ctx, cred.APIKey, cred.BaseURL, spec.Name, req, forward)
 		}
 		result, err := client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, req)
+		if err == nil && result.Reasoning != "" {
+			forward(StreamDelta{ReasoningDelta: result.Reasoning})
+		}
 		if err == nil && result.Content != "" {
 			forward(StreamDelta{TextDelta: result.Content})
 		}
