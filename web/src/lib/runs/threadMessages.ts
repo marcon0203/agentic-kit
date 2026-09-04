@@ -21,6 +21,9 @@ export interface ChatTurn {
 
 export interface FrozenAnswer {
   text: string
+  /** 各节点的思维链拼在一起——只有资源作者能看到（node.reasoning 是
+   * IsInternal 事件，黑盒订阅者的事件流里本来就没有这些事件）。 */
+  reasoningText: string
   entries: TimelineEntry[]
   failed: boolean
   /** 失败原因，或"连接中断"这类没有模型输出时的说明。 */
@@ -31,6 +34,7 @@ export interface FrozenAnswer {
 export function freezeAnswer(timeline: RunTimeline, note?: string): FrozenAnswer {
   return {
     text: joinBubbleText(timeline),
+    reasoningText: joinReasoningText(timeline),
     entries: timeline.entries,
     failed: timeline.runStatus === 'failed',
     note: note ?? timeline.runError,
@@ -47,6 +51,13 @@ export function freezeAnswer(timeline: RunTimeline, note?: string): FrozenAnswer
 function joinBubbleText(timeline: RunTimeline): string {
   return Object.values(timeline.bubbles)
     .map((b) => b.text)
+    .filter(Boolean)
+    .join('\n')
+}
+
+function joinReasoningText(timeline: RunTimeline): string {
+  return Object.values(timeline.bubbles)
+    .map((b) => b.reasoningText)
     .filter(Boolean)
     .join('\n')
 }
@@ -87,6 +98,10 @@ type Part = Exclude<ThreadMessageLike['content'], string>[number]
 
 function answerParts(answer: FrozenAnswer | undefined, isLive: boolean): Part[] {
   const parts: Part[] = []
+  const reasoningText = answer?.reasoningText ?? ''
+  // 思维链要排在正文前面——assistant-ui 的 ReasoningPrimitive 就是按"先
+  // 想后答"的顺序渲染折叠块的，放反了看起来会像模型读完答案才去思考。
+  if (reasoningText) parts.push({ type: 'reasoning', text: reasoningText })
   const text = answer?.text ?? ''
   // 正在跑但还没吐字时也要占一个空文本 part：一条 part 都没有的助手消息
   // 在 assistant-ui 里什么都不画，用户会以为发送没生效。

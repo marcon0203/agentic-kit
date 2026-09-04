@@ -22,6 +22,18 @@ describe('buildTimeline', () => {
     expect(entries[0]).toMatchObject({ kind: 'bubble-group', nodes: ['architect'] })
   })
 
+  it('accumulates node.reasoning into a separate field that node.finished does not overwrite', () => {
+    const { bubbles } = buildTimeline([
+      ev(1, 'bundle.started'),
+      ev(2, 'node.reasoning', 'architect', { text: '先想一下' }),
+      ev(3, 'node.reasoning', 'architect', { text: '，再想一下' }),
+      ev(4, 'node.thinking', 'architect', { text: '答案是' }),
+      ev(5, 'node.finished', 'architect', { text: '答案是 42' }),
+    ])
+    expect(bubbles.architect.reasoningText).toBe('先想一下，再想一下')
+    expect(bubbles.architect.text).toBe('答案是 42')
+  })
+
   it('groups two nodes running concurrently into one bubble-group, per the parallel-agent rule', () => {
     const { entries } = buildTimeline([
       ev(1, 'node.thinking', 'ui_designer', { text: 'designing' }),

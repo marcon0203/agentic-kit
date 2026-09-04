@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -7,10 +7,11 @@ import {
   useExternalStoreRuntime,
   type AppendMessage,
   type DataMessagePartProps,
+  type ReasoningMessagePartProps,
   type TextMessagePartProps,
   type ThreadMessageLike,
 } from '@assistant-ui/react'
-import { ArrowDown, Send, Square } from 'lucide-react'
+import { ArrowDown, ChevronDown, ChevronRight, Lightbulb, Send, Square } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -189,8 +190,35 @@ function assistantMessageWith(parts: ReturnType<typeof makeParts>) {
 function makeParts(gate: AgentThreadProps['gate']) {
   return {
     Text: MarkdownText,
+    Reasoning: ReasoningBlock,
     data: { Fallback: dataPartWith(gate) },
   }
+}
+
+/**
+ * 模型的思维链——默认折叠，点开才看正文。这是运行时才有的东西（只有
+ * 资源作者能看到，node.reasoning 是黑盒过滤会拦下的内部事件），和答案
+ * 正文分开渲染，不会被误当成回答的一部分。
+ */
+function ReasoningBlock({ text }: ReasoningMessagePartProps) {
+  const [open, setOpen] = useState(false)
+  if (!text) return null
+  return (
+    <div className="text-body-sm rounded-md border border-border bg-surface-muted">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-space-2 px-space-3 py-space-2 text-ink-500 hover:text-ink-700"
+      >
+        <Lightbulb className="size-3.5 shrink-0" aria-hidden />
+        <span>思考过程</span>
+        {open ? <ChevronDown className="ml-auto size-3.5" aria-hidden /> : <ChevronRight className="ml-auto size-3.5" aria-hidden />}
+      </button>
+      {open && (
+        <div className="whitespace-pre-wrap border-t border-border px-space-3 py-space-2 text-ink-500">{text}</div>
+      )}
+    </div>
+  )
 }
 
 /**

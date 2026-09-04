@@ -8,6 +8,12 @@ export interface ToolCallState {
 export interface NodeBubbleState {
   node: string
   text: string
+  /**
+   * 模型真正的思维链/推理过程（node.reasoning，与 node.thinking 的打字
+   * 机效果不是一回事）——单独攒在这个字段里，不会被 node.finished 覆盖，
+   * 这样答案定稿之后思考过程依旧留得住，可以折叠展示而不是消失。
+   */
+  reasoningText: string
   toolCalls: ToolCallState[]
   status: 'running' | 'done' | 'failed'
   /** true while still receiving node.thinking chunks — drives aria-busy
@@ -134,7 +140,7 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
 
   function bubbleFor(node: string): NodeBubbleState {
     if (!bubbles[node]) {
-      bubbles[node] = { node, text: '', toolCalls: [], status: 'running', isBusy: true }
+      bubbles[node] = { node, text: '', reasoningText: '', toolCalls: [], status: 'running', isBusy: true }
     }
     return bubbles[node]
   }
@@ -207,6 +213,17 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
         const text = typeof payload.text === 'string' ? payload.text : ''
         rawTextByNode[node] = (rawTextByNode[node] ?? '') + text
         b.text = filterFencedBlocks(rawTextByNode[node], hiddenLangsByNode[node] ?? EMPTY_LANG_SET)
+        b.isBusy = true
+        break
+      }
+
+      case 'node.reasoning': {
+        openOrAttachGroup(node)
+        const b = bubbleFor(node)
+        const text = typeof payload.text === 'string' ? payload.text : ''
+        // 累加进独立字段——不写 rawTextByNode/b.text，所以 node.finished
+        // 覆盖答案正文时不会把这段思考过程一起冲掉。
+        b.reasoningText += text
         b.isBusy = true
         break
       }
