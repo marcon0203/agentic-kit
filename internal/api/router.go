@@ -66,6 +66,10 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 	r := chi.NewRouter()
 
 	generalLimiter := NewRateLimiter(600, time.Minute, generalRateLimitKey)
+	// 匿名访客没有 user id 可键，只能按 IP——比 generalLimiter 严格得多：
+	// 这条路由的唯一作用就是发一个新身份，10/min/IP 足够正常使用，也让
+	// 批量刷 guest 账号的代价高不少（配额/计费在后续版本里再收紧）。
+	guestSessionLimiter := NewRateLimiter(10, time.Minute, func(r *http.Request) string { return "ip:" + RemoteAddrKey(r) })
 	authHandlers := cfg.Auth
 
 	r.Use(RecoverMiddleware(logger))
@@ -109,6 +113,11 @@ func NewRouter(logger *slog.Logger, cfg RouterConfig) http.Handler {
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/register", authHandlers.Register)
 		r.Post("/auth/login", authHandlers.Login)
+		// 未鉴权：匿名"立即体验"访客压根没有身份可带——这个接口本身就是
+		// 用来发身份的（iam.Service.CreateGuest）。挂在 generalLimiter 之
+		// 外单独限流，按 IP 而不是按 user，因为调用它的人本来就没有
+		// user。
+		r.With(guestSessionLimiter.Middleware).Post("/public/guest-sessions", authHandlers.CreateGuestSession)
 		if cfg.Plugins != nil {
 			// Unauthenticated by design (spec-20 §5.2/§4.2): a plugin
 			// renderer's iframe loads this src directly, with no

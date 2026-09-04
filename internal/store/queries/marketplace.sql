@@ -25,6 +25,15 @@ WHERE listing_ref = $1 AND distribution != 3
 ORDER BY published_at DESC
 LIMIT 1;
 
+-- name: GetListingByListingRefDistributing :one
+-- 匿名访客"立即体验"用：只认真正在分发中的（distribution = 1），比依
+-- 赖闭环校验用的 != 3 更严——一个作者已经点了"停止分发"的应用，不该再
+-- 让新的匿名访客点进来试用，即使它对老订阅者仍然可用（spec-08）。
+SELECT * FROM marketplace_listings
+WHERE listing_ref = $1 AND distribution = 1
+ORDER BY published_at DESC
+LIMIT 1;
+
 -- name: GetListingByListingRefAndVersion :one
 SELECT * FROM marketplace_listings
 WHERE listing_ref = $1 AND version = $2 AND distribution != 3;

@@ -16,3 +16,8 @@ SELECT count(*) FROM users WHERE is_admin = true;
 INSERT INTO users (email, password_hash, display_name, is_admin)
 VALUES ($1, $2, $3, true)
 RETURNING *;
+
+-- name: CreateGuestUser :one
+INSERT INTO users (email, password_hash, display_name, is_guest)
+VALUES ($1, $2, $3, true)
+RETURNING *;

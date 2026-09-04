@@ -66,6 +66,16 @@ func (f *fakeUserRepo) CreateAdmin(_ context.Context, email, passwordHash, displ
 	return u, nil
 }
 
+func (f *fakeUserRepo) CreateGuest(_ context.Context, email, passwordHash, displayName string) (iam.User, error) {
+	if _, exists := f.byEmail[email]; exists {
+		return iam.User{}, iam.ErrEmailTaken
+	}
+	u := iam.User{ID: f.nextID, Email: email, PasswordHash: passwordHash, DisplayName: displayName, IsGuest: true, CreatedAt: time.Now()}
+	f.nextID++
+	f.byEmail[email] = u
+	return u, nil
+}
+
 // The real argon2id hasher is used rather than a stub: these tests are
 // cheap enough to afford it, and it keeps the register-then-login path
 // exercising the same verification production does.
@@ -182,6 +192,28 @@ func TestRegister_MalformedBodyReturns400(t *testing.T) {
 	h.Register(w, r)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCreateGuestSession_ResponseShapeAndFreshEachCall(t *testing.T) {
+	h := newAuthHandlersForTest(t)
+
+	w1 := doJSON(t, h.CreateGuestSession, http.MethodPost, "/api/v1/public/guest-sessions", nil)
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w1.Code, w1.Body.String())
+	}
+	dto1 := decodeAuthResult(t, w1)
+	if dto1.AccessToken == "" {
+		t.Fatalf("expected an access token: %+v", dto1)
+	}
+	if dto1.User.IsAdmin {
+		t.Fatal("a guest must not be an admin")
+	}
+
+	w2 := doJSON(t, h.CreateGuestSession, http.MethodPost, "/api/v1/public/guest-sessions", nil)
+	dto2 := decodeAuthResult(t, w2)
+	if dto2.User.ID == dto1.User.ID {
+		t.Fatalf("two calls must mint two different guest accounts, both got id %q", dto1.User.ID)
 	}
 }
 

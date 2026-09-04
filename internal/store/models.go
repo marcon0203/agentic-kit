@@ -425,6 +425,7 @@ type User struct {
 	Status       int16              `json:"status"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	IsAdmin      bool               `json:"is_admin"`
+	IsGuest      bool               `json:"is_guest"`
 }
 
 type UserRole struct {

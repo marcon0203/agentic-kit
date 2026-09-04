@@ -42,6 +42,7 @@ type Querier interface {
 	// 决定这个提供商实际怎么被调用；template 只记录"从哪个模板来的"，供界面
 	// 展示，不参与运行时。
 	CreateCatalogProvider(ctx context.Context, arg CreateCatalogProviderParams) (CreateCatalogProviderRow, error)
+	CreateGuestUser(ctx context.Context, arg CreateGuestUserParams) (User, error)
 	CreateHumanGate(ctx context.Context, arg CreateHumanGateParams) (HumanGate, error)
 	CreateKnowledgeBase(ctx context.Context, arg CreateKnowledgeBaseParams) (KnowledgeBasis, error)
 	// Dependency closure (spec-08) is always owner-scoped: a Bundle/Agent only
@@ -157,6 +158,10 @@ type Querier interface {
 	GetLatestPluginVersion(ctx context.Context, pluginID string) (Plugin, error)
 	GetListingByID(ctx context.Context, id int64) (MarketplaceListing, error)
 	GetListingByListingRefAndVersion(ctx context.Context, arg GetListingByListingRefAndVersionParams) (MarketplaceListing, error)
+	// 匿名访客"立即体验"用：只认真正在分发中的（distribution = 1），比依
+	// 赖闭环校验用的 != 3 更严——一个作者已经点了"停止分发"的应用，不该再
+	// 让新的匿名访客点进来试用，即使它对老订阅者仍然可用（spec-08）。
+	GetListingByListingRefDistributing(ctx context.Context, listingRef string) (MarketplaceListing, error)
 	GetListingByListingRefLatestPublished(ctx context.Context, listingRef string) (MarketplaceListing, error)
 	GetMCPServerByIDForOwner(ctx context.Context, arg GetMCPServerByIDForOwnerParams) (McpServer, error)
 	GetMCPServerByRefVersionForOwner(ctx context.Context, arg GetMCPServerByRefVersionForOwnerParams) (McpServer, error)

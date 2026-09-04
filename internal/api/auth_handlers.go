@@ -88,3 +88,17 @@ func (h *AuthHandlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, r, http.StatusOK, toAuthResultDTO(session))
 }
+
+// CreateGuestSession handles POST /public/guest-sessions — the "立即体验"
+// standalone chat page's sign-in. No request body: every call mints a
+// brand new throwaway account. Deliberately unauthenticated (mounted
+// outside AuthMiddleware, see router.go) since its entire point is to hand
+// an identity to a caller who doesn't have one yet.
+func (h *AuthHandlers) CreateGuestSession(w http.ResponseWriter, r *http.Request) {
+	session, err := h.svc.CreateGuest(r.Context())
+	if err != nil {
+		writeDomainErr(w, r, err)
+		return
+	}
+	writeJSON(w, r, http.StatusCreated, toAuthResultDTO(session))
+}

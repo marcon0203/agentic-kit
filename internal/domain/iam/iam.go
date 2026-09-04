@@ -19,6 +19,7 @@ type User struct {
 	PasswordHash string
 	DisplayName  string
 	IsAdmin      bool
+	IsGuest      bool
 	CreatedAt    time.Time
 }
 

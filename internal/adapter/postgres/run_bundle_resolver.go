@@ -16,12 +16,16 @@ type RunBundleResolver struct{ q store.Querier }
 
 func NewRunBundleResolver(q store.Querier) *RunBundleResolver { return &RunBundleResolver{q: q} }
 
-// Resolve tries ownership first, then subscription.
+// Resolve tries ownership first, then subscription, and — only for a guest
+// caller (匿名"立即体验"访客，见 iam.Service.CreateGuest) — finally by the
+// published listing itself, no subscription required.
 //
-// The second path deliberately ignores the caller's bundle_version: the
-// version that runs is the one the subscription is bound to (spec-08's
-// snapshot isolation). Accepting a caller-supplied version here would let
-// a subscriber run a newer, unsubscribed version of somebody's Bundle.
+// The subscription and guest paths both deliberately ignore the caller's
+// bundle_version: the version that runs is the one the subscription is
+// bound to (spec-08's snapshot isolation), or for a guest, whatever the
+// listing itself currently distributes. Accepting a caller-supplied
+// version here would let a subscriber (or a guest) run a newer,
+// unsubscribed version of somebody's Bundle.
 func (r *RunBundleResolver) Resolve(ctx context.Context, userID int64, bundleRef, bundleVersion string) (run.ResolvedBundle, error) {
 	var row store.Bundle
 	var err error
@@ -41,7 +45,7 @@ func (r *RunBundleResolver) Resolve(ctx context.Context, userID int64, bundleRef
 		SubscriberID: userID, ListingRef: bundleRef,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return run.ResolvedBundle{}, run.ErrNotSubscribed
+		return r.resolveForGuest(ctx, userID, bundleRef)
 	}
 	if err != nil {
 		return run.ResolvedBundle{}, err
@@ -53,6 +57,41 @@ func (r *RunBundleResolver) Resolve(ctx context.Context, userID int64, bundleRef
 	}
 	// A subscription to an Agent or a Tool is not a licence to run
 	// something: only a bundle listing is executable.
+	if listing.ResourceType != "bundle" {
+		return run.ResolvedBundle{}, run.ErrNotSubscribed
+	}
+
+	bundleRow, err := r.q.GetBundleByID(ctx, listing.ResourceID)
+	if err != nil {
+		return run.ResolvedBundle{}, err
+	}
+	listingID := listing.ID
+	return toResolvedBundle(bundleRow, &listingID)
+}
+
+// resolveForGuest is the third and last resolution path, reached only after
+// ownership and subscription both miss. A normal account stops here with
+// ErrNotSubscribed exactly as before this path existed — only an is_guest
+// account (an anonymous "立即体验" visitor's throwaway identity) gets to
+// run any actively-distributing bundle listing by ref, with no subscription
+// row at all. This must never widen to non-guest callers: subscribing is
+// still how every real account gets access to somebody else's Bundle.
+func (r *RunBundleResolver) resolveForGuest(ctx context.Context, userID int64, bundleRef string) (run.ResolvedBundle, error) {
+	user, err := r.q.GetUserByID(ctx, userID)
+	if err != nil {
+		return run.ResolvedBundle{}, err
+	}
+	if !user.IsGuest {
+		return run.ResolvedBundle{}, run.ErrNotSubscribed
+	}
+
+	listing, err := r.q.GetListingByListingRefDistributing(ctx, bundleRef)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return run.ResolvedBundle{}, run.ErrNotSubscribed
+	}
+	if err != nil {
+		return run.ResolvedBundle{}, err
+	}
 	if listing.ResourceType != "bundle" {
 		return run.ResolvedBundle{}, run.ErrNotSubscribed
 	}

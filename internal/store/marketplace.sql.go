@@ -496,6 +496,36 @@ func (q *Queries) GetListingByListingRefAndVersion(ctx context.Context, arg GetL
 	return i, err
 }
 
+const getListingByListingRefDistributing = `-- name: GetListingByListingRefDistributing :one
+SELECT id, author_user_id, resource_type, resource_id, listing_ref, version, visibility, changelog, distribution, subscriber_count, run_count, published_at FROM marketplace_listings
+WHERE listing_ref = $1 AND distribution = 1
+ORDER BY published_at DESC
+LIMIT 1
+`
+
+// 匿名访客"立即体验"用：只认真正在分发中的（distribution = 1），比依
+// 赖闭环校验用的 != 3 更严——一个作者已经点了"停止分发"的应用，不该再
+// 让新的匿名访客点进来试用，即使它对老订阅者仍然可用（spec-08）。
+func (q *Queries) GetListingByListingRefDistributing(ctx context.Context, listingRef string) (MarketplaceListing, error) {
+	row := q.db.QueryRow(ctx, getListingByListingRefDistributing, listingRef)
+	var i MarketplaceListing
+	err := row.Scan(
+		&i.ID,
+		&i.AuthorUserID,
+		&i.ResourceType,
+		&i.ResourceID,
+		&i.ListingRef,
+		&i.Version,
+		&i.Visibility,
+		&i.Changelog,
+		&i.Distribution,
+		&i.SubscriberCount,
+		&i.RunCount,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
 const getListingByListingRefLatestPublished = `-- name: GetListingByListingRefLatestPublished :one
 SELECT id, author_user_id, resource_type, resource_id, listing_ref, version, visibility, changelog, distribution, subscriber_count, run_count, published_at FROM marketplace_listings
 WHERE listing_ref = $1 AND distribution != 3

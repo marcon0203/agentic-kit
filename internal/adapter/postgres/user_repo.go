@@ -51,6 +51,20 @@ func (r *UserRepository) CreateAdmin(ctx context.Context, email, passwordHash, d
 	return toDomainUser(row), nil
 }
 
+func (r *UserRepository) CreateGuest(ctx context.Context, email, passwordHash, displayName string) (iam.User, error) {
+	row, err := r.q.CreateGuestUser(ctx, store.CreateGuestUserParams{
+		Email: email, PasswordHash: passwordHash, DisplayName: displayName,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return iam.User{}, iam.ErrEmailTaken
+		}
+		return iam.User{}, err
+	}
+	return toDomainUser(row), nil
+}
+
 func (r *UserRepository) ByEmail(ctx context.Context, email string) (iam.User, error) {
 	row, err := r.q.GetUserByEmail(ctx, email)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -65,6 +79,6 @@ func (r *UserRepository) ByEmail(ctx context.Context, email string) (iam.User, e
 func toDomainUser(row store.User) iam.User {
 	return iam.User{
 		ID: row.ID, Email: row.Email, PasswordHash: row.PasswordHash,
-		DisplayName: row.DisplayName, IsAdmin: row.IsAdmin, CreatedAt: row.CreatedAt.Time,
+		DisplayName: row.DisplayName, IsAdmin: row.IsAdmin, IsGuest: row.IsGuest, CreatedAt: row.CreatedAt.Time,
 	}
 }

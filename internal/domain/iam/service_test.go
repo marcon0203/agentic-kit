@@ -58,6 +58,16 @@ func (f *fakeRepo) CreateAdmin(_ context.Context, email, passwordHash, displayNa
 	return u, nil
 }
 
+func (f *fakeRepo) CreateGuest(_ context.Context, email, passwordHash, displayName string) (iam.User, error) {
+	if _, taken := f.byEmail[email]; taken {
+		return iam.User{}, iam.ErrEmailTaken
+	}
+	u := iam.User{ID: f.nextID, Email: email, PasswordHash: passwordHash, DisplayName: displayName, IsGuest: true, CreatedAt: time.Now()}
+	f.nextID++
+	f.byEmail[email] = u
+	return u, nil
+}
+
 // countingHasher records every verification so a test can assert that a
 // sign-in for an unknown address still did the work — the property that
 // makes the two paths indistinguishable.
@@ -176,6 +186,29 @@ func TestRegister_SignsTheNewUserIn(t *testing.T) {
 	}
 	if session.User.Email != "a@example.com" || session.User.ID == 0 {
 		t.Fatalf("unexpected profile: %+v", session.User)
+	}
+}
+
+func TestCreateGuest_SignsInAFreshThrowawayAccountEachTime(t *testing.T) {
+	h := newHarness()
+
+	s1, err := h.svc.CreateGuest(context.Background())
+	if err != nil {
+		t.Fatalf("first guest: %v", err)
+	}
+	if s1.AccessToken == "" || s1.User.ID == 0 {
+		t.Fatalf("expected a signed-in session: %+v", s1)
+	}
+
+	s2, err := h.svc.CreateGuest(context.Background())
+	if err != nil {
+		t.Fatalf("second guest: %v", err)
+	}
+	if s2.User.ID == s1.User.ID || s2.User.Email == s1.User.Email {
+		t.Fatalf("two guests must not collide: %+v vs %+v", s1.User, s2.User)
+	}
+	if !h.repo.byEmail[s1.User.Email].IsGuest {
+		t.Fatalf("guest account must be flagged is_guest")
 	}
 }
 
@@ -324,6 +357,10 @@ func (errorRepo) CountAdmins(context.Context) (int64, error) {
 }
 
 func (errorRepo) CreateAdmin(context.Context, string, string, string) (iam.User, error) {
+	return iam.User{}, errors.New("storage down")
+}
+
+func (errorRepo) CreateGuest(context.Context, string, string, string) (iam.User, error) {
 	return iam.User{}, errors.New("storage down")
 }
 

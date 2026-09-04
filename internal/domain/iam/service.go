@@ -22,6 +22,10 @@ type Repository interface {
 	// account through Create.
 	CountAdmins(ctx context.Context) (int64, error)
 	CreateAdmin(ctx context.Context, email, passwordHash, displayName string) (User, error)
+	// CreateGuest backs CreateGuest only — an is_guest=true account nobody
+	// ever signs into by hand (generated email + generated, never-handed-out
+	// password).
+	CreateGuest(ctx context.Context, email, passwordHash, displayName string) (User, error)
 }
 
 // PasswordHasher hashes and verifies passwords. A port because which KDF
@@ -118,6 +122,35 @@ func (s *Service) Login(ctx context.Context, email, password string) (Session, e
 	}
 	if !found || !ok {
 		return Session{}, domain.Unauthorized(domain.CodeInvalidCredentials, "invalid email or password")
+	}
+	return s.session(user)
+}
+
+// CreateGuest provisions a throwaway account for an anonymous "立即体验"
+// visitor and signs it straight in. It exists so the rest of the platform
+// — POST /runs, GET /runs/{id}, the event stream, black-box filtering —
+// can stay exactly one code path: a guest is a real (if synthetic) userID
+// the moment this returns, not a special case those layers need to know
+// about. The email/password are generated and never surfaced to anyone;
+// nobody is meant to ever log into a guest account by hand.
+func (s *Service) CreateGuest(ctx context.Context) (Session, error) {
+	suffix, err := randomHex(16)
+	if err != nil {
+		return Session{}, domain.Internal(err)
+	}
+	email := "guest-" + suffix + "@guest.invalid"
+	password, err := randomPassword(24)
+	if err != nil {
+		return Session{}, domain.Internal(err)
+	}
+	hash, err := s.hasher.Hash(password)
+	if err != nil {
+		return Session{}, domain.Internal(err)
+	}
+
+	user, err := s.repo.CreateGuest(ctx, email, hash, "访客")
+	if err != nil {
+		return Session{}, domain.Internal(err)
 	}
 	return s.session(user)
 }

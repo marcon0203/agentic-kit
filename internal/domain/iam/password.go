@@ -2,6 +2,7 @@ package iam
 
 import (
 	"crypto/rand"
+	"encoding/hex"
 	"math/big"
 )
 
@@ -20,4 +21,16 @@ func randomPassword(length int) (string, error) {
 		out[i] = passwordAlphabet[n.Int64()]
 	}
 	return string(out), nil
+}
+
+// randomHex returns n random bytes hex-encoded — unlike randomPassword's
+// alphabet (which includes '@', fine for a password but not for building an
+// email address out of), every character here is a safe, unquoted local-part
+// character. Used only to make each CreateGuest email unique.
+func randomHex(n int) (string, error) {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
