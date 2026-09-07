@@ -37,11 +37,19 @@ const subscriptionBuffer = 512
 type Broker struct {
 	mu   sync.Mutex
 	subs map[string]map[*Subscription]struct{}
+	// acc 攒着每个节点"到目前为止"的文字。逐 token 的增量不落库之后，中途
+	// 接入的客户端要靠它恢复现场——见 accumulator 的注释。
+	acc *accumulator
 }
 
 func NewBroker() *Broker {
-	return &Broker{subs: make(map[string]map[*Subscription]struct{})}
+	return &Broker{subs: make(map[string]map[*Subscription]struct{}), acc: newAccumulator()}
 }
+
+// Snapshot 返回这次运行当前的现场：每个节点已经生成了哪些正文和思维链，
+// 一个节点一条 node.snapshot。SSE 处理器在补完历史之后下发它，刷新页面的
+// 人因此能接着当前状态往下看，而不是空着等这一轮结束。
+func (b *Broker) Snapshot(runID string) []run.Event { return b.acc.snapshot(runID) }
 
 // Subscription 是一条连接对某次运行的订阅。用完必须 Close，否则 broker 里
 // 会一直留着它的 channel。

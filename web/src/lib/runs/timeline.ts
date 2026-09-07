@@ -217,6 +217,22 @@ export function buildTimeline(events: RunEvent[]): RunTimeline {
         break
       }
 
+      // 该节点"到目前为止"的完整文字。赋值，不是追加——它是用来把中途接入
+      // 的界面恢复到当前现场的（刷新页面、断线重连），追加会把已经显示过的
+      // 内容再拼一遍。
+      case 'node.snapshot': {
+        openOrAttachGroup(node)
+        const b = bubbleFor(node)
+        const text = typeof payload.text === 'string' ? payload.text : ''
+        const reasoning = typeof payload.reasoning === 'string' ? payload.reasoning : ''
+        if (text) {
+          rawTextByNode[node] = text
+          b.text = filterFencedBlocks(text, hiddenLangsByNode[node] ?? EMPTY_LANG_SET)
+        }
+        if (reasoning) b.reasoningText = reasoning
+        break
+      }
+
       case 'node.reasoning': {
         openOrAttachGroup(node)
         const b = bubbleFor(node)

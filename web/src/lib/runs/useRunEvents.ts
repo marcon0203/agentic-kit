@@ -104,7 +104,11 @@ export function useRunEvents(runId: string | undefined, getAccessToken?: () => s
               sawStreamError = true
               continue
             }
-            lastIdRef.current = parsed.id
+            // id 为 0 的事件没有落库（node.thinking / node.reasoning 的逐字
+            // 增量、以及重连时补现场的 node.snapshot），拿它推进游标会把
+            // after_id 打回 0，重连时整段历史再来一遍。见 openapi 里
+            // RunEvent.id 的说明。
+            if (parsed.id > lastIdRef.current) lastIdRef.current = parsed.id
             if (!cancelled) {
               setEvents((prev) => [...prev, parsed])
             }

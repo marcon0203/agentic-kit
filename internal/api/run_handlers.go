@@ -329,6 +329,16 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 补完历史之后、进入实时之前，把"现场"下发一次：正在跑的节点已经生成
+	// 了哪些文字。逐 token 的增量不落库（见 runstream.PublishingStore），
+	// 所以库里读不到这半段；没有这一步，刷新页面的人会看到答案凭空少了一
+	// 截，只能空等这一轮结束。
+	//
+	// 顺序上必须排在历史之后：快照是赋值语义，先发会被后面的历史盖掉。
+	if sub != nil {
+		events = append(events, h.bus.Snapshot(id)...)
+	}
+
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -346,7 +356,11 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 			if err := writeNDJSONLine(w, dto); err != nil {
 				return
 			}
-			afterID = ev.ID
+			// ephemeral 事件没有数据库 id（恒为 0），不能拿它推进游标——
+			// 直接赋值会把 afterID 打回 0，下一次回库补读就会从头再来一遍。
+			if ev.ID > afterID {
+				afterID = ev.ID
+			}
 			// 终态事件本身就是关流的信号，不用再查一次状态确认。引擎的
 			// finish 先写终态事件再改状态，所以看见事件必然不早于状态变更。
 			if ev.Type == run.EventBundleFinished || ev.Type == run.EventBundleFailed {
@@ -396,6 +410,15 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// keepLive 决定一条实时事件要不要转发。
+//
+// 落库的事件按 id 去重：小于等于游标的那些已经在补历史时发过了。ephemeral
+// 事件不在库里，补读永远不会带上它们，所以一律放行——它们的 id 恒为 0，走
+// id 比较会被全部丢掉。
+func keepLive(ev run.Event, afterID int64) bool {
+	return ev.Ephemeral || ev.ID > afterID
+}
+
 // waitForLive 阻塞到广播器推来至少一个事件、心跳到点、或者客户端断开。
 //
 // 第二个返回值为 false 表示客户端走了，调用方应当直接结束这次流。返回空切
@@ -406,7 +429,7 @@ func waitForLive(ctx context.Context, sub *runstream.Subscription, afterID int64
 	case <-ctx.Done():
 		return nil, false
 	case ev := <-sub.Events():
-		if ev.ID > afterID {
+		if keepLive(ev, afterID) {
 			out = append(out, ev)
 		}
 	case <-time.After(streamSafetyInterval):
@@ -418,7 +441,7 @@ func waitForLive(ctx context.Context, sub *runstream.Subscription, afterID int64
 	for {
 		select {
 		case ev := <-sub.Events():
-			if ev.ID > afterID {
+			if keepLive(ev, afterID) {
 				out = append(out, ev)
 			}
 		default:

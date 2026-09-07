@@ -4202,11 +4202,23 @@ components:
         气泡内工具调用状态条；`human_gate.waiting` → 内联审批卡片；
         `node.render`（spec-20 §4.2）→ 插件渲染 iframe 卡片，payload 带
         `plugin`/`version`/`renderer`/`resource_uri`/`entry`/`data`。
+
+        `node.snapshot` → 该节点"到目前为止"的完整文字，payload 为
+        `{text, reasoning}`。它是**赋值**语义，不像 `node.thinking` /
+        `node.reasoning` 那样追加。出现在两种时刻：客户端中途接入一次正在
+        跑的运行（刷新页面、断线重连）时补现场；以及运行以失败告终、逐字
+        增量是仅存的部分答案时落库的那一条。
       properties:
         id:
           type: integer
           format: int64
-          description: 自增主键，作为断线续传游标
+          description: |
+            自增主键，作为断线续传游标。
+
+            **`id` 为 0 表示这条事件没有落库**：`node.thinking` /
+            `node.reasoning` 的逐字增量属于传输层，不进数据库（历史由
+            `node.finished` 的完整正文和合并后的 `node.reasoning` 承载）。
+            客户端**不能**用 `id` 为 0 的事件推进 `after_id` 游标。
         type:
           type: string
           enum:
@@ -4222,6 +4234,7 @@ components:
             - node.finished
             - node.failed
             - node.render
+            - node.snapshot
             - human_gate.waiting
             - human_gate.resolved
             - shared_state.updated

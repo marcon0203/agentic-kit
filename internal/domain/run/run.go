@@ -91,6 +91,16 @@ type Event struct {
 	Node      string
 	Payload   map[string]any
 	CreatedAt time.Time
+	// Ephemeral 标记"这条只走实时推送，不进数据库"。
+	//
+	// 逐 token 的增量属于传输层，不属于历史：一次运行能产生上千条
+	// {"text":"可"} 这样的行，而回放时它们一个字都不贡献——节点跑完后
+	// node.finished 携带的是完整正文，timeline 对它是赋值不是追加。历史
+	// 是「消息」，不是「token」。
+	//
+	// 这种事件没有数据库 id（ID 恒为 0），因此不能用来推进断线重连的游标；
+	// 中途接入的客户端靠 EventNodeSnapshot 拿到"到目前为止的文字"。
+	Ephemeral bool
 }
 
 // Lifecycle event types the runtime itself produces. ADK has no event for
@@ -103,6 +113,30 @@ const (
 	EventGateWaiting    = "human_gate.waiting"
 	EventGateResolved   = "human_gate.resolved"
 )
+
+// 节点事件类型。字符串本身是对外契约（见 api/openapi.yaml 的 RunEvent.type
+// 与前端 timeline.ts），编排层 internal/orchestrator/adk 各自也有一份同名
+// 常量——那一层在依赖方向上位于领域之下，不能反过来 import 这里。两处的值
+// 必须一致，改动时一起改。
+const (
+	EventNodeThinking  = "node.thinking"
+	EventNodeReasoning = "node.reasoning"
+	EventNodeFinished  = "node.finished"
+
+	// EventNodeSnapshot 是"到目前为止这个节点已经生成的文字"，一条顶替
+	// 上千条增量。它只在两种时刻出现：客户端中途接入一次正在跑的运行
+	// （刷新页面、断线重连），以及运行以失败告终、增量是仅存的部分答案时
+	// 落库的那一条。
+	//
+	// 前端对它是**赋值**语义（不是像增量那样追加），所以重连时不会把已经
+	// 显示的文字再拼一遍。
+	EventNodeSnapshot = "node.snapshot"
+)
+
+// IsEphemeralType 报告某个事件类型是否只走实时推送、不进数据库。
+func IsEphemeralType(t string) bool {
+	return t == EventNodeThinking || t == EventNodeReasoning
+}
 
 // FilterSharedState keeps only the keys a Bundle declares as outputs.
 //

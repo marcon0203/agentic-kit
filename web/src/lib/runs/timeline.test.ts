@@ -161,3 +161,31 @@ describe('filterFencedBlocks', () => {
     expect(filterFencedBlocks('a\n```chart\n{}\n```\nb', new Set(['chart']))).toBe('a\n\nb')
   })
 })
+
+// 刷新页面后接着当前状态往下看：重连时后端补一条 node.snapshot（该节点到
+// 目前为止的全文），它是赋值语义——按增量那样追加会把已经显示过的内容再
+// 拼一遍，屏幕上就是"今天天气今天天气不错"。
+describe('node.snapshot（中途接入时补现场）', () => {
+  it('赋值而不是追加，重连后文字不会重复', () => {
+    const t = buildTimeline([
+      ev(1, 'bundle.started', undefined, { input: { message: '你好' } }),
+      // 重连前这些增量客户端没收到（它们不落库），后端用一条快照顶替
+      ev(0, 'node.snapshot', 'writer', { text: '今天天气', reasoning: '让我想想' }),
+      ev(2, 'node.thinking', 'writer', { text: '不' }),
+      ev(3, 'node.thinking', 'writer', { text: '错' }),
+    ])
+    expect(t.bubbles.writer.text).toBe('今天天气不错')
+    expect(t.bubbles.writer.reasoningText).toBe('让我想想')
+  })
+
+  it('快照之后 node.finished 仍然以完整正文为准', () => {
+    const t = buildTimeline([
+      ev(1, 'bundle.started', undefined, { input: { message: '你好' } }),
+      ev(0, 'node.snapshot', 'writer', { text: '今天天', reasoning: '想' }),
+      ev(2, 'node.finished', 'writer', { text: '今天天气不错' }),
+    ])
+    expect(t.bubbles.writer.text).toBe('今天天气不错')
+    // 思维链不被 node.finished 覆盖，快照带来的那份要留着
+    expect(t.bubbles.writer.reasoningText).toBe('想')
+  })
+})

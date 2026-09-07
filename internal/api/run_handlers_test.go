@@ -62,6 +62,7 @@ func (s *stubRunRepo) AddUsage(context.Context, string, int64, float64) error   
 type stubEventStore struct {
 	mu     sync.Mutex
 	events []run.Event
+	nextID int64
 }
 
 func (s *stubEventStore) append(evs ...run.Event) {
@@ -71,6 +72,17 @@ func (s *stubEventStore) append(evs ...run.Event) {
 }
 
 func (s *stubEventStore) Append(_ context.Context, ev run.Event) (run.Event, error) {
+	// 和真的仓储一样分配自增 id 再回传。少了这一步，落库的事件全是 id=0，
+	// 会被 ListAfter 和流处理器当成"已经发过的历史"整批丢掉——那不是被测
+	// 代码的问题，是桩不像真的。
+	s.mu.Lock()
+	if ev.ID == 0 {
+		s.nextID++
+		ev.ID = s.nextID
+	} else if ev.ID > s.nextID {
+		s.nextID = ev.ID
+	}
+	s.mu.Unlock()
 	s.append(ev)
 	return ev, nil
 }
@@ -197,6 +209,11 @@ func finishedRunWithEvents(f *runFixture, triggeredBy, ownerID int64, events []r
 	f.runs.runs["run-1"] = run.Run{ID: "run-1", BundleID: 1, TriggeredBy: triggeredBy, Status: run.StatusFinished}
 	f.resolver.bundle = run.ResolvedBundle{BundleID: 1, Ref: "b1", Version: "v1", OwnerUserID: ownerID}
 	f.events.events = events
+	for _, ev := range events {
+		if ev.ID > f.events.nextID {
+			f.events.nextID = ev.ID
+		}
+	}
 }
 
 func TestStream_ReplaysHistoryAndClosesOnTerminalStatus(t *testing.T) {
