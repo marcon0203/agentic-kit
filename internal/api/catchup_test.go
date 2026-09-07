@@ -18,6 +18,9 @@ import (
 
 // 复现用户观察到的场景：连上来时库里已经堆了几百条历史，补读完之后运行
 // 仍在继续。补历史那一下会不会把实时那条路带坏？
+// 比订阅缓冲大一截，保证一定溢出。
+const subscriptionOverflow = 700
+
 func TestStream_LiveDeliveryStaysSmoothAfterALargeCatchUp(t *testing.T) {
 	const backlog = 675
 
@@ -182,5 +185,73 @@ func TestStream_MidRunReconnectGetsTheSnapshotAndKeepsFollowing(t *testing.T) {
 	}
 	if !sawFinished {
 		t.Fatal("应当一直跟到 bundle.finished")
+	}
+}
+
+// 订阅者积压丢过事件时，用快照补洞，而不是回库补读。
+//
+// 逐 token 的增量只推不存，所以"从 afterID 重读数据库"补不回丢掉的那几条
+// ——那句假设在增量还落库的年代成立，现在不成立了。补洞要靠累积缓冲的快照
+// （到目前为止的全文，赋值语义）。没有这一步，界面上会缺一段文字，而且再
+// 也不会补上。
+func TestStream_LaggedSubscriberIsHealedByASnapshotNotADatabaseReread(t *testing.T) {
+	f := newRunFixture()
+	f.resolver.bundle = run.ResolvedBundle{BundleID: 1, OwnerUserID: 5}
+	f.runs.runs["run-1"] = run.Run{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: run.StatusRunning}
+
+	store := runstream.NewPublishingStore(f.events, f.bus)
+	ctx := context.Background()
+
+	logger := slog.New(slog.NewTextHandler(nopWriter{}, nil))
+	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.handlers.Stream(w, runRequest(http.MethodGet, r.URL.String(), "run-1", 5, nil))
+	})
+	h = LoggingMiddleware(logger)(h)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	go func() {
+		waitForSubscriber(t, f.bus, "run-1")
+		// 先灌满订阅缓冲再多灌一些：超出的部分会被丢弃并打上 lagged 标记。
+		// 每一条都进了累积缓冲，所以快照里有完整的文字。
+		for i := 0; i < subscriptionOverflow; i++ {
+			_, _ = store.Append(ctx, run.Event{RunID: "run-1", Type: run.EventNodeThinking,
+				Node: "w", Payload: map[string]any{"text": "x"}})
+		}
+		_, _ = store.Append(ctx, run.Event{RunID: "run-1", Type: run.EventBundleFinished})
+	}()
+
+	resp, err := srv.Client().Get(srv.URL + "/runs/run-1/stream")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var sawSnapshot bool
+	var snapshotLen int
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	for sc.Scan() {
+		if len(sc.Bytes()) == 0 {
+			continue
+		}
+		var dto runEventDTO
+		if err := json.Unmarshal(sc.Bytes(), &dto); err != nil {
+			t.Fatalf("解析 NDJSON 失败: %v", err)
+		}
+		if dto.Type == run.EventNodeSnapshot {
+			sawSnapshot = true
+			if txt, _ := dto.Payload["text"].(string); len(txt) > snapshotLen {
+				snapshotLen = len(txt)
+			}
+		}
+	}
+
+	if !sawSnapshot {
+		t.Fatal("订阅者积压丢过事件之后，必须下发一条快照把洞补上")
+	}
+	if snapshotLen != subscriptionOverflow {
+		t.Fatalf("快照应当带上全部 %d 个字（丢掉的那些也在累积缓冲里），实际 %d",
+			subscriptionOverflow, snapshotLen)
 	}
 }

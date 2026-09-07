@@ -2,6 +2,7 @@ package runstream
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 
 	"github.com/marcon0203/agentic-kit/internal/domain/run"
@@ -65,8 +66,14 @@ func (s *PublishingStore) Append(ctx context.Context, ev run.Event) (run.Event, 
 		// 运行收尾。还没被 node.finished 收走的累积，说明那些节点没有跑到
 		// 完整答案（失败、超时、被取消）——此时增量就是仅存的部分答案，落
 		// 成一条快照留着，而不是连同垃圾一起丢掉。
+		//
+		// 快照落库失败**不能**挡住终态事件：调用方（引擎）是 `_, _ =
+		// Append(...)`，错误被忽略，于是 bundle.finished 既不落库也不推送
+		// ——前端的流永远等不到终态，界面卡在"运行中"，刷新才看到已完成。
+		// 丢一条部分答案是遗憾，丢终态事件是故障。
 		if err := s.flushRun(ctx, ev.RunID); err != nil {
-			return run.Event{}, err
+			slog.Error("run_snapshot_flush_failed_terminal_event_still_emitted",
+				"run_id", ev.RunID, "error", err.Error())
 		}
 		return s.persist(ctx, ev)
 
