@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,14 +57,27 @@ func (s *stubRunRepo) UpdateStatus(context.Context, string, run.Status, string) 
 func (s *stubRunRepo) MarkCancelRequested(context.Context, string) error              { return nil }
 func (s *stubRunRepo) AddUsage(context.Context, string, int64, float64) error         { return nil }
 
-type stubEventStore struct{ events []run.Event }
+// 带锁：流式用例里 handler 在一个 goroutine 里读，引擎那侧在另一个
+// goroutine 里追加，和线上是同一种并发形态（线上那边由 Postgres 兜住）。
+type stubEventStore struct {
+	mu     sync.Mutex
+	events []run.Event
+}
+
+func (s *stubEventStore) append(evs ...run.Event) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, evs...)
+}
 
 func (s *stubEventStore) Append(_ context.Context, ev run.Event) (run.Event, error) {
-	s.events = append(s.events, ev)
+	s.append(ev)
 	return ev, nil
 }
 
 func (s *stubEventStore) ListAfter(_ context.Context, runID string, afterID int64) ([]run.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var out []run.Event
 	for _, ev := range s.events {
 		if ev.RunID != runID || ev.ID <= afterID {
@@ -515,7 +529,7 @@ func (s *racingRunRepo) Get(ctx context.Context, runID string) (run.Run, error) 
 	if s.getCalls >= s.flipAfter {
 		// 事件先落库，再对外表现为终态——顺序同 engine.finish。
 		if len(s.events.events) == 1 {
-			s.events.events = append(s.events.events,
+			s.events.append(
 				run.Event{ID: 2, RunID: runID, Type: run.EventBundleFinished})
 		}
 		r := s.runs[runID]
