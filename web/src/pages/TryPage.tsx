@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, Menu, MessageSquare, Plus, Search, Sparkles, Trash2, TriangleAlert } from 'lucide-react'
+import { Loader2, Menu, Plus, Search, Sparkles, Trash2, TriangleAlert } from 'lucide-react'
 
 import { AgentThread } from '@/components/chat/AgentThread'
 import { useConversation, type StartRun } from '@/lib/runs/useConversation'
@@ -154,7 +154,7 @@ export function TryPage() {
         }`}
       >
         <div className="flex items-center gap-space-2 px-space-2 py-space-2">
-          <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-sm bg-blueprint-tint text-violet">
+          <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-sm bg-blueprint-tint text-blueprint">
             <Sparkles className="size-5" />
           </span>
           <p className="text-label-md truncate text-ink-900">{listing.display_meta.display_name}</p>
@@ -213,35 +213,12 @@ export function TryPage() {
                     hideConversation(c.session_id, e as unknown as React.MouseEvent)
                   }
                 }}
-                className={`group flex h-10 items-center gap-space-2 rounded-full px-space-3 text-left text-body-sm ${
-                  active
-                    ? 'bg-primary text-white shadow-[0_6px_16px_rgb(124_92_252_/_0.3)]'
-                    : 'text-ink-700 hover:bg-blueprint-tint hover:text-ink-900'
-                }`}
+                className="hidden shrink-0 rounded-xs p-1 opacity-70 hover:bg-black/10 hover:opacity-100 group-hover:flex"
               >
-                <MessageSquare
-                  className={`size-3.5 shrink-0 ${active ? 'text-white/80' : 'text-ink-500'}`}
-                  aria-hidden
-                />
-                <span className="min-w-0 flex-1 truncate">{c.title || '新的对话'}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label="删除对话"
-                  onClick={(e) => hideConversation(c.session_id, e)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      hideConversation(c.session_id, e as unknown as React.MouseEvent)
-                    }
-                  }}
-                  className="hidden shrink-0 rounded-xs p-1 opacity-70 hover:bg-black/10 hover:opacity-100 group-hover:flex"
-                >
-                  <Trash2 className="size-3.5" aria-hidden />
-                </span>
-              </button>
-            )
-          })}
+                <Trash2 className="size-3.5" aria-hidden />
+              </span>
+            </button>
+          ))}
         </nav>
 
         <p className="text-caption border-t border-border px-space-2 pt-space-3 text-ink-500">
@@ -260,7 +237,7 @@ export function TryPage() {
             <Menu className="size-5" aria-hidden />
           </button>
           <p className="text-label-md min-w-0 flex-1 truncate text-ink-900">{activeTitle}</p>
-          <span className="text-caption shrink-0 rounded-full bg-type-bundle-tint px-space-3 py-1 text-type-bundle">
+          <span className="text-caption shrink-0 rounded-full border border-border px-space-3 py-1 text-ink-500">
             {listing.display_meta.display_name} · v{listing.version}
           </span>
         </header>
@@ -372,9 +349,7 @@ function ChatBundleConversation({
   }, [chat.activeRunID])
 
   return (
-    // flex 列容器：AgentThread 的根节点靠 flex-1 撑满剩余高度，父层如果是
-    // 普通 block，它就只剩内容自身那么高，输入框会悬在页面中间。
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="min-h-0 flex-1">
       <AgentThread
         className="bg-transparent"
         messages={chat.messages}
