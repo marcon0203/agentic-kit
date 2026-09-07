@@ -53,7 +53,7 @@ ADK 产出自己的执行事件，平台订阅后翻译成 POC 已验证的事�
 
 **保留这层翻译而不是直接透传 ADK 事件**：前端契约不应该跟着上游框架的版本演进走。
 
-翻译时同步标记 `is_internal`（`node.thinking` 等含内部推理的事件 → true），供黑盒过滤使用。
+翻译时同步标记 `is_internal`：仅模型真实思维链（`node.reasoning`，ADK 的 Thought part）→ true，供黑盒过滤使用。流式答案文本（`node.thinking`）与工具调用事件保持公开——订阅者反正会在 `node.finished` 拿到完整答案，把它标成 internal 会让非作者订阅者（含 `/chat/bundle/:ref` 匿名聊天页）的回复失去流式效果，与 spec-14 的打字机验收项直接冲突。
 
 ### 4. AgentRunner 适配边界
 

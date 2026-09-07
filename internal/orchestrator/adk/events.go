@@ -58,11 +58,12 @@ type PlatformEvent struct {
 // translate to more than one platform event (e.g. a response that both
 // calls a tool and carries reasoning text).
 //
-// IsInternal marks anything that exposes the model's own reasoning or the
-// tool-calling machinery's raw plumbing (spec-10 §3: "node.thinking 等含
-// 内部推理的事件 → true") — the black-box run-event filter (spec-08)
-// drops these before they ever reach a subscriber, while the author
-// viewing their own resource still sees everything.
+// IsInternal marks anything that exposes the model's own reasoning (the
+// part.Thought branch → node.reasoning). Tool calls and streamed answer
+// text are public: the black-box boundary protects the bundle's reasoning
+// and structure, not the answer a subscriber is about to receive in full
+// anyway — see the node.thinking branch below for why streaming text in
+// particular must stay public.
 func TranslateEvent(node string, ev *session.Event) []PlatformEvent {
 	if ev == nil {
 		return nil
@@ -105,16 +106,24 @@ func TranslateEvent(node string, ev *session.Event) []PlatformEvent {
 				// The model's own internal reasoning trace — never
 				// forwarded to a black-box subscriber.
 				out = append(out, withUsage(PlatformEvent{Type: EventNodeReasoning, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: true}))
-			case part.Text != "":
-				if ev.IsFinalResponse() {
-					out = append(out, withUsage(PlatformEvent{Type: EventNodeFinished, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: false}))
-				} else {
-					// Streamed/intermediate model text is still the
-					// model "thinking out loud" from the product's point
-					// of view — the typewriter effect in spec-14, but
-					// not yet the node's committed output.
-					out = append(out, withUsage(PlatformEvent{Type: EventNodeThinking, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: true}))
-				}
+				case part.Text != "":
+					if ev.IsFinalResponse() {
+						out = append(out, withUsage(PlatformEvent{Type: EventNodeFinished, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: false}))
+					} else {
+						// Streamed/intermediate model text is the typewriter
+						// effect in spec-14 — the prefix of an answer the
+						// subscriber receives in full at node.finished
+						// anyway, so it is deliberately NOT internal: the
+						// chat page (/chat/bundle/:ref) serves subscribers
+						// who by definition never own the bundle, and
+						// marking this internal made their answer arrive as
+						// one non-streamed block (spec-14's own acceptance
+						// check — "打字机效果，不是一次性整段出现" — was
+						// unreachable for them). The model's actual chain of
+						// thought stays internal: that is the part.Thought
+						// branch above, node.reasoning.
+						out = append(out, withUsage(PlatformEvent{Type: EventNodeThinking, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: false}))
+					}
 			}
 		}
 	}

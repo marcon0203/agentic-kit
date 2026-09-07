@@ -60,14 +60,17 @@ func TestTranslateEvent_FinalText_IsNodeFinishedNotInternal(t *testing.T) {
 	}
 }
 
-func TestTranslateEvent_PartialText_IsInternalThinking(t *testing.T) {
+func TestTranslateEvent_PartialText_IsPublicThinking(t *testing.T) {
 	ev := &session.Event{}
 	ev.Content = genai.NewContentFromText("partial chunk", genai.RoleModel)
 	ev.Partial = true // streaming, not yet the committed final response
 
 	events := TranslateEvent("architect", ev)
-	if len(events) != 1 || events[0].Type != EventNodeThinking || !events[0].IsInternal {
-		t.Fatalf("expected an internal node.thinking event for partial text, got %+v", events)
+	// Not internal: streamed answer text is the typewriter effect every
+	// subscriber (not just the bundle's author) must see — the black-box
+	// filter dropping it is what made the chat page non-streaming.
+	if len(events) != 1 || events[0].Type != EventNodeThinking || events[0].IsInternal {
+		t.Fatalf("expected a non-internal node.thinking event for partial text, got %+v", events)
 	}
 }
 
