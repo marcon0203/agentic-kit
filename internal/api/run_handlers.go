@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -345,6 +346,18 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 
+	// 这条流为什么结束，必须留下痕迹。中间件的 http_request 只记了状态码和
+	// 字节数——一条正常收线的流和一条被客户端掐断、写失败、或者查库出错的
+	// 流，在那里长得一模一样。而"跑到一半不动了"恰恰全靠这个区分：是服务端
+	// 提前收线，还是客户端自己断了又重连。
+	exit, written := "unknown", 0
+	started := h.now()
+	defer func() {
+		slog.Info("run_stream_closed", "run_id", id, "reason", exit,
+			"events_written", written, "after_id", afterID,
+			"duration_ms", time.Since(started).Milliseconds())
+	}()
+
 	terminal := false
 	for {
 		for _, ev := range events {
@@ -354,8 +367,11 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 				dto.Node = &node
 			}
 			if err := writeNDJSONLine(w, dto); err != nil {
+				// 写不出去基本只有一个原因：对端已经走了。
+				exit = "write_failed: " + err.Error()
 				return
 			}
+			written++
 			// ephemeral 事件没有数据库 id（恒为 0），不能拿它推进游标——
 			// 直接赋值会把 afterID 打回 0，下一次回库补读就会从头再来一遍。
 			if ev.ID > afterID {
@@ -372,6 +388,12 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if terminal || status.Terminal() {
+			exit = "terminal"
+			if !terminal {
+				// 靠轮询发现的终态，说明终态事件没能通过广播器送达——
+				// 值得区分出来，它意味着前端拿不到 bundle.finished。
+				exit = "terminal_by_status_without_event"
+			}
 			return
 		}
 
@@ -379,7 +401,8 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 		if sub != nil {
 			live, ok := waitForLive(r.Context(), sub, afterID)
 			if !ok {
-				return // 客户端断开
+				exit = "client_disconnected"
+				return
 			}
 			if len(live) > 0 {
 				if sub.Lagged() {
@@ -404,14 +427,19 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 		if sub == nil {
 			select {
 			case <-r.Context().Done():
+				exit = "client_disconnected"
 				return
 			case <-time.After(streamPollInterval):
 			}
 		}
 		if status, err = h.svc.Status(r.Context(), id); err != nil {
+			// 以前这里是静默 return——流无声无息地断掉，前端只能判成
+			// "意外断流"，而真正的原因（查库出错）没有任何地方记着。
+			exit = "status_query_failed: " + err.Error()
 			return
 		}
 		if events, err = h.svc.EventsAfter(r.Context(), userID, id, afterID); err != nil {
+			exit = "events_query_failed: " + err.Error()
 			_ = writeNDJSONLine(w, runEventDTO{Type: "stream.error", RunID: id, Timestamp: h.now()})
 			return
 		}

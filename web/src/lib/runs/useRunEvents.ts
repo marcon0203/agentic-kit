@@ -65,8 +65,15 @@ export function useRunEvents(runId: string | undefined, getAccessToken?: () => s
     const controller = new AbortController()
     let cancelled = false
 
-    async function run() {
-      setStatus((s) => (s === 'error' ? 'reconnecting' : 'connecting'))
+    /** 一次连接的结局。 */
+    type Outcome =
+      | 'terminal' // 收到了 bundle.finished / failed，这一轮结束了
+      | 'dropped' // 连接没了但运行还在跑——可以带 after_id 续上
+      | 'fatal' // 请求本身就没建立起来（鉴权、运行不存在），续也没用
+
+    /** 打开一次连接，读到结束为止。第二个返回值是这次收到了多少条事件。 */
+    async function openStream(): Promise<[Outcome, number]> {
+      let received = 0
       try {
         const token = getAccessToken ? getAccessToken() : useAuthStore.getState().accessToken
         const url = `/api/v1/runs/${runId}/stream${lastIdRef.current > 0 ? `?after_id=${lastIdRef.current}` : ''}`
@@ -75,8 +82,7 @@ export function useRunEvents(runId: string | undefined, getAccessToken?: () => s
           headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         })
         if (!res.ok || !res.body) {
-          if (!cancelled) setStatus('error')
-          return
+          return ['fatal', received]
         }
         if (!cancelled) setStatus('open')
 
@@ -108,6 +114,7 @@ export function useRunEvents(runId: string | undefined, getAccessToken?: () => s
             // 增量、以及重连时补现场的 node.snapshot），拿它推进游标会把
             // after_id 打回 0，重连时整段历史再来一遍。见 openapi 里
             // RunEvent.id 的说明。
+            received++
             if (parsed.id > lastIdRef.current) lastIdRef.current = parsed.id
             if (!cancelled) {
               setEvents((prev) => [...prev, parsed])
@@ -117,21 +124,66 @@ export function useRunEvents(runId: string | undefined, getAccessToken?: () => s
             }
           }
         }
-        // The connection ending without a terminal bundle event means it
-        // dropped unexpectedly (network blip, proxy timeout, or a
-        // stream.error the server pushed before closing) — surface it as
-        // reconnectable, not "done".
-        if (!cancelled) {
-          setStatus(sawTerminalEvent && !sawStreamError ? 'closed' : 'error')
-        }
+        // 没收到终态就结束 = 连接意外断了（网络抖动、代理超时、服务端提
+        // 前收线）。运行还在服务端跑着，所以这不是"完成"，是"要续上"。
+        return [sawTerminalEvent && !sawStreamError ? 'terminal' : 'dropped', received]
       } catch (err) {
-        if (!cancelled && !(err instanceof DOMException && err.name === 'AbortError')) {
-          setStatus('error')
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return ['fatal', received] // 我们自己取消的，外层不会再续
         }
+        return ['dropped', received]
       }
     }
 
-    run()
+    /**
+     * 断了自动续。
+     *
+     * 流中途掉了不代表运行结束——它还在服务端跑着，而且事件流本来就是可以
+     * 带 after_id 断点续传的。以前这里直接把状态打成 error 就不管了，用户
+     * 看到的是"跑到一半不动了"，得刷新页面才知道其实早跑完了。
+     *
+     * 退避重试而不是死循环：运行真的没了（被删、越权）时第一次请求就返回
+     * 非 2xx，那是 fatal，不续。只有"连上过又断了"才续，且最多 MAX_RETRIES
+     * 次；中间只要收到过事件就把计数清零——收得到数据说明链路是好的，这次
+     * 断开是偶发。
+     */
+    async function run() {
+      const MAX_RETRIES = 6
+      let attempt = 0
+      setStatus('connecting')
+
+      while (!cancelled) {
+        const [outcome, received] = await openStream()
+        if (cancelled) return
+        if (outcome === 'terminal') {
+          setStatus('closed')
+          return
+        }
+        if (outcome === 'fatal') {
+          setStatus('error')
+          return
+        }
+        // 这一次收到过事件，说明链路本身是通的，重试预算重新计。
+        if (received > 0) attempt = 0
+        attempt += 1
+        if (attempt > MAX_RETRIES) {
+          setStatus('error')
+          return
+        }
+        setStatus('reconnecting')
+        // 0.5s / 1s / 2s / 4s / 8s / 8s……
+        const backoff = Math.min(500 * 2 ** (attempt - 1), 8000)
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, backoff)
+          controller.signal.addEventListener('abort', () => {
+            clearTimeout(timer)
+            resolve(undefined)
+          })
+        })
+      }
+    }
+
+    void run()
     return () => {
       cancelled = true
       controller.abort()
