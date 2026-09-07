@@ -25,13 +25,6 @@ const TYPE_TONE: Record<string, string> = {
   mcp: TYPE_TONES.mcp,
 }
 
-const TYPE_SPINE: Record<string, string> = {
-  bundle: 'border-t-type-bundle',
-  agent: 'border-t-type-agent',
-  skill: 'border-t-type-skill',
-  mcp: 'border-t-type-mcp',
-}
-
 /**
  * 广场卡片。解剖来自 design.md 的"发现页"家族：
  *
