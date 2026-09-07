@@ -62,17 +62,43 @@ export function useConversation({
     }
   }, [initialTurns])
 
+  // 已经看着它跑到终态的运行。再也不去接管它们——否则下面那个"服务端说还
+  // 在跑就接管"的规则会和 settle 打架：运行详情是缓存的，终态事件到达之后
+  // 它可能还写着 running，于是接管、开流、立刻收到终态、settle、再接管……
+  const seenTerminalRef = useRef<Set<string>>(new Set())
+
+  // 每次运行最多接管几次。useRunEvents 自己已经有退避重试（6 次），所以到
+  // 这一层的"失败"要么是重试耗尽、要么是请求根本建立不起来（401、运行被
+  // 删）。后者会立刻失败，不封顶的话"接管 → 秒失败 → settle → 再接管"就
+  // 是个打服务器的紧循环。
+  const MAX_TAKEOVERS = 3
+  const takeoverCountRef = useRef<Map<string, number>>(new Map())
+
   // 接管一次外部已经在跑的运行。它还没有对应的轮次，先补一条问题待定的
   // ——原话在事件流的 bundle.started 里，下面拿到就补上。
+  //
+  // 依赖里带上 activeRunID，是为了让这条规则在**整个运行期间**都成立，而
+  // 不只是挂载那一下：只要服务端还说这次运行在跑（initialActiveRunID 由
+  // run.status === 'running' 推出），而本地没有活跃的流，就接回去。
+  //
+  // 少了这一条，事件流一旦中途掉了（无论什么原因——网络抖动、代理、浏览器
+  // 掐断），settle 就成了不可逆的：activeRunID 清空之后没有任何东西会再把
+  // 它挂上，界面永远停在半截答案，只能靠刷新。实测就撞上过：运行在服务端
+  // 正常跑完（bundle.finished 已落库），而那条流在 9 秒前就断了，页面对此
+  // 一无所知。
   useEffect(() => {
     if (!initialActiveRunID) return
+    if (seenTerminalRef.current.has(initialActiveRunID)) return
+    const taken = takeoverCountRef.current.get(initialActiveRunID) ?? 0
+    if (taken >= MAX_TAKEOVERS) return
+    takeoverCountRef.current.set(initialActiveRunID, taken + 1)
     setTurns((cur) =>
       cur.some((t) => t.runId === initialActiveRunID)
         ? cur
         : [...cur, { id: `run:${initialActiveRunID}`, runId: initialActiveRunID, question: '' }],
     )
     setActiveRunID((cur) => cur ?? initialActiveRunID)
-  }, [initialActiveRunID])
+  }, [initialActiveRunID, activeRunID])
 
   const { events, status: streamStatus, reconnect } = useRunEvents(activeRunID, getAccessToken)
   const timeline = useMemo(() => buildTimeline(events), [events])
@@ -98,12 +124,15 @@ export function useConversation({
   useEffect(() => {
     if (!activeRunID) return
     if (timeline.runStatus !== 'finished' && timeline.runStatus !== 'failed') return
+    seenTerminalRef.current.add(activeRunID)
     settle(activeRunID)
   }, [timeline.runStatus, activeRunID, settle])
 
   // 兜底：流断在终态事件之前。后端那条竞态已经修掉了，但网络抖动、代理超
   // 时这些外部原因还是会断流；不兜底的话 activeRunID 一直挂着，输入框跟着
   // 永远禁用——"发了一次之后再也发不出去"就是这么来的。
+  // 刻意**不**登记进 seenTerminalRef：这一条冻结的是"连接断了"，不是"运行
+  // 结束了"。服务端那次运行很可能还在跑，上面的接管规则应当把它救回来。
   useEffect(() => {
     if (!activeRunID || streamStatus !== 'error') return
     setError('运行事件流中断了')
