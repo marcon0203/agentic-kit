@@ -1,23 +1,23 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Blocks, BookOpen, Database, Plug, Puzzle } from 'lucide-react'
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { Ref, Section, FilterChips, FilterChip } from '@/components/common/Page'
-import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel, ListSkeleton } from '@/components/common/EmptyState'
-import { AppCard } from '@/components/marketplace/AppCard'
-import { MarketSkillCard } from '@/components/resources/MarketSkillCard'
-import { MarketMcpServerCard } from '@/components/resources/MarketMcpServerCard'
+import { FilterChip, FilterChips, Ref, Section } from '@/components/common/Page'
 import { PAGE_SIZES, Pagination } from '@/components/common/Pagination'
-import { RegisterResourceDialog } from '@/components/resources/RegisterResourceDialog'
+import { EmptyRail } from '@/components/common/Rail'
 import { TypeTile, type TypeTone } from '@/components/common/TypeTile'
-import { apiClient, unwrap, ApiError } from '@/lib/api/client'
-import { cn } from '@/lib/utils'
-import { useFeatures } from '@/lib/features/useFeatures'
+import { AppCard } from '@/components/marketplace/AppCard'
+import { MarketMcpServerCard } from '@/components/resources/MarketMcpServerCard'
+import { MarketSkillCard } from '@/components/resources/MarketSkillCard'
+import { RegisterResourceDialog } from '@/components/resources/RegisterResourceDialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { apiClient, ApiError, unwrap } from '@/lib/api/client'
 import type { components } from '@/lib/api/schema'
+import { useFeatures } from '@/lib/features/useFeatures'
+import { cn } from '@/lib/utils'
 
 type ResourceType = components['schemas']['ResourceType']
 type Resource = components['schemas']['Resource']
@@ -292,7 +292,11 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
             {skillUploadBlocked && (
               <span className="text-caption text-ink-500">未配置对象存储（OSS_*），Skill 上传暂不可用</span>
             )}
-            <Button onClick={openRegister} disabled={skillUploadBlocked}>
+            <Button
+             
+              onClick={openRegister}
+              disabled={skillUploadBlocked}
+            >
               {kind.blank.cta}
             </Button>
           </div>

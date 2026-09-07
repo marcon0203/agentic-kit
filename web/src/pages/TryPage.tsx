@@ -166,7 +166,7 @@ export function TryPage() {
             startNewConversation()
             setSidebarOpen(false)
           }}
-          className="flex h-10 items-center justify-center gap-space-2 rounded-sm bg-gradient-cta text-body-sm font-semibold text-white shadow-[0_6px_16px_rgb(124_92_252_/_0.3)] hover:opacity-90"
+          className="flex h-10 items-center justify-center gap-space-2 rounded-sm bg-blueprint text-body-sm font-semibold text-white shadow-[0_6px_16px_rgb(124_92_252_/_0.3)] transition-colors duration-150 ease-out hover:bg-violet"
         >
           <Plus className="size-4" aria-hidden />
           新建对话
@@ -190,16 +190,28 @@ export function TryPage() {
               {conversations.length === 0 ? '还没有对话，从下方输入框开始吧。' : `没有匹配"${query}"的对话`}
             </p>
           )}
-          {filteredConversations.map((c) => {
-            const active = viewingSessionId === c.session_id
-            return (
-              <button
-                key={c.session_id}
-                type="button"
-                aria-current={active ? 'true' : undefined}
-                onClick={() => {
-                  openConversation(c.session_id)
-                  setSidebarOpen(false)
+          {filteredConversations.map((c) => (
+            <button
+              key={c.session_id}
+              type="button"
+              aria-current={viewingSessionId === c.session_id ? 'true' : undefined}
+              onClick={() => {
+                openConversation(c.session_id)
+                setSidebarOpen(false)
+              }}
+              className="group flex h-10 items-center gap-space-2 rounded-full px-space-3 text-left text-body-sm text-ink-700 transition-colors duration-150 ease-out hover:bg-blueprint-tint hover:text-ink-900 aria-[current=true]:bg-blueprint aria-[current=true]:text-white aria-[current=true]:shadow-[0_6px_16px_rgb(124_92_252_/_0.3)]"
+            >
+              <span className="min-w-0 flex-1 truncate">{c.title || '新的对话'}</span>
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="删除对话"
+                onClick={(e) => hideConversation(c.session_id, e)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    hideConversation(c.session_id, e as unknown as React.MouseEvent)
+                  }
                 }}
                 className={`group flex h-10 items-center gap-space-2 rounded-full px-space-3 text-left text-body-sm ${
                   active

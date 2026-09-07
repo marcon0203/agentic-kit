@@ -111,12 +111,17 @@ export function MarketplaceBrowsePage() {
         />
       </div>
 
+      {/* 这是一句解释性说明，不是营销位——用应用内的扁平卡片语言承载（描边
+          分层 + 图标 chip），而不是整块彩色渐变：控制台页面里的渐变只会把
+          一句注释喊成横幅。 */}
       {browseTab === 'featured' && (
-        <div className="flex items-center gap-space-4 overflow-hidden rounded-lg bg-gradient-cta p-space-6 text-white">
-          <Sparkles className="size-8 shrink-0" aria-hidden />
+        <div className="flex items-start gap-space-4 rounded-lg border border-border bg-surface p-space-5">
+          <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-sm bg-blueprint-tint text-blueprint">
+            <Sparkles className="size-5" />
+          </span>
           <div className="flex flex-col gap-1">
-            <p className="text-display-sm">订阅即用，作者的编排图与提示词不会带出来</p>
-            <p className="text-body-sm text-white/80">订阅锁定版本；有新版本发布时会单独提醒你升级。</p>
+            <p className="text-label-md text-ink-900">订阅即用，作者的编排图与提示词不会带出来</p>
+            <p className="text-body-sm text-ink-700">订阅锁定版本；有新版本发布时会单独提醒你升级。</p>
           </div>
         </div>
       )}

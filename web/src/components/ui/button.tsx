@@ -5,7 +5,11 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-sm text-body-sm font-semibold transition-all duration-150 ease-out disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 aria-invalid:border-destructive",
+  // transition lists the three properties that actually change on hover —
+  // never `transition-all`. box-shadow is deliberately absent: it carries
+  // both the accent glow and the focus ring, and a focus ring that fades in
+  // leaves keyboard users with no indicator for the first 150ms.
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-sm text-body-sm font-semibold transition-[background-color,border-color,color] duration-150 ease-out disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 outline-none focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 aria-invalid:border-destructive",
   {
     variants: {
       variant: {

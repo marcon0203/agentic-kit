@@ -10,7 +10,6 @@ import {
   GitBranch,
   ShieldCheck,
   Store,
-  Zap,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -138,19 +137,15 @@ function HeroIllustration() {
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-border bg-surface p-space-5 shadow-status-sm">
+      {/* 这张图里的每个颜色都走 token，不写死十六进制：之前它固化的是
+          换肤前那套蓝色值，全站换成紫色系统之后它自己留在了旧配色里
+          ——插画和界面用两套颜色，是最容易被忽略的不一致。 */}
       <svg viewBox="0 0 480 320" className="w-full" aria-hidden="true">
-        <defs>
-          <linearGradient id="bp-violet" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#2563eb" />
-            <stop offset="100%" stopColor="#7c3aed" />
-          </linearGradient>
-        </defs>
-
         {/* Card ground */}
-        <rect x="0" y="0" width="480" height="320" rx="14" fill="#f8fafc" />
+        <rect x="0" y="0" width="480" height="320" rx="14" fill="var(--color-surface-page)" />
 
         {/* Header */}
-        <text x="24" y="38" fontSize="12" fontWeight="700" fill="#0f172a">
+        <text x="24" y="38" fontSize="12" fontWeight="700" fill="var(--color-ink-900)">
           DELIVERY PIPELINE
         </text>
 
@@ -168,7 +163,7 @@ function HeroIllustration() {
                     y1="0"
                     x2={cx}
                     y2="0"
-                    stroke={reached ? 'url(#bp-violet)' : '#e2e8f0'}
+                    stroke={reached ? 'var(--color-blueprint)' : 'var(--color-border-strong)'}
                     strokeWidth="3"
                     strokeLinecap="round"
                   />
@@ -177,8 +172,8 @@ function HeroIllustration() {
                   cx={cx}
                   cy="0"
                   r={isGate ? 10 : 8}
-                  fill={reached ? (isGate ? '#f59e0b' : '#2563eb') : '#e2e8f0'}
-                  stroke="#fff"
+                  fill={reached ? (isGate ? 'var(--color-signal)' : 'var(--color-blueprint)') : 'var(--color-border-strong)'}
+                  stroke="var(--color-surface)"
                   strokeWidth="3"
                 >
                   {!reduced && isGate && (
@@ -196,7 +191,7 @@ function HeroIllustration() {
                   textAnchor="middle"
                   fontSize="11"
                   fontWeight="600"
-                  fill={reached ? '#0f172a' : '#94a3b8'}
+                  fill={reached ? 'var(--color-ink-900)' : 'var(--color-ink-500)'}
                 >
                   {station.note}
                 </text>
@@ -206,7 +201,7 @@ function HeroIllustration() {
 
           {/* Travelling dot */}
           {!reduced && (
-            <circle r="5" fill="#2563eb">
+            <circle r="5" fill="var(--color-blueprint)">
               <animateMotion
                 dur="3s"
                 repeatCount="indefinite"
@@ -217,18 +212,18 @@ function HeroIllustration() {
         </g>
 
         {/* Terminal panel */}
-        <rect x="24" y="160" width="432" height="136" rx="14" fill="#0b1220" />
+        <rect x="24" y="160" width="432" height="136" rx="14" fill="var(--color-surface-ink)" />
         <g fontFamily="var(--font-mono)" fontSize="11">
-          <text x="44" y="196" fill="#6ee7b7">
+          <text x="44" y="196" fill="var(--color-moss)">
             $ agentic-kit run --bundle demo
           </text>
-          <text x="44" y="222" fill="#93c5fd">
+          <text x="44" y="222" fill="var(--color-blueprint-edge)">
             ✓ 需求解析完成
           </text>
-          <text x="44" y="248" fill="#93c5fd">
+          <text x="44" y="248" fill="var(--color-blueprint-edge)">
             ✓ 技术方案已生成
           </text>
-          <text x="44" y="274" fill="#f59e0b">
+          <text x="44" y="274" fill="var(--color-signal)">
             ▶ 停在 human gate，等待审批…
             {!reduced && (
               <animate attributeName="opacity" values="1;.3;1" dur="1.4s" repeatCount="indefinite" />
@@ -246,37 +241,27 @@ function HeroSection() {
   const user = useAuthStore((s) => s.user)
   const openModal = useAuthStore((s) => s.openModal)
 
+  // 双联画（Split Studio）：左边陈述，右边佐证。这里刻意没有背景装饰——
+  // 原来那两颗 blur-3xl 的紫色光球是"需要点什么就加点什么"的产物，它们
+  // 不承载任何信息，去掉之后标题反而站得住。
   return (
-    <section className="relative overflow-hidden rounded-2xl bg-surface px-space-6 py-space-10 md:px-space-10 md:py-space-12">
-      {/* Soft radial glow in the corner, like the reference hero. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-24 -top-24 size-[500px] rounded-full bg-blueprint/5 blur-3xl"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -bottom-32 -left-32 size-[420px] rounded-full bg-violet/5 blur-3xl"
-      />
-
-      <div className="relative grid gap-space-10 md:grid-cols-2 md:items-center">
+    <section className="relative rounded-2xl border border-border bg-surface px-space-6 py-space-10 md:px-space-10 md:py-space-12">
+      <div className="grid gap-space-10 md:grid-cols-2 md:items-center">
         <div className="flex flex-col gap-space-5">
-          <span className="inline-flex w-max items-center gap-space-2 rounded-full bg-blueprint-tint px-space-3 py-1.5 text-eyebrow text-blueprint">
-            <Zap className="size-3.5" aria-hidden />
-            AGENTIC KIT · ORCHESTRATE · RUN · APPROVE
-          </span>
-
+          {/* 标题不用渐变填充：background-clip:text 的彩色标题是"这页是生成的"
+              最快被认出的信号。强调交给字重和 accent 色。 */}
           <h1 className="text-display-xl text-ink-900">
             {user ? (
               <>
                 欢迎回来，
                 <br />
-                <span className="text-gradient">{user.display_name}</span>
+                <span className="text-blueprint">{user.display_name}</span>
               </>
             ) : (
               <>
                 让多个 Agent
                 <br />
-                <span className="text-gradient">按图协作</span>
+                <span className="text-blueprint">按图协作</span>
               </>
             )}
           </h1>
@@ -287,14 +272,14 @@ function HeroSection() {
 
           <div className="flex flex-wrap items-center gap-space-3">
             {user ? (
-              <Button asChild size="lg" className="bg-gradient-cta text-white hover:opacity-90">
+              <Button asChild size="lg">
                 <Link to="/apps/bundles">
                   进入应用管理
                   <ArrowRight className="size-4" aria-hidden />
                 </Link>
               </Button>
             ) : (
-              <Button size="lg" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => openModal('manual')}>
+              <Button size="lg" onClick={() => openModal('manual')}>
                 创建账号
                 <ArrowRight className="size-4" aria-hidden />
               </Button>
@@ -400,7 +385,7 @@ function CentresSection() {
             <li key={centre.to}>
               <Link
                 to={centre.to}
-                className="group flex h-full flex-col gap-space-4 rounded-xl border border-border bg-surface p-space-5 transition-all hover:border-blueprint-edge hover:shadow-status-sm"
+                className="group flex h-full flex-col gap-space-4 rounded-xl border border-border bg-surface p-space-5 transition-colors duration-150 ease-out hover:border-blueprint-edge hover:shadow-status-sm"
               >
                 <span className="flex items-center justify-between">
                   <span

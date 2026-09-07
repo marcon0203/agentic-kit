@@ -1,0 +1,10 @@
+{
+  "scanned": "2026-09-07",
+  "framework": "React 19 + Vite 6 (SPA, react-router)",
+  "fontStack": "Plus Jakarta Sans + JetBrains Mono (Google Fonts, web/index.html)",
+  "palette": "CSS custom properties in src/index.css :root, mapped to Tailwind v4 via @theme inline",
+  "motion": "motion-cut — no framer-motion / gsap / lenis; tw-animate-css only",
+  "spacing": "--space-* 4pt scale (src/index.css)",
+  "preserved": ["font stack", "palette", "spacing scale", "radius scale"],
+  "introduced": ["design.md locked system", "anti-pattern gates", "token discipline (gate 48)", "mobile gates 34/51"]
+}

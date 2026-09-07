@@ -1,0 +1,14 @@
+[
+  {
+    "date": "2026-09-07",
+    "scope": "app",
+    "macrostructure": "Workbench (app) / Split Studio (marketing) / Long Document (content)",
+    "theme": "project palette preserved — violet accent, cool neutrals, Plus Jakarta Sans",
+    "genre": "modern-minimal",
+    "enrichment": "none — app pages carry no enrichment",
+    "nav": "N1b",
+    "footer": "none",
+    "design_system": "design.md",
+    "brief": "Agentic Kit · 全站 UI/UX 优化：清掉渐变标题、渐变泛滥、装饰光球与 token 漂移"
+  }
+]
