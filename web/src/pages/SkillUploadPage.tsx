@@ -135,7 +135,7 @@ export function SkillUploadPage() {
         <Button
           disabled={uploading || !ref || !file}
           onClick={upload}
-          className="bg-gradient-cta text-white hover:opacity-90"
+         
         >
           {uploading ? '上传中…' : '上传'}
         </Button>

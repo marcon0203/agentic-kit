@@ -98,7 +98,7 @@ export function SkillSourcesPage() {
     <Section
       title="Skill 源"
       aside={
-        <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setAddOpen(true)}>
+        <Button onClick={() => setAddOpen(true)}>
           添加源
         </Button>
       }
@@ -111,7 +111,7 @@ export function SkillSourcesPage() {
           title="登记第一个 Skill 源"
           description="填一个公开 Skill 市场的站点根地址（例如 https://clawhub.ai），同步后它的公开 Skill 会出现在 Skill 管理的市场视图里，可以查看用法、作者和更新记录。"
           action={
-            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setAddOpen(true)}>
+            <Button size="sm" onClick={() => setAddOpen(true)}>
               添加源
             </Button>
           }
@@ -206,7 +206,7 @@ export function SkillSourcesPage() {
               取消
             </Button>
             <Button
-              className="bg-gradient-cta text-white hover:opacity-90"
+             
               disabled={createMutation.isPending || !name.trim() || !baseUrl.trim()}
               onClick={() => createMutation.mutate()}
             >

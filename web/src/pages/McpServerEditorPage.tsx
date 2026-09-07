@@ -240,7 +240,7 @@ export function McpServerEditorPage() {
         <Button variant="outline" onClick={() => navigate('/apps/mcp')} disabled={saving}>
           取消
         </Button>
-        <Button disabled={saving || !ref || !url} onClick={save} className="bg-gradient-cta text-white hover:opacity-90">
+        <Button disabled={saving || !ref || !url} onClick={save}>
           {saving ? '保存中…' : '保存'}
         </Button>
       </div>

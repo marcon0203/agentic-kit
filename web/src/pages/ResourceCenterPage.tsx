@@ -278,7 +278,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
               <span className="text-caption text-ink-500">未配置对象存储（OSS_*），Skill 上传暂不可用</span>
             )}
             <Button
-              className="bg-gradient-cta text-white hover:opacity-90"
+             
               onClick={openRegister}
               disabled={skillUploadBlocked}
             >
@@ -450,7 +450,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
               }
               action={
                 !skillUploadBlocked && (
-                  <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={openRegister}>
+                  <Button size="sm" onClick={openRegister}>
                     {kind.blank.cta}
                   </Button>
                 )

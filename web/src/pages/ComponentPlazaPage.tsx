@@ -171,7 +171,7 @@ export function ComponentPlazaPage() {
         </div>
       }
       aside={
-        <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/apps/tool/new')}>
+        <Button onClick={() => navigate('/apps/tool/new')}>
           新建组件
         </Button>
       }
@@ -295,7 +295,7 @@ export function ComponentPlazaPage() {
               action={
                 <Button
                   size="sm"
-                  className="bg-gradient-cta text-white hover:opacity-90"
+                 
                   onClick={() => navigate('/apps/tool/new')}
                 >
                   新建组件
@@ -746,7 +746,7 @@ function PluginInstallDialog({
           <Button variant="outline" onClick={onClose} disabled={installing}>
             取消
           </Button>
-          <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={install} disabled={installing || !canInstall}>
+          <Button onClick={install} disabled={installing || !canInstall}>
             {installing ? '安装中…' : '确认安装'}
           </Button>
         </DialogFooter>

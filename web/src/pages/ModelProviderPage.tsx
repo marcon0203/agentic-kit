@@ -138,7 +138,7 @@ export function ModelProviderPage() {
               {/* 一个渠道都没有时点开弹窗只会得到一个空下拉框——直接禁掉并
                   说清楚该去哪配。 */}
               <Button
-                className="bg-gradient-cta text-white hover:opacity-90"
+               
                 disabled={specs.length === 0}
                 title={specs.length === 0 ? '还没有模型提供商，先去 系统配置 → 模型提供商 配一个' : undefined}
                 onClick={() => specs[0] && setConnecting(specs[0].name)}

@@ -70,7 +70,7 @@ export function RolesPage() {
         title="角色列表"
         aside={
           <Can permission="iam.role.manage">
-            <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
+            <Button onClick={() => setCreateOpen(true)}>
               新增角色
             </Button>
           </Can>
@@ -93,7 +93,7 @@ export function RolesPage() {
             description="一个角色就是一组权限，例如「运营」可以管理模型 Provider 但不能管理用户。创建后去用户管理页分配给具体的人。"
             action={
               canManage ? (
-                <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
+                <Button size="sm" onClick={() => setCreateOpen(true)}>
                   新增角色
                 </Button>
               ) : undefined

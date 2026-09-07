@@ -112,7 +112,7 @@ export function SkillMarketDetailPage() {
             </Button>
           )}
           <Button
-            className="bg-gradient-cta text-white hover:opacity-90"
+           
             size="sm"
             disabled={installMutation.isPending}
             onClick={() => installMutation.mutate()}

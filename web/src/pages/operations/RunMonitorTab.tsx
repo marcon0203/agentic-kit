@@ -108,7 +108,7 @@ export function RunMonitorTab() {
           title="还没有运行经过这里"
           description="从应用管理发起一次运行，它的每一步、耗时和失败原因都会出现在这张表里。"
           action={
-            <Button asChild size="sm" className="bg-gradient-cta text-white hover:opacity-90">
+            <Button asChild size="sm">
               <Link to="/apps/bundles">去应用管理发起一次运行</Link>
             </Button>
           }

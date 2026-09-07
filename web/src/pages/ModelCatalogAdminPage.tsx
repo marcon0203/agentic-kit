@@ -102,7 +102,7 @@ export function ModelCatalogAdminPage() {
         title="Provider 列表"
         aside={
           <Can permission="model_catalog.provider.create">
-            <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
+            <Button onClick={() => setCreateOpen(true)}>
               新增 Provider
             </Button>
           </Can>
@@ -125,7 +125,7 @@ export function ModelCatalogAdminPage() {
             description="选一个供应商，填上 API Key 和接口地址。"
             action={
               <Can permission="model_catalog.provider.create">
-                <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
+                <Button size="sm" onClick={() => setCreateOpen(true)}>
                   新增 Provider
                 </Button>
               </Can>

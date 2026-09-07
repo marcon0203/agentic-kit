@@ -346,7 +346,7 @@ export function ComponentDetailPage() {
 
         <div className="flex items-center gap-space-3">
           <Button
-            className="bg-gradient-cta text-white hover:opacity-90"
+           
             disabled={!dirty || saveMutation.isPending}
             onClick={() => saveMutation.mutate(form)}
           >

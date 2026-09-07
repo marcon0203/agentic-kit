@@ -52,7 +52,7 @@ export function MarketSkillCard({ skill }: { skill: MarketSkill }) {
       )}
 
       {/* 悬停浮出的查看详情条 */}
-      <span className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex translate-y-full items-center justify-center gap-space-1 rounded-b-lg bg-blueprint py-2 text-body-sm font-medium text-white opacity-0 transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100">
+      <span className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex translate-y-full items-center justify-center gap-space-1 rounded-b-lg bg-blueprint py-2 text-body-sm font-medium text-white opacity-0 transition-[transform,opacity] duration-150 ease-out group-hover:translate-y-0 group-hover:opacity-100">
         查看详情
         <ArrowRight className="size-3.5" aria-hidden />
       </span>

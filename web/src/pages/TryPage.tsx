@@ -166,7 +166,7 @@ export function TryPage() {
             startNewConversation()
             setSidebarOpen(false)
           }}
-          className="flex h-10 items-center justify-center gap-space-2 rounded-sm bg-gradient-cta text-body-sm font-semibold text-white shadow-[0_6px_16px_rgb(124_92_252_/_0.3)] hover:opacity-90"
+          className="flex h-10 items-center justify-center gap-space-2 rounded-sm bg-blueprint text-body-sm font-semibold text-white shadow-[0_6px_16px_rgb(124_92_252_/_0.3)] transition-colors duration-150 ease-out hover:bg-violet"
         >
           <Plus className="size-4" aria-hidden />
           新建对话
@@ -199,7 +199,7 @@ export function TryPage() {
                 openConversation(c.session_id)
                 setSidebarOpen(false)
               }}
-              className="group flex h-10 items-center gap-space-2 rounded-full px-space-3 text-left text-body-sm text-ink-700 hover:bg-blueprint-tint hover:text-ink-900 aria-[current=true]:bg-gradient-cta aria-[current=true]:text-white aria-[current=true]:shadow-[0_6px_16px_rgb(124_92_252_/_0.3)]"
+              className="group flex h-10 items-center gap-space-2 rounded-full px-space-3 text-left text-body-sm text-ink-700 transition-colors duration-150 ease-out hover:bg-blueprint-tint hover:text-ink-900 aria-[current=true]:bg-blueprint aria-[current=true]:text-white aria-[current=true]:shadow-[0_6px_16px_rgb(124_92_252_/_0.3)]"
             >
               <span className="min-w-0 flex-1 truncate">{c.title || '新的对话'}</span>
               <span

@@ -90,7 +90,7 @@ export function ApiKeysPage() {
           </code>
           ，和登录态并行有效。
         </p>
-        <Button className="shrink-0 bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
+        <Button className="shrink-0" onClick={() => setCreateOpen(true)}>
           新建 API Key
         </Button>
       </div>
@@ -109,7 +109,7 @@ export function ApiKeysPage() {
           title="还没有创建任何 API Key"
           description="创建一个之后，第三方系统就能拿它调用你发布的应用。"
           action={
-            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setCreateOpen(true)}>
+            <Button size="sm" onClick={() => setCreateOpen(true)}>
               新建第一个
             </Button>
           }
