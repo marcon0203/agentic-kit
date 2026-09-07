@@ -217,6 +217,12 @@ func (c *descriptorClient) Embed(ctx context.Context, apiKey, baseURL, model str
 // do 发一次非流式请求。返回的 url 供调用方拼错误信息用——出错时没有它，
 // 用户不知道请求到底打到哪去了。
 func (c *descriptorClient) do(ctx context.Context, spec descriptor.HTTPRequest, apiKey, baseURL string, stream bool) (body []byte, status int, url string, err error) {
+	// 非流式调用的整体时限。以前它挂在 http.Client.Timeout 上，但那个字段
+	// 连流式响应的 body 读取一起算，会把长运行拦腰砍断（见 gateway.go 的
+	// completionTimeout 注释），所以改成只加在这条一次性请求的路径上。
+	ctx, cancel := context.WithTimeout(ctx, completionTimeout)
+	defer cancel()
+
 	req, err := c.newRequest(ctx, spec, apiKey, baseURL, stream)
 	if err != nil {
 		return nil, 0, "", err
@@ -262,6 +268,15 @@ func (c *descriptorClient) newRequest(ctx context.Context, spec descriptor.HTTPR
 	}
 	if stream {
 		req.Header.Set("Accept", "text/event-stream")
+		// 显式要求不压缩。不设这个头的话，Go 的 transport 会自作主张加上
+		// Accept-Encoding: gzip 并透明解压——而 gzip 是按块工作的：上游若
+		// 不逐帧 flush deflate 流，解压侧就必须攒够一整块才能吐出数据，
+		// SSE 于是变成"静默几秒、然后一批帧一起到"。设了这个头之后 Go 认
+		// 为压缩由调用方自己管，也就不再自动解压。
+		//
+		// 代价是流式响应不再压缩，多占些带宽。对逐字输出来说这是值得的：
+		// 流式的全部价值就在于"边生成边看见"。
+		req.Header.Set("Accept-Encoding", "identity")
 	}
 	for k, v := range spec.Headers {
 		req.Header.Set(k, v)

@@ -14,7 +14,30 @@ import (
 // completionTimeout bounds a single provider call. Fallback tries the next
 // provider on any failure, including a timeout — a hung primary must not
 // block the whole chain.
+// completionTimeout 是**非流式**调用的整体上限，由 descriptor_client 在
+// 每次请求上用 context 施加。
+//
+// 它刻意不再放在 http.Client.Timeout 上：那个字段覆盖整个请求生命周期，
+// **包括读 response body**。流式响应的 body 会一直开着，一次跑上几分钟是
+// 正常的，放在那里等于给每次运行判了 60 秒死刑——到点连接被拦腰砍断，运行
+// 以失败告终，而模型其实答得好好的。
 const completionTimeout = 60 * time.Second
+
+// streamHeaderTimeout 约束的是"多久拿到响应头"，不是"多久读完"。上游连不上
+// 或迟迟不回应时它照样能快速失败，同时不干涉已经开始的流。
+const streamHeaderTimeout = 60 * time.Second
+
+// newHTTPClient 建模型调用共用的 client。
+//
+// 不设 Client.Timeout（理由见 completionTimeout），改用 Transport 上的
+// ResponseHeaderTimeout 兜住"上游没反应"这种情况；整体时限由调用方按请求
+// 类型自己加 context 决定。运行本身的墙钟上限由运行引擎负责，那一层的
+// context 会一路传到这里，所以流式请求仍然是有界的。
+func newHTTPClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = streamHeaderTimeout
+	return &http.Client{Transport: tr}
+}
 
 // Message is one turn in a completion request, provider-agnostic.
 //
@@ -190,7 +213,7 @@ type Gateway struct {
 // NewGateway builds a Gateway that resolves channels from the live
 // registry (registry.go). sink may be nil (no fallback events emitted).
 func NewGateway(sink EventSink) *Gateway {
-	return &Gateway{sink: sink, httpClient: &http.Client{Timeout: completionTimeout}}
+	return &Gateway{sink: sink, httpClient: newHTTPClient()}
 }
 
 // NewGatewayWithClients builds a Gateway against caller-supplied Clients —
@@ -199,7 +222,7 @@ func NewGatewayWithClients(clients map[string]Client, sink EventSink) *Gateway {
 	if clients == nil {
 		clients = map[string]Client{}
 	}
-	return &Gateway{sink: sink, overrides: clients, httpClient: &http.Client{Timeout: completionTimeout}}
+	return &Gateway{sink: sink, overrides: clients, httpClient: newHTTPClient()}
 }
 
 // clientFor 现取一个 client。找不到渠道 = 这个 provider 名没有被任何已登
