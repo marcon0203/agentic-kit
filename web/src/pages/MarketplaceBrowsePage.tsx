@@ -52,23 +52,30 @@ export function MarketplaceBrowsePage() {
   const [type, setType] = useState<ListingResourceType | 'all'>('all')
   const [search, setSearch] = useState('')
 
+  // 类型筛选改在客户端做，服务端只按搜索词取一次。这样分面上的计数和筛选
+  // 后看到的条数永远是同一批数据算出来的——如果类型也交给服务端过滤，选中
+  // 「Bundle」之后就只剩 Bundle 的数据，其它分面的计数便无从算起，只能编。
   const query = useQuery({
-    queryKey: ['marketplace-listings', browseTab === 'all' ? type : 'all', search],
+    queryKey: ['marketplace-listings', search],
     queryFn: async () =>
       unwrap<{ items: ListingSummary[]; has_more: boolean }>(
-        await apiClient.GET('/marketplace/listings', {
-          params: {
-            query: {
-              resource_type: browseTab === 'all' && type !== 'all' ? type : undefined,
-              q: search || undefined,
-            },
-          },
-        }),
+        await apiClient.GET('/marketplace/listings', { params: { query: { q: search || undefined } } }),
       ),
   })
 
-  const items = query.data?.items ?? []
+  const loaded = query.data?.items ?? []
+  const hasMore = query.data?.has_more ?? false
+  const items = browseTab === 'all' && type !== 'all' ? loaded.filter((l) => l.resource_type === type) : loaded
   const isFiltered = (browseTab === 'all' && type !== 'all') || search !== ''
+
+  // 计数只统计这一页真的拿到的条目。后端还有下一页时补一个「+」，
+  // 而不是把"这一页有 12 条"说成"一共 12 条"。
+  const counts = useMemo(() => {
+    const by = new Map<ListingResourceType | 'all', number>([['all', loaded.length]])
+    for (const l of loaded) by.set(l.resource_type, (by.get(l.resource_type) ?? 0) + 1)
+    return by
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 同下：query.data 才是真依赖
+  }, [query.data])
 
   const grouped = useMemo(() => {
     const byType = new Map<ListingResourceType, ListingSummary[]>()
@@ -85,30 +92,45 @@ export function MarketplaceBrowsePage() {
 
   return (
     <div className="flex flex-col gap-space-6">
+      {/* 区块头：名字 + 真实计数 chip 在左，控件收在同一行的右侧。计数用的
+          是这次实际返回的条数，不是编出来的总量。 */}
       <div className="flex flex-wrap items-center justify-between gap-space-4">
-        <div role="tablist" className="flex items-center gap-space-1 rounded-full border border-border bg-surface-muted p-1">
-          {(['featured', 'all'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="tab"
-              aria-selected={browseTab === t}
-              onClick={() => setBrowseTab(t)}
-              className={cn(
-                'text-body-sm rounded-full px-space-4 py-1.5 transition-colors',
-                browseTab === t ? 'bg-surface text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-900',
-              )}
-            >
-              {t === 'featured' ? '精选应用' : '全部应用'}
-            </button>
-          ))}
+        <div className="flex items-center gap-space-3">
+          <h2 className="text-display-md text-ink-900">应用广场</h2>
+          {query.isSuccess && (
+            <span className="text-caption tabular rounded-full bg-surface-muted px-space-3 py-0.5 text-ink-700">
+              {items.length}
+              {hasMore && '+'} 个
+            </span>
+          )}
         </div>
-        <Input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索名称或描述"
-          className="w-full max-w-[240px]"
-        />
+        <div className="flex flex-wrap items-center gap-space-3">
+          <div role="tablist" className="flex items-center gap-space-1 rounded-full border border-border bg-surface-muted p-1">
+            {(['featured', 'all'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={browseTab === t}
+                onClick={() => setBrowseTab(t)}
+                className={cn(
+                  'text-body-sm whitespace-nowrap rounded-full px-space-4 py-1.5 transition-colors duration-150 ease-out',
+                  browseTab === t ? 'bg-surface text-ink-900 shadow-sm' : 'text-ink-500 hover:text-ink-900',
+                )}
+              >
+                {t === 'featured' ? '精选应用' : '全部应用'}
+              </button>
+            ))}
+          </div>
+          {/* 不能用 w-full：在这个会换行的 flex 行里它会索取整行宽度，把自己
+              挤到 tab 组的下一行去。给一个固定宽度，窄屏时再让它整行。 */}
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索名称或描述"
+            className="w-[240px] max-w-full"
+          />
+        </div>
       </div>
 
       {/* 这是一句解释性说明，不是营销位——用应用内的扁平卡片语言承载（描边
@@ -126,13 +148,22 @@ export function MarketplaceBrowsePage() {
         </div>
       )}
 
+      {/* 带计数的分面。参考站把它做成一整条左侧栏，这里没有照搬：这个页面
+          外面已经有 AppsLayout 的二级菜单栏，再加一列就是双左栏。计数这个
+          真正有用的部分留下，形态收成一行。 */}
       {browseTab === 'all' && (
         <FilterChips>
-          {TYPES.map((t) => (
-            <FilterChip key={t.value} active={t.value === type} onClick={() => setType(t.value)}>
-              {t.label}
-            </FilterChip>
-          ))}
+          {TYPES.map((t) => {
+            const n = counts.get(t.value) ?? 0
+            return (
+              <FilterChip key={t.value} active={t.value === type} onClick={() => setType(t.value)}>
+                {t.label}
+                {/* 计数继承 chip 自身的颜色再压低透明度，而不是写死一个灰
+                    ——选中态的 chip 是紫底，写死的 ink-500 在上面只有 2:1。 */}
+                <span className="tabular ml-space-2 opacity-60">{n}</span>
+              </FilterChip>
+            )
+          })}
         </FilterChips>
       )}
 

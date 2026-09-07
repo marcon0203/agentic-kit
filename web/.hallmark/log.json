@@ -1,6 +1,18 @@
 [
   {
     "date": "2026-09-07",
+    "scope": "page",
+    "macrostructure": "Ecosystem Index",
+    "theme": "studied-DNA (source: image · 第三方 AI 平台模型/技能市场截图)",
+    "genre": "modern-minimal",
+    "enrichment": "none",
+    "design_system": "design.md",
+    "studied": true,
+    "note": "只取骨架；配色/字体沿用项目 design.md。未导出 design.md（来源为第三方站点）。",
+    "brief": "应用广场 /apps/browse 按 Ecosystem Index DNA 改造：区块头计数 + 计数分面 + 重建卡片解剖"
+  },
+  {
+    "date": "2026-09-07",
     "scope": "app",
     "macrostructure": "Workbench (app) / Split Studio (marketing) / Long Document (content)",
     "theme": "project palette preserved — violet accent, cool neutrals, Plus Jakarta Sans",
