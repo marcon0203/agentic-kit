@@ -1,4 +1,4 @@
-import { Pencil, Play, Trash2, Workflow, GitBranch, Box, Rocket } from 'lucide-react'
+import { Pencil, Play, Trash2, Workflow, GitBranch, Box, Rocket, Split } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Ref } from '@/components/common/Page'
@@ -15,6 +15,7 @@ const RUN_TYPE_META = {
   graph: { label: '图编排', Icon: GitBranch },
   flow: { label: '顺序流程', Icon: Workflow },
   single: { label: '单体', Icon: Box },
+  router: { label: '模型路由', Icon: Split },
 } as const
 
 interface BundleCardProps {

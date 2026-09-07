@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/marcon0203/agentic-kit/internal/bundlegraph"
 	"github.com/marcon0203/agentic-kit/internal/domain"
@@ -85,6 +86,14 @@ func (s *Service) Create(ctx context.Context, ownerID int64, def Definition) (Cr
 
 	var warnings []Warning
 	switch def.Type() {
+	case RunTypeRouter:
+		if err := validateRouter(def); err != nil {
+			return CreateResult{}, err
+		}
+		// 转交由模型临场决定，没有静态的边可以检查可达性——router 的"图"
+		// 是完全连通的：路由器可以交给任何一个候选。handoff 漂移检查同样
+		// 无从谈起（Agent 声明的 handoff 对手在这里不构成约束），所以这
+		// 一类不产生警告。
 	case RunTypeFlow, RunTypeSingle:
 		handoffWarnings, err := s.checkHandoffDrift(ctx, ownerID, def, consecutiveEdges(def.Agents()))
 		if err != nil {
@@ -230,4 +239,25 @@ func issuesToWarnings(issues []bundlegraph.Issue) []Warning {
 		out[i] = Warning{Field: iss.Field, Reason: iss.Message}
 	}
 	return out
+}
+
+// validateRouter 检查 RunTypeRouter 的两条不变量。
+//
+// Schema 已经保证了 router.node 存在、agents[] 至少两项；这里补的是
+// schema 表达不了的那部分——router.node 必须真的指向 agents[] 里的某一项。
+// 拼错节点名在 schema 眼里完全合法，但运行时会直接编译失败，那时用户拿到
+// 的是一句 ADK 的内部错误，而不是"你把节点名写错了"。
+func validateRouter(def Definition) error {
+	cfg := def.Router()
+	agents := def.Agents()
+
+	known := make([]string, 0, len(agents))
+	for _, a := range agents {
+		if a.Node == cfg.Node {
+			return nil
+		}
+		known = append(known, a.Node)
+	}
+	return domain.Unprocessable(domain.CodeBundleGraphInvalid,
+		fmt.Sprintf("router.node %q 不在 agents[] 里（可选的有：%s）", cfg.Node, strings.Join(known, "、")))
 }

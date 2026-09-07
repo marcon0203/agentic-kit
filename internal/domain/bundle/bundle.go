@@ -65,6 +65,19 @@ const (
 	// RunTypeSingle is exactly one agent, run directly with no
 	// orchestration layer whatsoever.
 	RunTypeSingle RunType = "single"
+	// RunTypeRouter 让**模型**决定下一步交给谁，而不是让 DSL 决定。
+	//
+	// 和 RunTypeGraph 的区别是"谁在做路由决策"：graph 的边上挂的是布尔表
+	// 达式（`shared_state.score > 0.8`），走哪条边编译期就定死了；router
+	// 把 agents[] 里的一个 Agent 指定为路由器，其余成为它的候选，由它每
+	// 一步看着上下文决定交给谁、或者收尾。这是 supervisor / handoff 那一
+	// 类形态，用条件边表达不出来——条件边不认识"意图"。
+	//
+	// 底座是 ADK 原生的 transfer 机制：LlmAgent 一旦带上 SubAgents，
+	// AgentTransferRequestProcessor 会自动给它挂上 transfer_to_agent 工具
+	// 和相应指令，base_flow 负责把控制权切过去。所以这里不需要自己写调度
+	// 循环，只需要把编译好的候选接成父子关系。
+	RunTypeRouter RunType = "router"
 )
 
 // Type reads the DSL's optional top-level `type`, defaulting to
@@ -75,6 +88,37 @@ func (d Definition) Type() RunType {
 		return RunType(s)
 	}
 	return RunTypeGraph
+}
+
+// RouterConfig 是 RunTypeRouter 的编排配置，读自 DSL 顶层的 `router` 块。
+type RouterConfig struct {
+	// Node 是充当路由器的那个节点名（agents[] 里某项的 alias，没有 alias
+	// 就是 ref）。其余节点都是它的候选。
+	Node string
+	// MaxHandoffs 是一次运行里控制权最多转交几次，0 表示用默认值。它兜住
+	// 的是"两个 Agent 互相踢皮球"——模型自己不会喊停，而 ADK 的 transfer
+	// 没有内建次数上限（只有 LoopAgent 有 MaxIterations）。语义和 graph
+	// 的 maxLoop 对齐：超限即失败，而不是悄悄截断。
+	MaxHandoffs int
+}
+
+// Router reads the DSL's top-level `router` block. 只有 RunTypeRouter 用得上。
+func (d Definition) Router() RouterConfig {
+	m, _ := d["router"].(map[string]any)
+	cfg := RouterConfig{}
+	if m == nil {
+		return cfg
+	}
+	cfg.Node, _ = m["node"].(string)
+	// JSON 数字过 encoding/json 之后是 float64；DSL 也可能来自 Go 侧构造，
+	// 那时是 int。两种都认。
+	switch n := m["max_handoffs"].(type) {
+	case float64:
+		cfg.MaxHandoffs = int(n)
+	case int:
+		cfg.MaxHandoffs = n
+	}
+	return cfg
 }
 
 // AgentBinding is one entry of the Bundle's agents[]. Node is the name the

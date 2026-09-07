@@ -10,6 +10,7 @@ import (
 
 	"github.com/marcon0203/agentic-kit/internal/adapter/postgres"
 	"github.com/marcon0203/agentic-kit/internal/bundlegraph"
+	"github.com/marcon0203/agentic-kit/internal/domain/bundle"
 	"github.com/marcon0203/agentic-kit/internal/domain/knowledgebase"
 	"github.com/marcon0203/agentic-kit/internal/domain/resource"
 	"github.com/marcon0203/agentic-kit/internal/domain/run"
@@ -104,6 +105,16 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 	gateway := modelgateway.NewGateway(nil)
 	authorizer := newResourceAuthorizer(ctx, e.queries, b.OwnerUserID, e.aesKey, e.pluginWasm, e.connectors)
 
+	// RunTypeRouter 的路由节点必须**最后**编译：ADK 在 llmagent.New 时就
+	// 把父子关系固化进 agent 树，候选得先就绪。主循环里先跳过它，把它的
+	// 定义留到循环之后。
+	routerCfg := bundle.Definition(b.Definition).Router()
+	routerNode := ""
+	if runType == string(bundle.RunTypeRouter) {
+		routerNode = routerCfg.Node
+	}
+	var routerDef map[string]any
+
 	agentsRaw, _ := b.Definition["agents"].([]any)
 	compiled := make(map[string]adk.CompiledAgent, len(agentsRaw))
 	nodeOrder := make([]string, 0, len(agentsRaw)) // agents[] declaration order — a flow's implicit schedule
@@ -130,6 +141,11 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 			return nil, fmt.Errorf("resolve agent %q: %w", ref, err)
 		}
 		agentDef["agent"] = node
+
+		if node == routerNode {
+			routerDef = agentDef
+			continue // 候选编完再回来编它
+		}
 
 		var nodeRenderers []adk.RendererRegistration
 		compiledAgent, err := adk.CompileAgent(ctx, agentDef, adk.AgentCompileOptions{
@@ -173,6 +189,12 @@ func (e *Engine) Prepare(ctx context.Context, runID string, b run.ResolvedBundle
 		})
 	case "single":
 		root, err = adk.CompileSingle(bundleRef, firstOrEmpty(nodeOrder), compiled)
+	case string(bundle.RunTypeRouter):
+		root, err = e.compileRouter(ctx, compileRouterArgs{
+			bundleRef: bundleRef, routerNode: routerNode, routerDef: routerDef,
+			candidates: nodeOrder, compiled: compiled, maxHandoffs: routerCfg.MaxHandoffs,
+			gateway: gateway, creds: creds, authorizer: authorizer, renderRules: renderRules,
+		})
 	default:
 		root, err = adk.CompileBundle(adk.BundleCompileOptions{
 			BundleRef: bundleRef, Graph: graph, Agents: compiled, GateNodes: gateNodes, GateWaiter: waiter,
@@ -478,4 +500,60 @@ func sanitizeRunError(err error) string {
 		return run.FailAllProvidersDown
 	}
 	return run.FailGeneric
+}
+
+// compileRouterArgs 是 compileRouter 要的一堆东西，单独成型只是为了不让
+// Prepare 里那个调用点变成十个位置参数。
+type compileRouterArgs struct {
+	bundleRef   string
+	routerNode  string
+	routerDef   map[string]any
+	candidates  []string
+	compiled    map[string]adk.CompiledAgent
+	maxHandoffs int
+	gateway     *modelgateway.Gateway
+	creds       map[string]modelgateway.Credential
+	authorizer  adk.ResourceAuthorizer
+	renderRules map[string][]adk.RendererRegistration
+}
+
+// compileRouter 编译 RunTypeRouter 的根 agent。
+//
+// 顺序是这个函数存在的全部理由：候选先包上转交计数壳，再作为 SubAgents 编
+// 译路由器。反过来不行——ADK 在 llmagent.New 时就固化了 agent 树，路由器
+// 建好之后再挂候选是挂不上的，transfer_to_agent 工具也就不会出现。
+func (e *Engine) compileRouter(ctx context.Context, a compileRouterArgs) (adk.CompiledAgent, error) {
+	if a.routerDef == nil {
+		return nil, fmt.Errorf("router node %q is not in agents[]", a.routerNode)
+	}
+
+	counter := adk.NewHandoffCounter(a.maxHandoffs)
+	subAgents := make([]adk.CompiledAgent, 0, len(a.candidates))
+	for _, node := range a.candidates {
+		wrapped, err := adk.CountHandoffs(node, a.compiled[node], counter)
+		if err != nil {
+			return nil, fmt.Errorf("wrap candidate %q: %w", node, err)
+		}
+		subAgents = append(subAgents, wrapped)
+	}
+
+	var routerRenderers []adk.RendererRegistration
+	router, err := adk.CompileAgent(ctx, a.routerDef, adk.AgentCompileOptions{
+		Gateway: a.gateway, Credentials: a.creds, Authorizer: a.authorizer,
+		KnowledgeBaseSearcher: e.kbSearcher, SkillContentFetcher: e.skills, PluginRuntime: e.plugins,
+		Renderers: &routerRenderers,
+		SubAgents: subAgents,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("compile router %q: %w", a.routerNode, err)
+	}
+	if len(routerRenderers) > 0 {
+		a.renderRules[a.routerNode] = routerRenderers
+	}
+	a.compiled[a.routerNode] = router
+
+	return adk.CompileRouter(adk.RouterCompileOptions{
+		BundleRef: a.bundleRef, Router: router, RouterNode: a.routerNode,
+		Candidates: a.candidates, MaxHandoffs: a.maxHandoffs,
+	})
 }

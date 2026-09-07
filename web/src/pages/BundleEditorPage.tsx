@@ -45,7 +45,7 @@ type BundleDefinition = components['schemas']['BundleDefinition']
 const nodeTypes = { agentNode: AgentNode, endNode: EndNode }
 const edgeTypes = { bundleEdge: BundleEdgeView, selfLoop: SelfLoopEdgeView }
 
-const BLANK_META = { bundle: '', version: '1.0', description: '', runType: 'graph' as BundleRunType }
+const BLANK_META = { bundle: '', version: '1.0', description: '', runType: 'graph' as BundleRunType, routerNode: null as string | null }
 const BLANK_END = { id: END_NODE_ID, type: 'endNode' as const, position: { x: 480, y: 40 }, data: { ref: END_NODE_ID }, deletable: false }
 
 interface ValidationIssue {
@@ -90,7 +90,7 @@ function EditorInner() {
     const graph = definitionToGraph(bundle.definition)
     setNodes(graph.nodes)
     setEdges(annotateParallelEdges(graph.edges))
-    setMeta({ bundle: graph.bundle, version: bumpVersion(graph.version), description: graph.description, runType: graph.runType })
+    setMeta({ bundle: graph.bundle, version: bumpVersion(graph.version), description: graph.description, runType: graph.runType, routerNode: graph.routerNode })
     setEntry(graph.entry)
     setDirty(false)
     requestAnimationFrame(() => fitView({ padding: 0.2 }))
@@ -239,6 +239,16 @@ function EditorInner() {
         return { ...base, type: 'flow', agents }
       case 'single':
         return { ...base, type: 'single', agents: agents.slice(0, 1) }
+      case 'router':
+        // router 也没有 orchestration：转交由模型临场决定，没有静态的边。
+        // 路由器默认取第一个节点——总得有一个，而"第一个"是用户在画布上最
+        // 可能理解成入口的那个。
+        return {
+          ...base,
+          type: 'router',
+          agents,
+          router: { node: meta.routerNode || agents[0]?.alias || agents[0]?.ref || '' },
+        }
       default:
         return { ...base, type: 'graph', agents, orchestration: graphToOrchestration(nodes, edges, entry) }
     }
@@ -256,7 +266,7 @@ function EditorInner() {
       const graph = definitionToGraph(def)
       setNodes(graph.nodes)
       setEdges(annotateParallelEdges(graph.edges))
-      setMeta({ bundle: graph.bundle, version: graph.version, description: graph.description, runType: graph.runType })
+      setMeta({ bundle: graph.bundle, version: graph.version, description: graph.description, runType: graph.runType, routerNode: graph.routerNode })
       setEntry(graph.entry)
       setTab('canvas')
       markDirty()

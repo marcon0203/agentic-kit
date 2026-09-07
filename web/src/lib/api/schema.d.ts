@@ -2114,11 +2114,18 @@ export interface components {
         };
         BundleDefinition: {
             /**
-             * @description 运行类型，决定编排引擎如何调度：graph（默认，省略即此）走完整图执行引擎；flow 按 agents[] 声明顺序严格串行执行，走 ADK 原生 SequentialAgent，无需 orchestration；single 只有一个 agent，直接运行。省略时按 graph 处理，此时 orchestration 必填。
+             * @description 运行类型，决定编排引擎如何调度：graph（默认，省略即此）走完整图执行引擎，边上挂布尔表达式， 走哪条编译期就定死；flow 按 agents[] 声明顺序严格串行执行，走 ADK 原生 SequentialAgent， 无需 orchestration；single 只有一个 agent，直接运行；router 由**模型**决定下一步交给谁—— agents[] 里指定一个作路由器，其余是它的候选，走 ADK 原生 transfer 机制，需要 router 块。 graph 与 router 的分界是「谁在做路由决策」：前者是写死的条件，后者是模型的判断。 省略时按 graph 处理，此时 orchestration 必填。
              * @default graph
              * @enum {string}
              */
-            type: "graph" | "flow" | "single";
+            type: "graph" | "flow" | "single" | "router";
+            /** @description type=router 的编排配置。指定 agents[] 里哪一个充当路由器，其余成为它的候选。 */
+            router?: {
+                /** @description 充当路由器的节点名（agents[] 中某项的 alias，没有 alias 就是 ref）。它是个普通 Agent， 有自己的模型、人设和工具；运行时会额外获得一个 transfer_to_agent 工具用来转交控制权。 */
+                node: string;
+                /** @description 一次运行里控制权最多转交几次，兜住「两个 Agent 互相踢皮球」。超限即失败， 语义和 graph 的自循环上限一致。省略时服务端按 8 处理。 （这里刻意不写 default——openapi-typescript 会把带 default 的字段生成为必填， 而这是个客户端可以不传的可选项。） */
+                max_handoffs?: number;
+            };
             bundle: string;
             version: string;
             description?: string;

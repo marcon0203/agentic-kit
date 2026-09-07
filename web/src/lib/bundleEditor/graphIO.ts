@@ -55,6 +55,8 @@ export interface BundleGraph {
   version: string
   description: string
   runType: BundleRunType
+  /** type=router 时充当路由器的节点名；其余运行类型下为 null。 */
+  routerNode: string | null
   entry: string | null
   nodes: AgentNode[]
   edges: BundleEdge[]
@@ -150,6 +152,7 @@ export function definitionToGraph(def: BundleDefinition): BundleGraph {
     version: def.version ?? '1.0',
     description: def.description ?? '',
     runType: def.type ?? 'graph',
+    routerNode: def.router?.node ?? null,
     entry: entry || null,
     nodes,
     edges: rfEdges,

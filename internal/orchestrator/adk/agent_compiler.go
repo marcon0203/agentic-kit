@@ -48,6 +48,13 @@ type AgentCompileOptions struct {
 	// node.render events against the node's actual output; CompileAgent
 	// itself never emits one.
 	Renderers *[]RendererRegistration
+	// SubAgents 让这个 Agent 可以把控制权转交给别人——RunTypeRouter 的路由
+	// 器就是这样构成的。非空时 ADK 会自动给它挂上 transfer_to_agent 工具和
+	// 相应指令（AgentTransferRequestProcessor），无需我们提供任何工具。
+	//
+	// 必须在编译时给：ADK 在 llmagent.New 时就固化了 agent 树，事后挂不上。
+	// 其余三种运行类型都留空。
+	SubAgents []agent.Agent
 	// Hooks, if non-nil, receives every plugin hook this Agent's
 	// capabilities.hooks{} resolved during compilation (spec-20 §4.4).
 	// CompileAgent returns an error if two different plugins claim the
@@ -122,6 +129,11 @@ func CompileAgent(ctx context.Context, def map[string]any, opts AgentCompileOpti
 		Tools:       tools,
 		Toolsets:    toolsets,
 		OutputKey:   ref,
+		// 只有 RunTypeRouter 的路由 Agent 会带上这个。ADK 在 llmagent.New
+		// 时就把父子关系固化进 agent 树，AgentTransferRequestProcessor 靠
+		// 它决定要不要挂 transfer_to_agent 工具——所以候选必须在编译路由器
+		// **之前**就绪，事后再挂是挂不上的。
+		SubAgents: opts.SubAgents,
 	}
 	applyHookCallbacks(&cfg, nodeHooks, opts.PluginRuntime)
 

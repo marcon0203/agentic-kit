@@ -20,7 +20,8 @@
           "type": {
             "enum": [
               "flow",
-              "single"
+              "single",
+              "router"
             ]
           }
         }
@@ -49,16 +50,39 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "router"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "router"
+        ],
+        "properties": {
+          "agents": {
+            "minItems": 2
+          }
+        }
+      }
     }
   ],
   "properties": {
     "type": {
       "type": "string",
-      "description": "bundle 的运行类型，决定编排引擎如何调度：graph（默认）——完整的条件/并行/自循环图，走图执行引擎；flow——agents[] 按声明顺序严格串行执行，无需 orchestration 块，走 ADK 原生 SequentialAgent；single——只有一个 agent，直接运行，无编排开销。三者是真正不同的运行模式，不是同一引擎的不同外观。",
+      "description": "bundle 的运行类型，决定编排引擎如何调度。graph（默认）——条件/并行/自循环图，边上挂布尔表达式，走哪条编译期就定死，走图执行引擎；flow——agents[] 按声明顺序严格串行，无需 orchestration 块，走 ADK 原生 SequentialAgent；single——只有一个 agent，直接运行，无编排开销；router——由模型决定下一步交给谁：agents[] 里指定一个作路由器，其余是它的候选，走 ADK 原生 transfer 机制。四者是真正不同的运行模式，不是同一引擎的不同外观。graph 与 router 的分界是「谁在做路由决策」：前者是写死的条件，后者是模型的判断。",
       "enum": [
         "graph",
         "flow",
-        "single"
+        "single",
+        "router"
       ],
       "default": "graph"
     },
@@ -109,6 +133,27 @@
         }
       }
     },
+    "router": {
+      "type": "object",
+      "description": "type: router 的编排配置。指定 agents[] 里哪一个充当路由器，其余成为它的候选。",
+      "required": [
+        "node"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "type": "string",
+          "description": "充当路由器的节点名——agents[] 中某项的 alias，没有 alias 就是 ref。它是个普通 Agent，有自己的模型、人设和工具；运行时会额外获得一个 transfer_to_agent 工具用来把控制权交给候选。"
+        },
+        "max_handoffs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 8,
+          "description": "一次运行里控制权最多转交几次。兜住「两个 Agent 互相踢皮球」——模型自己不会喊停。超限即失败，语义和 graph 的自循环上限一致。"
+        }
+      }
+    },
     "orchestration": {
       "type": "object",
       "required": [
@@ -120,7 +165,7 @@
       "properties": {
         "mode": {
           "type": "string",
-          "description": "pipeline 是 graph 的特例（纯线性无分支）；supervisor 通过在 edges 中接入一个路由 agent 节点实现，复用同一套图执行引擎",
+          "description": "pipeline 是 graph 的特例（纯线性无分支）。注意：由模型决定下一步交给谁的 supervisor 形态**不在这里**——条件边表达不了「意图」，那是独立的 type: router，见顶层 router 块。",
           "enum": [
             "pipeline",
             "graph"

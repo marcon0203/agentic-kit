@@ -8,9 +8,10 @@ import { validateCondition } from '@/lib/bundleEditor/validateCondition'
 import type { AgentNode, BundleEdge, BundleRunType } from '@/lib/bundleEditor/graphIO'
 
 const RUN_TYPE_HELP: Record<BundleRunType, string> = {
-  graph: '完整编排图：支持条件分支、并行 fan-out、join 汇合与自循环重试。',
+  graph: '完整编排图：条件分支、并行 fan-out、join 汇合与自循环重试。走哪条边由边上的表达式决定，编译期就定死。',
   flow: '顺序流程：agents 按加入画布的顺序严格串行执行一次，无分支/并行。',
   single: '单体：只运行一个 agent，没有编排开销。',
+  router: '模型路由：由一个路由 Agent 每一步看着上下文决定交给谁，不用画边。和 graph 的区别是「谁在做决策」——那边是写死的条件，这边是模型的判断。',
 }
 
 interface ValidationIssue {
@@ -41,8 +42,8 @@ export function PropertiesPanel({
   onUpdateEdge: (id: string, patch: Partial<BundleEdge['data']>) => void
   onDeleteNode: (id: string) => void
   onDeleteEdge: (id: string) => void
-  bundleMeta: { bundle: string; version: string; description: string; runType: BundleRunType }
-  onUpdateMeta: (patch: Partial<{ bundle: string; version: string; description: string }>) => void
+  bundleMeta: { bundle: string; version: string; description: string; runType: BundleRunType; routerNode: string | null }
+  onUpdateMeta: (patch: Partial<{ bundle: string; version: string; description: string; routerNode: string | null }>) => void
   onUpdateRunType: (runType: BundleRunType) => void
   entry: string | null
   onSetEntry: (id: string) => void
@@ -231,6 +232,7 @@ export function PropertiesPanel({
                 <SelectItem value="graph">graph（图编排）</SelectItem>
                 <SelectItem value="flow">flow（顺序流程）</SelectItem>
                 <SelectItem value="single">single（单体）</SelectItem>
+                <SelectItem value="router">router（模型路由）</SelectItem>
               </SelectContent>
             </Select>
             <p className="text-body-sm text-ink-500">{RUN_TYPE_HELP[bundleMeta.runType]}</p>
@@ -252,6 +254,35 @@ export function PropertiesPanel({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+          {bundleMeta.runType === 'router' && (
+            <div className="flex flex-col gap-space-2">
+              <label htmlFor="meta-router" className="text-label-md text-ink-700">
+                路由节点
+              </label>
+              <Select
+                value={bundleMeta.routerNode ?? nodeNames[0] ?? undefined}
+                onValueChange={(v) => onUpdateMeta({ routerNode: v })}
+              >
+                <SelectTrigger id="meta-router" className="h-9 w-full">
+                  <SelectValue placeholder="选择路由节点" />
+                </SelectTrigger>
+                <SelectContent>
+                  {nodeNames.map((n) => (
+                    <SelectItem key={n} value={n}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-body-sm text-ink-500">
+                这个节点决定每一步交给谁。它是个普通 Agent——它的人设直接决定路由质量，写清楚各候选分别擅长什么。
+                其余 {Math.max(nodeNames.length - 1, 0)} 个节点是它的候选。
+              </p>
+              {nodeNames.length < 2 && (
+                <p className="text-body-sm text-rust">router 至少要两个节点：一个路由器加至少一个候选。</p>
+              )}
             </div>
           )}
           {bundleMeta.runType === 'single' && nodeNames.length > 1 && (

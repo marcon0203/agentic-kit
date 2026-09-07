@@ -3,6 +3,7 @@ package bundle_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
@@ -390,5 +391,45 @@ func TestDelete_SucceedsWhenUnoccupied(t *testing.T) {
 	}
 	if _, still := repo.bundles["free"]; still {
 		t.Fatal("expected the bundle to be gone")
+	}
+}
+
+// router.node 拼错在 schema 眼里完全合法（它只知道那是个字符串），但运行时
+// 会直接编译失败，用户拿到的是一句 ADK 的内部错误。校验层要在保存时就说清
+// 楚，并把可选的节点名列出来。
+func TestCreate_RouterNodeMustBeOneOfTheAgents(t *testing.T) {
+	svc := newSvc(newFakeRepo(), newFakeHandoffs(), passValidator{})
+	_, err := svc.Create(context.Background(), 1, bundle.Definition{
+		"bundle": "b1", "version": "1.0", "type": "router",
+		"agents": []any{
+			map[string]any{"ref": "supervisor"},
+			map[string]any{"ref": "worker"},
+		},
+		"router": map[string]any{"node": "superviser"}, // 少了个 o
+	})
+	if err == nil {
+		t.Fatal("router.node 指向不存在的节点，应当拒绝保存")
+	}
+	if !strings.Contains(err.Error(), "router.node") {
+		t.Fatalf("错误信息要点名是 router.node 的问题：%v", err)
+	}
+}
+
+func TestCreate_RouterWithAValidNodeIsAccepted(t *testing.T) {
+	svc := newSvc(newFakeRepo(), newFakeHandoffs(), passValidator{})
+	res, err := svc.Create(context.Background(), 1, bundle.Definition{
+		"bundle": "b1", "version": "1.0", "type": "router",
+		"agents": []any{
+			map[string]any{"ref": "supervisor"},
+			map[string]any{"ref": "worker", "alias": "w"},
+		},
+		"router": map[string]any{"node": "supervisor"},
+	})
+	if err != nil {
+		t.Fatalf("合法的 router Bundle 应当能保存：%v", err)
+	}
+	// 转交由模型临场决定，没有静态的边可以检查可达性，所以不产生图相关警告。
+	if len(res.Warnings) != 0 {
+		t.Fatalf("router 类型不该产生编排警告：%+v", res.Warnings)
 	}
 }
