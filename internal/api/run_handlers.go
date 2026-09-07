@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -10,20 +11,24 @@ import (
 
 	"github.com/marcon0203/agentic-kit/internal/domain"
 	"github.com/marcon0203/agentic-kit/internal/domain/run"
+	"github.com/marcon0203/agentic-kit/internal/runstream"
 )
 
 // RunHandlers is the HTTP transport for the 编排运行时 context (spec-11).
-// The launch chain, the black-box filter and the gate rules live in
-// internal/domain/run; what is left here is JSON, status codes and the one
-// endpoint that streams.
+// The launch chain and the gate rules live in internal/domain/run; what is
+// left here is JSON, status codes and the one endpoint that streams.
 type RunHandlers struct {
 	svc *run.Service
+	// bus 是运行事件的实时投递通道（internal/runstream）。可以为 nil：
+	// 那时 Stream 退回纯轮询，行为和引入广播器之前一致——测试里的裸
+	// handler 就走这条路。
+	bus *runstream.Broker
 	// now is overridable in tests.
 	now func() time.Time
 }
 
-func NewRunHandlers(svc *run.Service) *RunHandlers {
-	return &RunHandlers{svc: svc, now: time.Now}
+func NewRunHandlers(svc *run.Service, bus *runstream.Broker) *RunHandlers {
+	return &RunHandlers{svc: svc, bus: bus, now: time.Now}
 }
 
 // ── DTOs ─────────────────────────────────────────────────────────────
@@ -258,11 +263,19 @@ func (h *RunHandlers) Get(w http.ResponseWriter, r *http.Request) {
 
 // ── Stream ───────────────────────────────────────────────────────────
 
-// streamPollInterval is spec-12's "服务端检查间隔（300ms）" — how often the
-// stream re-polls for new events and status once caught up, which bounds
-// both end-to-end latency and how quickly the connection closes after the
-// run finishes (spec-12's "~400ms 内自动关闭" acceptance check).
-const streamPollInterval = 300 * time.Millisecond
+// 两个间隔，对应两种形态。
+//
+// 有广播器时（正常部署），事件是推过来的，轮询降级成纯兜底心跳：只为覆盖
+// 广播器覆盖不到的情况——运行跑在另一个副本上、订阅者积压丢过事件、进程
+// 崩溃导致运行没写终态事件。2s 一次，每条连接 0.5 QPS，是原来 6.7 QPS 的
+// 十三分之一。
+//
+// 没有广播器时（测试里的裸 handler），退回 spec-12 原本的 300ms 轮询，行为
+// 和这次改造之前一致。
+const (
+	streamSafetyInterval = 2 * time.Second
+	streamPollInterval   = 300 * time.Millisecond
+)
 
 type runEventDTO struct {
 	ID        int64          `json:"id"`
@@ -286,6 +299,15 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 	afterID := int64(0)
 	if v := r.URL.Query().Get("after_id"); v != "" {
 		afterID, _ = strconv.ParseInt(v, 10, 64)
+	}
+
+	// 订阅要在下面首次读库之前建立。顺序反过来的话，"读完库"到"挂上订阅"
+	// 这段空窗里引擎写进去的事件，既不在查询结果里、也不在订阅流里，会被
+	// 永久跳过——正好是模型开始吐字最密的那一瞬间。
+	var sub *runstream.Subscription
+	if h.bus != nil {
+		sub = h.bus.Subscribe(id)
+		defer sub.Close()
 	}
 
 	// 状态在事件之前读。engine.finish 先写终态事件再改状态，所以"读到的
@@ -313,6 +335,7 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
 
+	terminal := false
 	for {
 		for _, ev := range events {
 			dto := runEventDTO{ID: ev.ID, Type: ev.Type, RunID: id, Timestamp: ev.CreatedAt, Payload: ev.Payload}
@@ -324,27 +347,82 @@ func (h *RunHandlers) Stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			afterID = ev.ID
+			// 终态事件本身就是关流的信号，不用再查一次状态确认。引擎的
+			// finish 先写终态事件再改状态，所以看见事件必然不早于状态变更。
+			if ev.Type == run.EventBundleFinished || ev.Type == run.EventBundleFailed {
+				terminal = true
+			}
 		}
 		if flusher != nil {
 			flusher.Flush()
 		}
 
-		if status.Terminal() {
+		if terminal || status.Terminal() {
 			return
-		}
-		select {
-		case <-r.Context().Done():
-			return
-		case <-time.After(streamPollInterval):
 		}
 
-		// 同样先状态后事件，理由见上面第一次读取处。
+		// 实时路径：阻塞等广播器推事件。推到了就直接写出去，一次库都不查。
+		if sub != nil {
+			live, ok := waitForLive(r.Context(), sub, afterID)
+			if !ok {
+				return // 客户端断开
+			}
+			if len(live) > 0 && !sub.Lagged() {
+				events = live
+				continue
+			}
+			// 落到这里 = 心跳到点（这一轮没有新事件），或者这个订阅者积压
+			// 丢过事件（Lagged）。两种情况都得回库：前者是为了发现广播器
+			// 看不见的状态变化，后者是为了补上流里的洞——从 afterID 重读
+			// 一定覆盖 live 里那几条，所以直接丢掉它们不会漏。
+		}
+
+		// 兜底路径（也是没有广播器时的唯一路径）。同样先状态后事件，理由
+		// 见上面第一次读取处。
+		if sub == nil {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-time.After(streamPollInterval):
+			}
+		}
 		if status, err = h.svc.Status(r.Context(), id); err != nil {
 			return
 		}
 		if events, err = h.svc.EventsAfter(r.Context(), userID, id, afterID); err != nil {
 			_ = writeNDJSONLine(w, runEventDTO{Type: "stream.error", RunID: id, Timestamp: h.now()})
 			return
+		}
+	}
+}
+
+// waitForLive 阻塞到广播器推来至少一个事件、心跳到点、或者客户端断开。
+//
+// 第二个返回值为 false 表示客户端走了，调用方应当直接结束这次流。返回空切
+// 片而 ok 为 true 表示心跳到点、这一轮没有实时事件——调用方该回库看一眼。
+func waitForLive(ctx context.Context, sub *runstream.Subscription, afterID int64) ([]run.Event, bool) {
+	var out []run.Event
+	select {
+	case <-ctx.Done():
+		return nil, false
+	case ev := <-sub.Events():
+		if ev.ID > afterID {
+			out = append(out, ev)
+		}
+	case <-time.After(streamSafetyInterval):
+		return nil, true
+	}
+	// 一条一条写会让每个 token 走一次 flush；把此刻已经排在 channel 里的
+	// 都取出来合成一批，是"尽快出去"和"别把 syscall 打爆"之间的平衡。
+	// 事件按 id 升序到达，所以拿 afterID 一路比过去是安全的。
+	for {
+		select {
+		case ev := <-sub.Events():
+			if ev.ID > afterID {
+				out = append(out, ev)
+			}
+		default:
+			return out, true
 		}
 	}
 }

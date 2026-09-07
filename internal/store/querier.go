@@ -243,7 +243,6 @@ type Querier interface {
 	ListAuditLogsForActorPage(ctx context.Context, arg ListAuditLogsForActorPageParams) ([]AuditLog, error)
 	ListAuditLogsForTarget(ctx context.Context, arg ListAuditLogsForTargetParams) ([]AuditLog, error)
 	ListBundleRunEventsAfter(ctx context.Context, arg ListBundleRunEventsAfterParams) ([]BundleRunEvent, error)
-	ListBundleRunEventsAfterExternal(ctx context.Context, arg ListBundleRunEventsAfterExternalParams) ([]BundleRunEvent, error)
 	ListBundleRunsByBundleAndStatus(ctx context.Context, arg ListBundleRunsByBundleAndStatusParams) ([]BundleRun, error)
 	ListBundleRunsForUser(ctx context.Context, arg ListBundleRunsForUserParams) ([]BundleRun, error)
 	// bundle_ref/status filters are optional: pass '' to mean "no filter" on

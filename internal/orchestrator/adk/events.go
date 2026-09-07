@@ -39,10 +39,9 @@ const (
 // 透传 ADK 事件——前端契约不应该跟着上游框架的版本演进走". Node is the
 // graph node (Bundle.agents[] ref) the event belongs to.
 type PlatformEvent struct {
-	Type       string
-	Node       string
-	Payload    map[string]any
-	IsInternal bool
+	Type    string
+	Node    string
+	Payload map[string]any
 	// InputTokens/OutputTokens/CostUSD are non-zero only on events derived
 	// from a raw session.Event that actually carried usage metadata (an
 	// LLM turn) — the run engine accumulates these onto
@@ -58,12 +57,12 @@ type PlatformEvent struct {
 // translate to more than one platform event (e.g. a response that both
 // calls a tool and carries reasoning text).
 //
-// IsInternal marks anything that exposes the model's own reasoning (the
-// part.Thought branch → node.reasoning). Tool calls and streamed answer
-// text are public: the black-box boundary protects the bundle's reasoning
-// and structure, not the answer a subscriber is about to receive in full
-// anyway — see the node.thinking branch below for why streaming text in
-// particular must stay public.
+// 每一种事件对所有身份一视同仁。这里曾经给 node.thinking / node.reasoning
+// 标 IsInternal，让黑盒订阅者的事件流里没有它们；代价是那些身份下的运行
+// 完全没有流式输出——增量文本被挡掉后，只剩最后一条 node.finished 携带整
+// 段答案。挡它本来也保护不了什么：node.thinking 就是那段答案的前缀，订阅
+// 者过一会儿照样会整段收到。黑盒该守的是 shared_state 的输出面和 Bundle
+// 定义本身，不是模型正在往外写的那半句话。
 func TranslateEvent(node string, ev *session.Event) []PlatformEvent {
 	if ev == nil {
 		return nil
@@ -93,43 +92,35 @@ func TranslateEvent(node string, ev *session.Event) []PlatformEvent {
 			case part.FunctionCall != nil:
 				out = append(out, withUsage(PlatformEvent{
 					Type: EventNodeToolCallStarted, Node: node,
-					Payload:    map[string]any{"name": part.FunctionCall.Name, "args": part.FunctionCall.Args},
-					IsInternal: false,
+					Payload: map[string]any{"name": part.FunctionCall.Name, "args": part.FunctionCall.Args},
 				}))
 			case part.FunctionResponse != nil:
 				out = append(out, withUsage(PlatformEvent{
 					Type: EventNodeToolCallFinished, Node: node,
-					Payload:    map[string]any{"name": part.FunctionResponse.Name, "result": part.FunctionResponse.Response},
-					IsInternal: false,
+					Payload: map[string]any{"name": part.FunctionResponse.Name, "result": part.FunctionResponse.Response},
 				}))
 			case part.Thought:
-				// The model's own internal reasoning trace — never
-				// forwarded to a black-box subscriber.
-				out = append(out, withUsage(PlatformEvent{Type: EventNodeReasoning, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: true}))
-				case part.Text != "":
-					if ev.IsFinalResponse() {
-						out = append(out, withUsage(PlatformEvent{Type: EventNodeFinished, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: false}))
-					} else {
-						// Streamed/intermediate model text is the typewriter
-						// effect in spec-14 — the prefix of an answer the
-						// subscriber receives in full at node.finished
-						// anyway, so it is deliberately NOT internal: the
-						// chat page (/chat/bundle/:ref) serves subscribers
-						// who by definition never own the bundle, and
-						// marking this internal made their answer arrive as
-						// one non-streamed block (spec-14's own acceptance
-						// check — "打字机效果，不是一次性整段出现" — was
-						// unreachable for them). The model's actual chain of
-						// thought stays internal: that is the part.Thought
-						// branch above, node.reasoning.
-						out = append(out, withUsage(PlatformEvent{Type: EventNodeThinking, Node: node, Payload: map[string]any{"text": part.Text}, IsInternal: false}))
-					}
+				// The model's own reasoning trace.
+				out = append(out, withUsage(PlatformEvent{Type: EventNodeReasoning, Node: node, Payload: map[string]any{"text": part.Text}}))
+			case part.Text != "":
+				if ev.IsFinalResponse() {
+					out = append(out, withUsage(PlatformEvent{Type: EventNodeFinished, Node: node, Payload: map[string]any{"text": part.Text}}))
+				} else {
+					// Streamed/intermediate model text is still the
+					// model "thinking out loud" from the product's point
+					// of view — spec-14 的打字机效果，但还不是这个节点已
+					// 经定稿的输出。/chat/bundle/:ref 上的订阅者按定义永
+					// 远不是 Bundle 作者，这条被挡掉时 spec-14 自己的验
+					// 收项（"打字机效果，不是一次性整段出现"）对他们就是
+					// 不可能达成的。
+					out = append(out, withUsage(PlatformEvent{Type: EventNodeThinking, Node: node, Payload: map[string]any{"text": part.Text}}))
+				}
 			}
 		}
 	}
 
 	if len(out) == 0 && ev.IsFinalResponse() {
-		out = append(out, withUsage(PlatformEvent{Type: EventNodeFinished, Node: node, Payload: nil, IsInternal: false}))
+		out = append(out, withUsage(PlatformEvent{Type: EventNodeFinished, Node: node, Payload: nil}))
 	}
 	return out
 }

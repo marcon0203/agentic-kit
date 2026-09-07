@@ -362,14 +362,16 @@ func (s *Service) Get(ctx context.Context, userID int64, runID string) (Detail, 
 	return Detail{Run: r, IsOwner: isOwner, SharedState: state}, nil
 }
 
-// EventsAfter returns the run's events past afterID, restricted to what
-// this requester may see.
+// EventsAfter returns the run's events past afterID.
+//
+// load 仍然要调：它决定这个人能不能看这次运行（自己触发的，或订阅了这个
+// 应用）。能看之后就是完整的事件流——作者和订阅者看到的是同一批事件，
+// 不再按身份裁剪。
 func (s *Service) EventsAfter(ctx context.Context, userID int64, runID string, afterID int64) ([]Event, error) {
-	_, bundle, err := s.load(ctx, userID, runID)
-	if err != nil {
+	if _, _, err := s.load(ctx, userID, runID); err != nil {
 		return nil, err
 	}
-	events, err := s.events.ListAfter(ctx, runID, afterID, bundle.OwnerUserID == userID)
+	events, err := s.events.ListAfter(ctx, runID, afterID)
 	if err != nil {
 		return nil, domain.Internal(err)
 	}
@@ -532,5 +534,5 @@ func (s *Service) recordGateDecision(ctx context.Context, gate Gate, d Decision,
 	if onTimeout, ok := detail["on_timeout"].(string); ok {
 		payload["on_timeout"] = onTimeout
 	}
-	_ = s.events.Append(ctx, Event{RunID: gate.RunID, Type: EventGateResolved, Node: gate.Node, Payload: payload})
+	_, _ = s.events.Append(ctx, Event{RunID: gate.RunID, Type: EventGateResolved, Node: gate.Node, Payload: payload})
 }

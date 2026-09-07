@@ -76,12 +76,12 @@ func (r recordingRuns) AddUsage(context.Context, string, int64, float64) error {
 
 type recordingEvents struct{ log *[]string }
 
-func (e recordingEvents) Append(_ context.Context, ev run.Event) error {
+func (e recordingEvents) Append(_ context.Context, ev run.Event) (run.Event, error) {
 	*e.log = append(*e.log, "event:"+ev.Type)
-	return nil
+	return ev, nil
 }
 
-func (e recordingEvents) ListAfter(context.Context, string, int64, bool) ([]run.Event, error) {
+func (e recordingEvents) ListAfter(context.Context, string, int64) ([]run.Event, error) {
 	return nil, nil
 }
 

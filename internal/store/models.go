@@ -102,13 +102,12 @@ type BundleRun struct {
 }
 
 type BundleRunEvent struct {
-	ID         int64              `json:"id"`
-	RunID      string             `json:"run_id"`
-	Type       string             `json:"type"`
-	Node       pgtype.Text        `json:"node"`
-	Payload    []byte             `json:"payload"`
-	IsInternal bool               `json:"is_internal"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ID        int64              `json:"id"`
+	RunID     string             `json:"run_id"`
+	Type      string             `json:"type"`
+	Node      pgtype.Text        `json:"node"`
+	Payload   []byte             `json:"payload"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type CatalogModel struct {

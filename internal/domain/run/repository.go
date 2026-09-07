@@ -54,12 +54,14 @@ type ListQuery struct {
 	Offset      int
 }
 
-// EventStore appends and reads run events. Excluding internal events is a
-// query parameter rather than a post-filter so the black-box subset never
-// travels further than it has to.
+// EventStore appends and reads run events.
+//
+// Append 回传落库后的事件而不是只回 error：id 是数据库分配的，实时推流那
+// 一侧（internal/runstream）要靠它给订阅者去重和续传。没有它，推出去的事
+// 件就没有可比较的游标，断线重连必然重复或丢失。
 type EventStore interface {
-	Append(ctx context.Context, ev Event) error
-	ListAfter(ctx context.Context, runID string, afterID int64, includeInternal bool) ([]Event, error)
+	Append(ctx context.Context, ev Event) (Event, error)
+	ListAfter(ctx context.Context, runID string, afterID int64) ([]Event, error)
 }
 
 // ResolvedBundle is the Bundle a run will execute, together with who owns

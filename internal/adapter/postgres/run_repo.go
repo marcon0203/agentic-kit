@@ -174,35 +174,32 @@ type RunEventStore struct{ q store.Querier }
 
 func NewRunEventStore(q store.Querier) *RunEventStore { return &RunEventStore{q: q} }
 
-func (s *RunEventStore) Append(ctx context.Context, ev run.Event) error {
+func (s *RunEventStore) Append(ctx context.Context, ev run.Event) (run.Event, error) {
 	payload, err := json.Marshal(ev.Payload)
 	if err != nil {
-		return err
+		return run.Event{}, err
 	}
-	_, err = s.q.InsertBundleRunEvent(ctx, store.InsertBundleRunEventParams{
+	row, err := s.q.InsertBundleRunEvent(ctx, store.InsertBundleRunEventParams{
 		RunID: ev.RunID, Type: ev.Type, Node: pgtype.Text{String: ev.Node, Valid: ev.Node != ""},
-		Payload: payload, IsInternal: ev.IsInternal,
+		Payload: payload,
 	})
-	return err
+	if err != nil {
+		return run.Event{}, err
+	}
+	// 回传的是落库后的行，不是入参：id 和 created_at 都是数据库给的，推流
+	// 侧要用 id 当游标。Payload 直接沿用入参，省一次 json 往返。
+	ev.ID, ev.CreatedAt = row.ID, row.CreatedAt.Time
+	return ev, nil
 }
 
-// ListAfter uses two separate queries rather than filtering in Go: the
-// black-box subset is decided by SQL, so an internal event never leaves
-// the database on a subscriber's behalf.
-func (s *RunEventStore) ListAfter(ctx context.Context, runID string, afterID int64, includeInternal bool) ([]run.Event, error) {
-	var rows []store.BundleRunEvent
-	var err error
-	if includeInternal {
-		rows, err = s.q.ListBundleRunEventsAfter(ctx, store.ListBundleRunEventsAfterParams{RunID: runID, ID: afterID})
-	} else {
-		rows, err = s.q.ListBundleRunEventsAfterExternal(ctx, store.ListBundleRunEventsAfterExternalParams{RunID: runID, ID: afterID})
-	}
+func (s *RunEventStore) ListAfter(ctx context.Context, runID string, afterID int64) ([]run.Event, error) {
+	rows, err := s.q.ListBundleRunEventsAfter(ctx, store.ListBundleRunEventsAfterParams{RunID: runID, ID: afterID})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]run.Event, 0, len(rows))
 	for _, row := range rows {
-		ev := run.Event{ID: row.ID, RunID: row.RunID, Type: row.Type, IsInternal: row.IsInternal, CreatedAt: row.CreatedAt.Time}
+		ev := run.Event{ID: row.ID, RunID: row.RunID, Type: row.Type, CreatedAt: row.CreatedAt.Time}
 		if row.Node.Valid {
 			ev.Node = row.Node.String
 		}

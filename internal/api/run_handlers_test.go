@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/marcon0203/agentic-kit/internal/domain/run"
+	"github.com/marcon0203/agentic-kit/internal/runstream"
 )
 
 // The run rules — the launch chain, who may approve a gate, what a
@@ -57,18 +58,15 @@ func (s *stubRunRepo) AddUsage(context.Context, string, int64, float64) error   
 
 type stubEventStore struct{ events []run.Event }
 
-func (s *stubEventStore) Append(_ context.Context, ev run.Event) error {
+func (s *stubEventStore) Append(_ context.Context, ev run.Event) (run.Event, error) {
 	s.events = append(s.events, ev)
-	return nil
+	return ev, nil
 }
 
-func (s *stubEventStore) ListAfter(_ context.Context, runID string, afterID int64, includeInternal bool) ([]run.Event, error) {
+func (s *stubEventStore) ListAfter(_ context.Context, runID string, afterID int64) ([]run.Event, error) {
 	var out []run.Event
 	for _, ev := range s.events {
 		if ev.RunID != runID || ev.ID <= afterID {
-			continue
-		}
-		if ev.IsInternal && !includeInternal {
 			continue
 		}
 		out = append(out, ev)
@@ -137,14 +135,16 @@ type runFixture struct {
 	runs     *stubRunRepo
 	events   *stubEventStore
 	resolver *stubResolver
+	bus      *runstream.Broker
 }
 
 func newRunFixture() *runFixture {
 	runs := &stubRunRepo{runs: map[string]run.Run{}}
 	events := &stubEventStore{}
 	resolver := &stubResolver{}
+	bus := runstream.NewBroker()
 	svc := run.NewService(runs, events, resolver, stubDeps{}, stubOrchestrator{}, stubGates{}, stubNotifier{}, stubAudit{}, stubIDs{})
-	return &runFixture{handlers: NewRunHandlers(svc), runs: runs, events: events, resolver: resolver}
+	return &runFixture{handlers: NewRunHandlers(svc, bus), runs: runs, events: events, resolver: resolver, bus: bus}
 }
 
 func runRequest(method, url, runID string, userID int64, body []byte) *http.Request {
@@ -229,20 +229,77 @@ func TestStream_AfterIDResumesWithoutReplay(t *testing.T) {
 	}
 }
 
-func TestStream_FiltersInternalEventsForSubscriber(t *testing.T) {
+// 订阅者（不是这个 Bundle 的作者，userID 30 ≠ owner）拿到的是完整事件流，
+// 包括 node.thinking。这曾经是被 is_internal 挡掉的那一批——挡掉的直接后果
+// 是非作者身份的运行完全没有流式输出，只在最后蹦出一整段答案。
+func TestStream_SubscriberReceivesStreamingEvents(t *testing.T) {
 	f := newRunFixture()
 	finishedRunWithEvents(f, 30, 99, []run.Event{
-		{ID: 1, RunID: "run-1", Type: "tool.call", IsInternal: true},
-		{ID: 2, RunID: "run-1", Type: run.EventBundleFinished},
+		{ID: 1, RunID: "run-1", Type: "node.thinking", Node: "writer", Payload: map[string]any{"text": "你"}},
+		{ID: 2, RunID: "run-1", Type: "node.thinking", Node: "writer", Payload: map[string]any{"text": "好"}},
+		{ID: 3, RunID: "run-1", Type: run.EventBundleFinished},
 	})
 
 	w := httptest.NewRecorder()
 	f.handlers.Stream(w, runRequest(http.MethodGet, "/runs/run-1/stream", "run-1", 30, nil))
 
 	events := decodeNDJSONLines(t, w.Body.Bytes())
-	if len(events) != 1 || events[0].ID != 2 {
-		t.Fatalf("a subscriber must not receive internal events, got %+v", events)
+	if len(events) != 3 {
+		t.Fatalf("订阅者应当收到完整事件流（含 node.thinking），got %+v", events)
 	}
+	if events[0].Type != "node.thinking" || events[1].Type != "node.thinking" {
+		t.Fatalf("前两条应当是流式增量，got %+v", events)
+	}
+}
+
+// 实时投递：事件从广播器推过来，处理器不必等轮询、也不查库就写出去。
+//
+// 这就是"没有流式输出、都是按块输出"的另一半修复。原本 SSE 每 300ms 回头
+// 查一次库，模型吐得再快，前端也只能每 300ms 收到一坨；现在事件一落库就
+// 推到连接上。stubEventStore 里**没有**这几条事件——它们只存在于广播器里，
+// 所以这个用例但凡能通过，就说明走的是实时那条路，不是轮询兜底。
+func TestStream_DeliversLiveEventsFromTheBrokerWithoutPolling(t *testing.T) {
+	f := newRunFixture()
+	f.resolver.bundle = run.ResolvedBundle{BundleID: 1, OwnerUserID: 5}
+	f.runs.runs["run-1"] = run.Run{ID: "run-1", BundleID: 1, TriggeredBy: 5, Status: run.StatusRunning}
+
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.handlers.Stream(w, runRequest(http.MethodGet, "/runs/run-1/stream", "run-1", 5, nil))
+	}()
+
+	// 等处理器挂上订阅再推，否则事件会推给一个还不存在的订阅者。
+	waitForSubscriber(t, f.bus, "run-1")
+	f.bus.Publish(run.Event{ID: 1, RunID: "run-1", Type: "node.thinking", Node: "writer", Payload: map[string]any{"text": "你"}})
+	f.bus.Publish(run.Event{ID: 2, RunID: "run-1", Type: "node.thinking", Node: "writer", Payload: map[string]any{"text": "好"}})
+	f.bus.Publish(run.Event{ID: 3, RunID: "run-1", Type: run.EventBundleFinished})
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("终态事件推过去之后流应当收线")
+	}
+
+	events := decodeNDJSONLines(t, w.Body.Bytes())
+	if len(events) != 3 {
+		t.Fatalf("期望三条实时事件，实际 %d 条：%+v", len(events), events)
+	}
+	if events[0].Type != "node.thinking" || events[2].Type != run.EventBundleFinished {
+		t.Fatalf("事件顺序不对：%+v", events)
+	}
+}
+
+func waitForSubscriber(t *testing.T, b *runstream.Broker, runID string) {
+	t.Helper()
+	for i := 0; i < 500; i++ {
+		if b.SubscriberCount(runID) > 0 {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("处理器一直没挂上订阅")
 }
 
 // A stream that cannot start must fail as a normal envelope, before any
@@ -483,7 +540,9 @@ func TestStream_DoesNotLoseTerminalEventWrittenJustBeforeStatusFlip(t *testing.T
 
 	racing := &racingRunRepo{stubRunRepo: f.runs, events: f.events, flipAfter: 2}
 	svc := run.NewService(racing, f.events, f.resolver, stubDeps{}, stubOrchestrator{}, stubGates{}, stubNotifier{}, stubAudit{}, stubIDs{})
-	h := NewRunHandlers(svc)
+	// 这个用例故意不挂广播器：它模拟的是"事件绕过推流直接落库"（另一个
+	// 副本在跑，或者广播器漏推），走的正是兜底轮询那条路。
+	h := NewRunHandlers(svc, nil)
 
 	w := httptest.NewRecorder()
 	h.Stream(w, runRequest(http.MethodGet, "/runs/run-1/stream", "run-1", 5, nil))

@@ -54,6 +54,7 @@ import (
 	"github.com/marcon0203/agentic-kit/internal/dslschema"
 	"github.com/marcon0203/agentic-kit/internal/modelgateway"
 	"github.com/marcon0203/agentic-kit/internal/observability"
+	"github.com/marcon0203/agentic-kit/internal/runstream"
 	"github.com/marcon0203/agentic-kit/internal/store"
 )
 
@@ -245,7 +246,12 @@ func run() error {
 	// registry that both the orchestrator (which blocks on gates) and the
 	// timeout scanner (which resolves them) must share.
 	runRepo := postgres.NewRunRepository(queries)
-	runEvents := postgres.NewRunEventStore(queries)
+	// 运行事件走两条线：落库（postgres）和实时推送（runstream）。
+	// PublishingStore 把它们缝在一起——每条事件先 INSERT，成功后推给正在
+	// 看这次运行的 SSE 连接。引擎和领域层只认 run.EventStore 这个接口，
+	// 不知道有广播器存在。
+	runEventBus := runstream.NewBroker()
+	runEvents := runstream.NewPublishingStore(postgres.NewRunEventStore(queries), runEventBus)
 	gateRepo := postgres.NewGateRepository(queries)
 	gateRegistry := orchestrator.NewGateRegistry()
 
@@ -360,7 +366,7 @@ func run() error {
 			resourceService,
 		)),
 		Usage:    api.NewUsageHandlers(modelCenter),
-		Runs:     api.NewRunHandlers(runService),
+		Runs:     api.NewRunHandlers(runService, runEventBus),
 		RBAC:     api.NewRBACHandlers(rbacService),
 		Plugins:  api.NewPluginHandlers(pluginService, skillObjectStore),
 		Features: api.FeaturesConfig{KnowledgeBaseEnabled: cfg.KBEnabled, SkillUploadEnabled: cfg.OSSEnabled()},

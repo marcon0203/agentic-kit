@@ -1,0 +1,11 @@
+-- 去掉运行事件的黑盒过滤。
+--
+-- is_internal 原本的用意是"订阅者跑别人的应用时，看不到 node.thinking /
+-- node.reasoning"。实际效果是把流式输出一起挡没了：node.thinking 承载的
+-- 就是最终答案还没写完的那半截，它的内容是 node.finished 的前缀，挡掉它
+-- 保护不了任何东西，只让非作者身份的运行变成"等一整段、啪地出现一块"。
+--
+-- 黑盒边界仍然存在，只是不再由事件流承担——它由 run.FilterSharedState
+-- （只放行 Bundle 声明的输出键）和"订阅者读不到 Bundle 定义"这两处守住，
+-- 那才是真正会泄露编排结构与提示词的地方。
+ALTER TABLE bundle_run_events DROP COLUMN is_internal;

@@ -212,17 +212,16 @@ func (q *Queries) GetUsageSummaryForUser(ctx context.Context, arg GetUsageSummar
 }
 
 const insertBundleRunEvent = `-- name: InsertBundleRunEvent :one
-INSERT INTO bundle_run_events (run_id, type, node, payload, is_internal)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, run_id, type, node, payload, is_internal, created_at
+INSERT INTO bundle_run_events (run_id, type, node, payload)
+VALUES ($1, $2, $3, $4)
+RETURNING id, run_id, type, node, payload, created_at
 `
 
 type InsertBundleRunEventParams struct {
-	RunID      string      `json:"run_id"`
-	Type       string      `json:"type"`
-	Node       pgtype.Text `json:"node"`
-	Payload    []byte      `json:"payload"`
-	IsInternal bool        `json:"is_internal"`
+	RunID   string      `json:"run_id"`
+	Type    string      `json:"type"`
+	Node    pgtype.Text `json:"node"`
+	Payload []byte      `json:"payload"`
 }
 
 func (q *Queries) InsertBundleRunEvent(ctx context.Context, arg InsertBundleRunEventParams) (BundleRunEvent, error) {
@@ -231,7 +230,6 @@ func (q *Queries) InsertBundleRunEvent(ctx context.Context, arg InsertBundleRunE
 		arg.Type,
 		arg.Node,
 		arg.Payload,
-		arg.IsInternal,
 	)
 	var i BundleRunEvent
 	err := row.Scan(
@@ -240,14 +238,13 @@ func (q *Queries) InsertBundleRunEvent(ctx context.Context, arg InsertBundleRunE
 		&i.Type,
 		&i.Node,
 		&i.Payload,
-		&i.IsInternal,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const listBundleRunEventsAfter = `-- name: ListBundleRunEventsAfter :many
-SELECT id, run_id, type, node, payload, is_internal, created_at FROM bundle_run_events
+SELECT id, run_id, type, node, payload, created_at FROM bundle_run_events
 WHERE run_id = $1 AND id > $2
 ORDER BY id ASC
 `
@@ -272,46 +269,6 @@ func (q *Queries) ListBundleRunEventsAfter(ctx context.Context, arg ListBundleRu
 			&i.Type,
 			&i.Node,
 			&i.Payload,
-			&i.IsInternal,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listBundleRunEventsAfterExternal = `-- name: ListBundleRunEventsAfterExternal :many
-SELECT id, run_id, type, node, payload, is_internal, created_at FROM bundle_run_events
-WHERE run_id = $1 AND id > $2 AND is_internal = false
-ORDER BY id ASC
-`
-
-type ListBundleRunEventsAfterExternalParams struct {
-	RunID string `json:"run_id"`
-	ID    int64  `json:"id"`
-}
-
-func (q *Queries) ListBundleRunEventsAfterExternal(ctx context.Context, arg ListBundleRunEventsAfterExternalParams) ([]BundleRunEvent, error) {
-	rows, err := q.db.Query(ctx, listBundleRunEventsAfterExternal, arg.RunID, arg.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []BundleRunEvent{}
-	for rows.Next() {
-		var i BundleRunEvent
-		if err := rows.Scan(
-			&i.ID,
-			&i.RunID,
-			&i.Type,
-			&i.Node,
-			&i.Payload,
-			&i.IsInternal,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

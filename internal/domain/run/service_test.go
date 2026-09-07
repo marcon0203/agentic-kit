@@ -111,18 +111,15 @@ func (f *fakeRepo) AddUsage(_ context.Context, _ string, tokens int64, cost floa
 
 type fakeEvents struct{ appended []run.Event }
 
-func (f *fakeEvents) Append(_ context.Context, ev run.Event) error {
+func (f *fakeEvents) Append(_ context.Context, ev run.Event) (run.Event, error) {
 	f.appended = append(f.appended, ev)
-	return nil
+	return ev, nil
 }
 
-func (f *fakeEvents) ListAfter(_ context.Context, runID string, afterID int64, includeInternal bool) ([]run.Event, error) {
+func (f *fakeEvents) ListAfter(_ context.Context, runID string, afterID int64) ([]run.Event, error) {
 	var out []run.Event
 	for _, ev := range f.appended {
 		if ev.RunID != runID || ev.ID <= afterID {
-			continue
-		}
-		if ev.IsInternal && !includeInternal {
 			continue
 		}
 		out = append(out, ev)
@@ -570,12 +567,17 @@ func TestGet_SomeoneElsesRunIsNotFound(t *testing.T) {
 	}
 }
 
-func TestEventsAfter_InternalEventsOnlyForAuthor(t *testing.T) {
+// 事件流不按身份裁剪：订阅者和作者读到的是同一批事件。
+//
+// 这里曾经是反过来的——is_internal 的事件只给作者。那道过滤把 node.thinking
+// 一起挡掉了，于是订阅者跑别人的应用时完全没有流式输出。黑盒边界改由
+// FilterSharedState（只放行声明的输出键）和"读不到 Bundle 定义"两处承担。
+func TestEventsAfter_SubscriberAndAuthorSeeTheSameEvents(t *testing.T) {
 	h := newHarness()
 	h.repo.runs["run-1"] = run.Run{ID: "run-1", BundleID: 1, TriggeredBy: 30, Status: run.StatusFinished}
 	h.resolver.bundle = run.ResolvedBundle{BundleID: 1, OwnerUserID: 99}
 	h.events.appended = []run.Event{
-		{ID: 1, RunID: "run-1", Type: "tool.call", IsInternal: true},
+		{ID: 1, RunID: "run-1", Type: "node.thinking"},
 		{ID: 2, RunID: "run-1", Type: run.EventBundleFinished},
 	}
 
@@ -583,8 +585,8 @@ func TestEventsAfter_InternalEventsOnlyForAuthor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
-	if len(subscriberView) != 1 || subscriberView[0].ID != 2 {
-		t.Fatalf("a subscriber must not see internal events: %+v", subscriberView)
+	if len(subscriberView) != 2 {
+		t.Fatalf("订阅者应当拿到完整事件流：%+v", subscriberView)
 	}
 
 	h.repo.runs["run-1"] = run.Run{ID: "run-1", BundleID: 1, TriggeredBy: 99, Status: run.StatusFinished}
@@ -592,8 +594,8 @@ func TestEventsAfter_InternalEventsOnlyForAuthor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("events: %v", err)
 	}
-	if len(authorView) != 2 {
-		t.Fatalf("the author should see internal events too: %+v", authorView)
+	if len(authorView) != len(subscriberView) {
+		t.Fatalf("作者和订阅者应当看到同一批事件：%+v vs %+v", authorView, subscriberView)
 	}
 }
 
@@ -724,9 +726,6 @@ func TestResolveGate_ApprovalNotifiesAuditsAndEmitsEvent(t *testing.T) {
 	}
 	if resolvedEvent == nil || resolvedEvent.Node != "review" {
 		t.Fatalf("expected a human_gate.resolved event: %+v", h.events.appended)
-	}
-	if resolvedEvent.IsInternal {
-		t.Fatal("a gate resolution is what the Chat gate card renders — it must not be internal")
 	}
 }
 

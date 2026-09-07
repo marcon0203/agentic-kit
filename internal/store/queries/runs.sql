@@ -78,18 +78,13 @@ GROUP BY to_char(br.created_at, 'YYYY-MM-DD')
 ORDER BY key DESC;
 
 -- name: InsertBundleRunEvent :one
-INSERT INTO bundle_run_events (run_id, type, node, payload, is_internal)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO bundle_run_events (run_id, type, node, payload)
+VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: ListBundleRunEventsAfter :many
 SELECT * FROM bundle_run_events
 WHERE run_id = $1 AND id > $2
-ORDER BY id ASC;
-
--- name: ListBundleRunEventsAfterExternal :many
-SELECT * FROM bundle_run_events
-WHERE run_id = $1 AND id > $2 AND is_internal = false
 ORDER BY id ASC;
 
 -- name: ListBundleRunsInSession :many

@@ -77,22 +77,25 @@ type Detail struct {
 	SharedState map[string]any
 }
 
-// Event is one persisted run event. IsInternal marks the ones only the
-// Bundle's author may see.
+// Event is one persisted run event.
+//
+// 这里曾经有一个 IsInternal 字段，用来把 node.thinking / node.reasoning
+// 挡在非作者身份的事件流之外。它已经删掉了：node.thinking 的内容就是
+// node.finished 的前缀，挡掉它保护不了任何东西，只是让订阅者和访客的运行
+// 失去流式输出。黑盒边界由 FilterSharedState 和"订阅者读不到 Bundle 定义"
+// 守住——那两处才是编排结构与提示词真正会漏出去的地方。
 type Event struct {
-	ID         int64
-	RunID      string
-	Type       string
-	Node       string
-	Payload    map[string]any
-	IsInternal bool
-	CreatedAt  time.Time
+	ID        int64
+	RunID     string
+	Type      string
+	Node      string
+	Payload   map[string]any
+	CreatedAt time.Time
 }
 
 // Lifecycle event types the runtime itself produces. ADK has no event for
 // "the graph is about to execute", and spec-14's Chat page needs one to
-// leave its starting placeholder — so the runtime owns these three. They
-// are never internal: a run's own start and end is not reasoning detail.
+// leave its starting placeholder — so the runtime owns these three.
 const (
 	EventBundleStarted  = "bundle.started"
 	EventBundleFinished = "bundle.finished"

@@ -89,7 +89,7 @@ func (w *gateWaiter) Wait(ctx context.Context, node string) error {
 		return err
 	}
 
-	_ = w.events.Append(ctx, run.Event{
+	_, _ = w.events.Append(ctx, run.Event{
 		RunID: w.runID, Type: run.EventGateWaiting, Node: node,
 		Payload: map[string]any{"gate_id": gate.ID, "on_timeout": string(cfg.OnTimeout)},
 	})

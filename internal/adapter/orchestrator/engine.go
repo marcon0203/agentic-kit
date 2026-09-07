@@ -324,7 +324,7 @@ func (x *execution) Start(triggeredBy int64, sessionID string, input map[string]
 	// input 一并写进事件里，而不是只落在 bundle_runs.shared_state：刷新页
 	// 面后前端要把整段对话重建出来，一次运行读一条事件流就能同时拿到"用户
 	// 问了什么"和"模型答了什么"——否则还得为每一次运行再多取一次运行详情。
-	_ = e.events.Append(persist, run.Event{
+	_, _ = e.events.Append(persist, run.Event{
 		RunID: x.runID, Type: run.EventBundleStarted,
 		Payload: map[string]any{"renderers": rendererFencedLangs(x.renderRules), "input": input},
 	})
@@ -342,8 +342,8 @@ func (x *execution) Start(triggeredBy int64, sessionID string, input map[string]
 			if b, err := json.Marshal(ev.Payload); err == nil {
 				_ = json.Unmarshal(b, &payload)
 			}
-			_ = e.events.Append(persist, run.Event{
-				RunID: x.runID, Type: ev.Type, Node: ev.Node, Payload: payload, IsInternal: ev.IsInternal,
+			_, _ = e.events.Append(persist, run.Event{
+				RunID: x.runID, Type: ev.Type, Node: ev.Node, Payload: payload,
 			})
 			x.emitRenderIfMatched(persist, ev)
 
@@ -422,7 +422,7 @@ func (x *execution) emitRenderIfMatched(ctx context.Context, ev adk.Event) {
 		if !ok {
 			return
 		}
-		_ = x.engine.events.Append(ctx, run.Event{
+		_, _ = x.engine.events.Append(ctx, run.Event{
 			RunID: x.runID, Type: adk.EventNodeRender, Node: ev.Node,
 			Payload: map[string]any{
 				"plugin": reg.PluginID, "version": reg.Version, "renderer": reg.RendererName,
@@ -438,7 +438,7 @@ func (x *execution) emitRenderIfMatched(ctx context.Context, ev adk.Event) {
 		if !matched {
 			return
 		}
-		_ = x.engine.events.Append(ctx, run.Event{
+		_, _ = x.engine.events.Append(ctx, run.Event{
 			RunID: x.runID, Type: adk.EventNodeRender, Node: ev.Node,
 			Payload: map[string]any{
 				"plugin": reg.PluginID, "version": reg.Version, "renderer": reg.RendererName,
@@ -462,7 +462,7 @@ func (x *execution) finish(ctx context.Context, status run.Status, errMsg string
 	if errMsg != "" {
 		eventType, payload = run.EventBundleFailed, map[string]any{"error": errMsg}
 	}
-	_ = x.engine.events.Append(ctx, run.Event{RunID: x.runID, Type: eventType, Payload: payload})
+	_, _ = x.engine.events.Append(ctx, run.Event{RunID: x.runID, Type: eventType, Payload: payload})
 
 	_ = x.engine.runs.UpdateStatus(ctx, x.runID, status, errMsg)
 }
