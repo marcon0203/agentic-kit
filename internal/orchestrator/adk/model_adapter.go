@@ -88,6 +88,11 @@ func (m *gatewayLLM) GenerateContent(ctx context.Context, req *model.LLMRequest,
 		var result modelgateway.CompletionResult
 		var err error
 		stopped := false
+		// 收到多少个增量。这是判断"到底有没有真的流式"的唯一硬指标：
+		// deltas 等于 1 说明上游把整段答案一次性给了（渠道没声明 stream、
+		// Client 不支持流式、或者上游无视了 stream:true），前端再怎么改也
+		// 不会有打字机效果；deltas 是几十上百才说明后端这一侧是通的。
+		deltas := 0
 		if stream {
 			// runner.go requests StreamingModeSSE, which is what makes ADK
 			// pass stream=true here — each text delta becomes its own
@@ -103,6 +108,7 @@ func (m *gatewayLLM) GenerateContent(ctx context.Context, req *model.LLMRequest,
 				// part.Thought 分支变成 node.reasoning；TextDelta 保持
 				// 原样，走非 Thought 分支——events.go 据 IsFinalResponse
 				// 判断它是不是 node.thinking 的打字机效果。
+				deltas++
 				if d.ReasoningDelta != "" {
 					if !yield(&model.LLMResponse{
 						Content:      &genai.Content{Role: string(genai.RoleModel), Parts: []*genai.Part{{Text: d.ReasoningDelta, Thought: true}}},
@@ -135,7 +141,13 @@ func (m *gatewayLLM) GenerateContent(ctx context.Context, req *model.LLMRequest,
 			return
 		}
 		slog.Info("model_generate_content_result", "provider", result.Provider, "model", result.Model,
-			"content_chars", len(result.Content), "tool_calls", toolCallNames(result.ToolCalls))
+			"content_chars", len(result.Content), "tool_calls", toolCallNames(result.ToolCalls),
+			"stream", stream, "deltas", deltas)
+		if stream && deltas <= 1 && len(result.Content) > 0 {
+			slog.Warn("stream_produced_no_incremental_deltas",
+				"provider", result.Provider, "model", result.Model, "deltas", deltas,
+				"hint", "请求了流式但只收到一个增量：整段答案会一次性出现在前端。检查该渠道描述符的 stream 段，以及上游是否真的按 SSE 逐块返回")
+		}
 
 		// stream=true 已经把 Reasoning 拆成增量 Thought part 逐条 yield
 		// 过了（result.Reasoning 只是那些增量的聚合，重放一遍会把同一段

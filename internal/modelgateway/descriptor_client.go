@@ -136,6 +136,14 @@ func (c *descriptorClient) Complete(ctx context.Context, apiKey, baseURL, model 
 func (c *descriptorClient) CompleteStream(ctx context.Context, apiKey, baseURL, model string, req CompletionRequest, onDelta func(StreamDelta)) (CompletionResult, error) {
 	if c.desc.Stream == nil {
 		// 没声明流式的渠道退回一次性调用，由 Gateway 合成单个 delta。
+		//
+		// 这条必须喊出来。降级之后整条链路照常工作、不报错，只是前端再也
+		// 没有打字机效果——一个"功能少了一半但什么都不说"的状态，排查时
+		// 只能靠读代码猜。渠道模板改过、或者手工建的渠道漏了 stream 段，
+		// 都长这样。
+		slog.Warn("channel_has_no_stream_config_falling_back_to_single_shot",
+			"channel", c.desc.ID, "model", model,
+			"hint", "该渠道描述符没有 stream 段，本次调用退回一次性请求，前端不会有流式输出")
 		return c.Complete(ctx, apiKey, baseURL, model, req)
 	}
 	if err := c.checkRequiredParams(model, req); err != nil {

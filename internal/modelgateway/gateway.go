@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -352,6 +353,11 @@ func (g *Gateway) CompleteStream(ctx context.Context, primary ModelSpec, fallbac
 		if sc, ok := client.(StreamingClient); ok {
 			return sc.CompleteStream(ctx, cred.APIKey, cred.BaseURL, spec.Name, req, forward)
 		}
+		// 同 descriptor_client 里那条：静默降级会让"没有流式输出"变成一个
+		// 查不出来的现象。
+		slog.Warn("client_does_not_support_streaming_falling_back_to_single_shot",
+			"provider", spec.Provider, "model", spec.Name,
+			"hint", "该 provider 的 Client 没实现 StreamingClient，整段答案会作为单个 delta 一次性推出")
 		result, err := client.Complete(ctx, cred.APIKey, cred.BaseURL, spec.Name, req)
 		if err == nil && result.Reasoning != "" {
 			forward(StreamDelta{ReasoningDelta: result.Reasoning})
