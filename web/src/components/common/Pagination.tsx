@@ -69,7 +69,7 @@ export function Pagination({
             className={cn(
               'text-body-sm size-8 rounded-md border transition-colors',
               entry === page
-                ? 'border-primary bg-blueprint-tint text-blueprint'
+                ? 'border-primary bg-blueprint-tint text-violet'
                 : 'border-transparent text-ink-700 hover:bg-surface-muted',
             )}
           >

@@ -22,21 +22,24 @@ function sectionGroups(knowledgeBaseEnabled: boolean): SectionSidebarGroup[] {
     {
       label: '应用',
       items: [
-        { value: 'bundles', label: '应用管理', icon: Boxes },
-        { value: 'agents', label: '智能体管理', icon: Bot },
+        { value: 'bundles', label: '应用管理', icon: Boxes, tone: 'text-type-bundle' },
+        { value: 'agents', label: '智能体管理', icon: Bot, tone: 'text-type-agent' },
       ],
     },
     {
       label: '资源',
       items: [
-        { value: 'tool', label: '组件', icon: Wrench },
-        { value: 'skill', label: 'Skill 管理', icon: Puzzle },
-        { value: 'mcp', label: 'MCP 管理', icon: Plug },
+        // 图标带各自的类型色相（§1.4）：和列表行、卡片、空态用的是同一组颜色。
+        { value: 'tool', label: '组件', icon: Wrench, tone: 'text-type-tool' },
+        { value: 'skill', label: 'Skill 管理', icon: Puzzle, tone: 'text-type-skill' },
+        { value: 'mcp', label: 'MCP 管理', icon: Plug, tone: 'text-type-mcp' },
         // 知识库依赖 Milvus + Elasticsearch（多路召回）；未部署时
         // GET /features 报 knowledge_base_enabled=false，隐藏这一项而不是
         // 留一个点了就报错的入口。
-        ...(knowledgeBaseEnabled ? [{ value: 'knowledge_base', label: '知识库', icon: BookOpen }] : []),
-        { value: 'memory', label: '记忆库', icon: Brain },
+        ...(knowledgeBaseEnabled
+          ? [{ value: 'knowledge_base', label: '知识库', icon: BookOpen, tone: 'text-type-lib' }]
+          : []),
+        { value: 'memory', label: '记忆库', icon: Brain, tone: 'text-type-lib' },
       ],
     },
     {

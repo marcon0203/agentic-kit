@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Sparkles } from 'lucide-react'
+import { Bot, Boxes, Plug, Puzzle, Sparkles } from 'lucide-react'
 
 import { FilterChip, FilterChips } from '@/components/common/Page'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { EmptyState, ErrorPanel } from '@/components/common/EmptyState'
 import { AppCard } from '@/components/marketplace/AppCard'
+import { TypeTile } from '@/components/common/TypeTile'
 import { apiClient, unwrap } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 import type { components } from '@/lib/api/schema'
@@ -23,11 +24,17 @@ const TYPES: { value: ListingResourceType | 'all'; label: string }[] = [
   { value: 'mcp', label: 'MCP' },
 ]
 
-const CATEGORIES: { value: ListingResourceType; label: string }[] = [
-  { value: 'bundle', label: '编排应用 · Bundle' },
-  { value: 'agent', label: '单体应用 · Agent' },
-  { value: 'skill', label: 'Skill' },
-  { value: 'mcp', label: 'MCP Server' },
+/* 分组头沿用类型色相环：图标方块 + 组名，一屏滚下来类型段落靠颜色分段。 */
+const CATEGORIES: {
+  value: ListingResourceType
+  label: string
+  icon: typeof Boxes
+  tone: 'bundle' | 'agent' | 'skill' | 'mcp'
+}[] = [
+  { value: 'bundle', label: '编排应用 · Bundle', icon: Boxes, tone: 'bundle' },
+  { value: 'agent', label: '单体应用 · Agent', icon: Bot, tone: 'agent' },
+  { value: 'skill', label: 'Skill', icon: Puzzle, tone: 'skill' },
+  { value: 'mcp', label: 'MCP Server', icon: Plug, tone: 'mcp' },
 ]
 
 function CardSkeleton() {
@@ -132,7 +139,7 @@ export function MarketplaceBrowsePage() {
           title="广场上还没有人发布东西"
           description="把你做好的 Bundle 或 Agent 发布出来，别人订阅后可以直接运行，但看不到你怎么编排的。"
           action={
-            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" asChild>
+            <Button size="sm" asChild>
               <Link to="/apps/publish">发布我的第一个资源</Link>
             </Button>
           }
@@ -162,7 +169,11 @@ export function MarketplaceBrowsePage() {
         <div className="flex flex-col gap-space-6">
           {grouped.map((group) => (
             <div key={group.value} className="flex flex-col gap-space-3">
-              <h3 className="text-label-md text-ink-900">{group.label}</h3>
+              <div className="flex items-center gap-space-2">
+                <TypeTile icon={group.icon} tone={group.tone} size="sm" />
+                <h3 className="text-label-md text-ink-900">{group.label}</h3>
+                <span className="text-caption tabular text-ink-500">{group.items.length}</span>
+              </div>
               <div className="grid grid-cols-1 gap-space-3 md:grid-cols-2 xl:grid-cols-3">
                 {group.items.map((listing) => (
                   <AppCard key={listing.id} listing={listing} />

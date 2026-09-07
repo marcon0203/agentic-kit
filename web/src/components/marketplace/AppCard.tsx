@@ -3,6 +3,7 @@ import { Bot, Boxes, Lock, Plug, Puzzle, Users, PlayCircle } from 'lucide-react'
 import type { ComponentType } from 'react'
 
 import type { components } from '@/lib/api/schema'
+import { TYPE_TONES } from '@/components/common/TypeTile'
 
 type ListingSummary = components['schemas']['ListingSummary']
 
@@ -13,26 +14,38 @@ const TYPE_ICON: Record<string, ComponentType<{ className?: string }>> = {
   mcp: Plug,
 }
 
+/* The type hue wheel (design-system.md v3.0 §1.4): each resource type keeps
+   one hue everywhere it appears — tile, top spine, group header. Hues sit
+   away from the status colours, so a green tile can never read as "done". */
 const TYPE_TONE: Record<string, string> = {
-  bundle: 'bg-blueprint-tint text-blueprint',
-  agent: 'bg-signal-tint text-signal',
-  skill: 'bg-moss-tint text-moss',
-  mcp: 'bg-violet-tint text-violet',
+  bundle: TYPE_TONES.bundle,
+  agent: TYPE_TONES.agent,
+  skill: TYPE_TONES.skill,
+  mcp: TYPE_TONES.mcp,
+}
+
+const TYPE_SPINE: Record<string, string> = {
+  bundle: 'border-t-type-bundle',
+  agent: 'border-t-type-agent',
+  skill: 'border-t-type-skill',
+  mcp: 'border-t-type-mcp',
 }
 
 /**
- * A广场卡片：图标方块 + 标题 + 使用量一行 + 简介，呼应截图里应用广场的卡片
- * 样式。数据上只如实展示这个平台真正有的两个量——订阅数与运行次数——
- * 而不是照搬截图里的"浏览/复制"（那两个量在黑盒分发模型里没有对应物）。
+ * 广场卡片：类型色顶脊 + 图标方块 + 标题 + 使用量一行 + 简介。顶脊让一屏
+ * 卡片的类型构成一眼可读——不用读字就知道这排是 Skill、那排是 Bundle。
+ * 数据上只如实展示这个平台真正有的两个量——订阅数与运行次数——而不是
+ * 照搬截图里的"浏览/复制"（那两个量在黑盒分发模型里没有对应物）。
  */
 export function AppCard({ listing }: { listing: ListingSummary }) {
   const Icon = TYPE_ICON[listing.resource_type] ?? Boxes
   const tone = TYPE_TONE[listing.resource_type] ?? TYPE_TONE.bundle
+  const spine = TYPE_SPINE[listing.resource_type] ?? TYPE_SPINE.bundle
 
   return (
     <Link
       to={`/marketplace/listing/${listing.listing_ref}`}
-      className="flex items-start gap-space-4 rounded-lg border border-border bg-surface p-space-4 transition-colors hover:border-border-strong"
+      className={`flex items-start gap-space-4 rounded-lg border border-border border-t-2 bg-surface p-space-4 transition-all hover:border-blueprint-edge hover:shadow-status-sm ${spine}`}
     >
       <span
         aria-hidden
@@ -46,7 +59,7 @@ export function AppCard({ listing }: { listing: ListingSummary }) {
             {listing.display_meta.display_name}
           </span>
           {listing.subscribed && (
-            <span className="text-caption inline-flex shrink-0 items-center gap-1 text-moss">
+            <span className="text-caption inline-flex shrink-0 items-center gap-1 rounded-full bg-moss-tint px-space-2 py-0.5 text-moss-deep">
               <span aria-hidden className="size-1.5 rounded-full bg-moss" />
               已订阅
             </span>

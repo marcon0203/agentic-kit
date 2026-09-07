@@ -140,7 +140,7 @@ export function ListingDetailPage() {
                   </Link>
                 </Button>
                 {canRun ? (
-                  <Button asChild className="self-start bg-gradient-cta text-white hover:opacity-90">
+                  <Button asChild className="self-start">
                     <Link to={`/runs/new?bundle=${encodeURIComponent(listing.listing_ref)}`}>
                       <Play className="mr-1 size-4" aria-hidden />
                       运行

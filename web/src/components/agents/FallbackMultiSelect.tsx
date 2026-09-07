@@ -109,7 +109,7 @@ export function FallbackMultiSelect({ catalog, value, onChange, exclude }: Fallb
                   <DropdownMenuItem
                     onSelect={(e) => e.preventDefault()}
                     onClick={() => setActiveProvider(g.provider)}
-                    className={cn('gap-space-2', g.provider === active?.provider && 'bg-blueprint-tint text-blueprint')}
+                    className={cn('gap-space-2', g.provider === active?.provider && 'bg-blueprint-tint text-violet')}
                   >
                     <ProviderIcon name={g.label} className="size-4" />
                     <span className="line-clamp-1 flex-1">{g.label}</span>

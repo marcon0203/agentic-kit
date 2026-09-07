@@ -1,5 +1,7 @@
-import type { ReactNode } from 'react'
+import type { ComponentType, ReactNode } from 'react'
+import { Workflow } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { TypeTile, type TypeTone } from '@/components/common/TypeTile'
 
 /**
  * The run rail — this platform's signature element.
@@ -118,30 +120,39 @@ export function Rail({ nodes, className }: { nodes: RailNode[]; className?: stri
  * The copy rule (design-system.md): say what would appear here and give the
  * one action that makes it appear. Never "no data" — that tells the reader
  * something they can already see.
+ *
+ * v3.0: the rail sits on a tinted panel with a type-coloured lead station —
+ * an empty state is an invitation, and grey-on-grey reads as a dead end.
  */
 export function EmptyRail({
   title,
   description,
   action,
+  icon: Icon = Workflow,
+  tone = 'bundle',
   className,
 }: {
   title: string
   description: string
   action?: ReactNode
+  /** 画在空轨道上方的类型图标，默认是应用（Bundle）的编排图形。 */
+  icon?: ComponentType<{ className?: string }>
+  tone?: TypeTone
   className?: string
 }) {
   return (
     <div
       className={cn(
-        'flex flex-col items-center gap-space-4 px-space-6 py-space-10 text-center',
+        'flex flex-col items-center gap-space-4 rounded-xl border border-border bg-surface px-space-6 py-space-10 text-center',
         className,
       )}
     >
-      <div aria-hidden className="flex w-full max-w-[280px] items-center">
+      <TypeTile icon={Icon} tone={tone} size="lg" />
+      <div aria-hidden className="flex w-full max-w-[280px] items-center rounded-full bg-blueprint-tint/60 p-space-1.5">
+        <span className="size-2.5 shrink-0 rounded-full border-2 border-type-bundle bg-surface" />
+        <span className="h-px flex-1 bg-type-bundle/30" />
         <span className="size-2.5 shrink-0 rounded-full border-2 border-border-strong bg-surface" />
-        <span className="h-px flex-1 bg-border" />
-        <span className="size-2.5 shrink-0 rounded-full border-2 border-border-strong bg-surface" />
-        <span className="h-px flex-1 bg-border" />
+        <span className="h-px flex-1 bg-white/80" />
         <span className="size-2.5 shrink-0 rounded-full border-2 border-border-strong bg-surface" />
       </div>
       <div className="flex flex-col gap-space-2">

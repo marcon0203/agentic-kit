@@ -57,7 +57,7 @@ export function CheckCardGroup({
             className={cn(
               'relative flex cursor-pointer items-start gap-space-3 rounded-lg border p-space-4 transition-colors',
               isSelected
-                ? 'border-primary bg-blueprint-tint text-blueprint'
+                ? 'border-primary bg-blueprint-tint text-violet'
                 : 'border-border bg-surface text-ink-900 hover:border-border-strong',
               option.disabled && 'cursor-not-allowed opacity-50',
             )}

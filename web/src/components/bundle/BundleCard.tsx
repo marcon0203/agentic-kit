@@ -2,6 +2,7 @@ import { Pencil, Play, Trash2, Workflow, GitBranch, Box, Rocket } from 'lucide-r
 
 import { Button } from '@/components/ui/button'
 import { Ref } from '@/components/common/Page'
+import { TypeTile } from '@/components/common/TypeTile'
 import { cn } from '@/lib/utils'
 import type { components } from '@/lib/api/schema'
 
@@ -26,28 +27,34 @@ interface BundleCardProps {
 }
 
 /**
- * 应用中心的卡片，和资源/智能体列表同一套卡片语言：状态点 + ref + 版本在
- * 顶部，描述占中间的固定两行（缺省时也占位，卡片高度才不会参差），底部是
- * 这张卡自己的动作。
+ * 应用中心的卡片。图标方块（类型色相环的 bundle 紫）是整张卡的视觉锚点，
+ * 状态用 tint chip 而不是裸圆点——颜色从来不单独承载状态，这里补上了文字。
  */
 export function BundleCard({ bundle, runBlocked, onRun, onEdit, onDelete, onPublish }: BundleCardProps) {
   const definition = bundle.definition as BundleDefinition
   const runType = RUN_TYPE_META[definition.type ?? 'graph'] ?? RUN_TYPE_META.graph
   const agentCount = definition.agents?.length ?? 0
+  const enabled = bundle.status === 1
 
   return (
-    <div className="group flex flex-col gap-space-4 rounded-lg border border-border bg-surface p-space-5 transition-colors hover:border-border-strong">
+    <div className="group flex flex-col gap-space-4 rounded-lg border border-border bg-surface p-space-5 transition-all hover:border-blueprint-edge hover:shadow-status-sm">
       <div className="flex items-start gap-space-3">
-        <span
-          aria-hidden
-          className={cn('mt-1.5 size-2 shrink-0 rounded-full', bundle.status === 1 ? 'bg-moss' : 'bg-border-strong')}
-        />
-        <div className="flex min-w-0 flex-1 flex-col">
+        <TypeTile icon={runType.Icon} tone="bundle" />
+        <div className="flex min-w-0 flex-1 flex-col gap-space-2">
           <span className="flex items-center gap-space-2">
             <Ref>{bundle.bundle_ref}</Ref>
             <span className="text-caption tabular text-ink-500">v{bundle.version}</span>
+            <span
+              className={cn(
+                'text-caption ml-auto inline-flex w-max items-center gap-1 rounded-full px-space-2 py-0.5',
+                enabled ? 'bg-moss-tint text-moss-deep' : 'bg-surface-muted text-ink-500',
+              )}
+            >
+              <span aria-hidden className={cn('size-1.5 rounded-full', enabled ? 'bg-moss' : 'bg-border-strong')} />
+              {enabled ? '已启用' : '已停用'}
+            </span>
           </span>
-          <span className="text-caption mt-0.5 flex items-center gap-space-3 text-ink-500">
+          <span className="text-caption flex items-center gap-space-3 text-ink-500">
             <span className="inline-flex items-center gap-1">
               <runType.Icon className="size-3" aria-hidden />
               {runType.label}

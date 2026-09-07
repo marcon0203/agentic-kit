@@ -145,7 +145,7 @@ export function Ref({
   const toneClass = {
     default: 'bg-surface-muted text-ink-900',
     muted: 'bg-transparent text-ink-500',
-    blueprint: 'bg-blueprint-tint text-blueprint',
+    blueprint: 'bg-blueprint-tint text-violet',
   }[tone]
 
   return (
@@ -240,7 +240,7 @@ export function FilterChip({
       className={cn(
         'text-caption rounded-full border px-space-3 py-1 transition-colors',
         active
-          ? 'border-blueprint bg-blueprint-tint text-blueprint'
+          ? 'border-blueprint bg-blueprint-tint font-medium text-violet'
           : 'border-border-strong text-ink-700 hover:border-ink-500 hover:text-ink-900',
       )}
     >

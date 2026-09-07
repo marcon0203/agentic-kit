@@ -384,7 +384,7 @@ function RecentRunsSection({ runs }: { runs: RunSummary[] }) {
 /* ── Centres grid ───────────────────────────────────────────────────── */
 
 const TONE_STYLES = {
-  blueprint: 'bg-blueprint-tint text-blueprint',
+  blueprint: 'bg-blueprint-tint text-violet',
   violet: 'bg-violet-tint text-violet',
   moss: 'bg-moss-tint text-moss',
   signal: 'bg-signal-tint text-signal',
@@ -447,7 +447,7 @@ function StepsSection() {
           return (
             <li key={step.label} className="relative flex flex-col gap-space-3">
               <span aria-hidden className="flex items-center gap-space-2">
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-blueprint-tint text-blueprint">
+                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-blueprint-tint text-violet">
                   <Icon className="size-5" aria-hidden />
                 </span>
                 <span className="h-px flex-1 bg-border xl:hidden" />
@@ -565,11 +565,11 @@ export function HomePage() {
   )
 }
 
-/* Status is carried by a dot plus a word — never colour alone. */
+/* Status is carried by a tinted chip — colour + dot + word, never colour alone. */
 const RUN_STATUS = {
-  running: { label: '运行中', dot: 'bg-blueprint', text: 'text-blueprint' },
-  finished: { label: '已完成', dot: 'bg-moss', text: 'text-moss' },
-  failed: { label: '失败', dot: 'bg-rust', text: 'text-rust' },
+  running: { label: '运行中', dot: 'bg-blueprint', chip: 'bg-blueprint-tint text-violet' },
+  finished: { label: '已完成', dot: 'bg-moss', chip: 'bg-moss-tint text-moss-deep' },
+  failed: { label: '失败', dot: 'bg-rust', chip: 'bg-rust-tint text-rust-deep' },
 } as const
 
 function RunStatusDot({ status }: { status: RunSummary['status'] }) {
@@ -581,6 +581,9 @@ function RunStatusDot({ status }: { status: RunSummary['status'] }) {
 function RunStatusLabel({ status }: { status: RunSummary['status'] }) {
   const meta = RUN_STATUS[status]
   return (
-    <span className={cn('text-caption w-12 shrink-0 text-right', meta.text)}>{meta.label}</span>
+    <span className={cn('text-caption inline-flex w-max shrink-0 items-center gap-1.5 rounded-full px-space-2 py-0.5', meta.chip)}>
+      <span aria-hidden className={cn('size-1.5 rounded-full', meta.dot)} />
+      {meta.label}
+    </span>
   )
 }

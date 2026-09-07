@@ -38,7 +38,7 @@ export function AgentWizardActions({
           size="sm"
           disabled={saving}
           onClick={onSave}
-          className="bg-gradient-cta text-white hover:opacity-90"
+         
         >
           {saving ? '保存中…' : '保存'}
         </Button>

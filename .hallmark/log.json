@@ -1,0 +1,11 @@
+[
+  {
+    "date": "2026-09-04",
+    "scope": "app",
+    "macrostructure": "app console (Soft SaaS base preserved)",
+    "theme": "custom — type-hue wheel over Soft SaaS violet",
+    "theme_axes": "light paper / rounded humanist sans / violet accent + 6 type hues",
+    "enrichment": "Tier-A CSS art (TypeTile, tint chips, card spines, colored empty rail)",
+    "brief": "agentic-kit 全站重构：缺色彩、文本主导 → 类型色相环 + tint 状态 chip + 渐变收编；design-system.md 升 v3.0"
+  }
+]

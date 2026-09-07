@@ -97,9 +97,18 @@ export function AgentThread({
           className="relative flex min-h-0 flex-1 flex-col gap-space-5 overflow-y-auto px-space-5 py-space-5"
         >
           <ThreadPrimitive.Empty>
-            <div className="flex flex-1 flex-col items-center justify-center gap-space-2 text-center">
-              <span className="text-label-md text-ink-900">{emptyTitle ?? '开始对话'}</span>
-              <span className="text-body-sm text-ink-500">{emptyHint ?? '输入问题试试'}</span>
+            <div className="flex flex-1 flex-col items-center justify-center gap-space-4 text-center">
+              {/* 空态也是轨道语言：还没发过消息 = 线上没有东西经过。首站给
+                  品牌紫，画一条"下一条消息将从这里出发"的短线。 */}
+              <div aria-hidden className="flex w-40 items-center">
+                <span className="size-2.5 shrink-0 rounded-full border-2 border-type-bundle bg-surface" />
+                <span className="h-px flex-1 bg-gradient-to-r from-type-bundle/40 to-transparent" />
+                <span className="size-2.5 shrink-0 rounded-full border-2 border-border-strong bg-surface" />
+              </div>
+              <div className="flex flex-col gap-space-1">
+                <span className="text-label-md text-ink-900">{emptyTitle ?? '开始对话'}</span>
+                <span className="text-body-sm text-ink-500">{emptyHint ?? '输入问题试试'}</span>
+              </div>
             </div>
           </ThreadPrimitive.Empty>
 
@@ -128,14 +137,14 @@ export function AgentThread({
             autoFocus
             placeholder={disabled ? (disabledHint ?? '暂时不能发送') : '输入消息，Enter 发送，Shift+Enter 换行'}
             aria-label="消息输入"
-            className="text-body-md max-h-40 min-h-[3.25rem] flex-1 resize-none rounded-md border border-border bg-surface px-space-3 py-space-2 text-ink-900 outline-none placeholder:text-ink-500 focus-visible:border-border-strong disabled:cursor-not-allowed disabled:opacity-60"
+            className="text-body-md max-h-40 min-h-[3.25rem] flex-1 resize-none rounded-md border border-border bg-surface px-space-3 py-space-2 text-ink-900 outline-none transition-colors placeholder:text-ink-500 focus-visible:border-blueprint focus-visible:shadow-focus-ring disabled:cursor-not-allowed disabled:opacity-60"
           />
           <ThreadPrimitive.If running={false}>
             <ComposerPrimitive.Send asChild>
               <button
                 type="button"
                 aria-label="发送"
-                className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
+                className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground shadow-[0_6px_16px_rgb(124_92_252_/_0.3)] transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 <Send className="size-4" aria-hidden />
               </button>
@@ -165,7 +174,7 @@ export function AgentThread({
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="flex justify-end">
-      <div className="text-body-md max-w-[78%] rounded-lg bg-blueprint-tint px-space-4 py-space-3 whitespace-pre-wrap text-ink-900">
+      <div className="text-body-md max-w-[78%] rounded-lg rounded-br-sm bg-blueprint-tint px-space-4 py-space-3 whitespace-pre-wrap text-ink-900">
         <MessagePrimitive.Parts />
       </div>
     </MessagePrimitive.Root>
@@ -180,7 +189,7 @@ function assistantMessageWith(parts: ReturnType<typeof makeParts>) {
           <MessagePrimitive.Parts components={parts} />
         </div>
         <MessagePrimitive.Error>
-          <p className="text-body-sm rounded-md bg-rust-tint px-space-3 py-space-2 text-rust">这一轮没能跑完</p>
+          <p className="text-body-sm rounded-md bg-rust-tint px-space-3 py-space-2 text-rust-deep">这一轮没能跑完</p>
         </MessagePrimitive.Error>
       </MessagePrimitive.Root>
     )
@@ -277,7 +286,7 @@ function dataPartWith(gate: AgentThreadProps['gate']) {
     }
     if (name === 'run-error') {
       const { note } = data as { note?: string }
-      return <p className="text-body-sm rounded-md bg-rust-tint px-space-3 py-space-2 text-rust">{note ?? '运行失败'}</p>
+      return <p className="text-body-sm rounded-md bg-rust-tint px-space-3 py-space-2 text-rust-deep">{note ?? '运行失败'}</p>
     }
     return null
   }

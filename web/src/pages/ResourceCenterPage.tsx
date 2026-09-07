@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Blocks, BookOpen, Database, Plug, Puzzle } from 'lucide-react'
 
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -12,6 +13,7 @@ import { MarketSkillCard } from '@/components/resources/MarketSkillCard'
 import { MarketMcpServerCard } from '@/components/resources/MarketMcpServerCard'
 import { PAGE_SIZES, Pagination } from '@/components/common/Pagination'
 import { RegisterResourceDialog } from '@/components/resources/RegisterResourceDialog'
+import { TypeTile, type TypeTone } from '@/components/common/TypeTile'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 import { useFeatures } from '@/lib/features/useFeatures'
@@ -28,15 +30,20 @@ type MarketMCPServer = components['schemas']['MarketMCPServer']
    four times over and helps nobody; what a person needs to know is what this
    particular kind is for and what registering one would let them do. Also
    doubles as the label lookup AppsLayout's sidebar uses, so a kind's name is
-   spelled once. */
+   spelled once. Icon + tone come from the type hue wheel (§1.4): the same
+   colour follows a resource kind from sidebar to list row to empty state. */
 export const RESOURCE_KINDS: {
   value: ResourceType
   label: string
+  icon: typeof Blocks
+  tone: TypeTone
   blank: { title: string; description: string; cta: string }
 }[] = [
   {
     value: 'tool',
     label: '组件',
+    icon: Blocks,
+    tone: 'tool',
     blank: {
       title: '给 Agent 一件能用的工具',
       description:
@@ -47,6 +54,8 @@ export const RESOURCE_KINDS: {
   {
     value: 'skill',
     label: 'Skill',
+    icon: Puzzle,
+    tone: 'skill',
     blank: {
       title: '沉淀一段可复用的做法',
       description: 'Skill 把一段固定的做事方式打包，让多个 Agent 共用同一套步骤，而不是各写各的提示词。',
@@ -56,6 +65,8 @@ export const RESOURCE_KINDS: {
   {
     value: 'mcp',
     label: 'MCP Server',
+    icon: Plug,
+    tone: 'mcp',
     blank: {
       title: '接入一台 MCP Server',
       description:
@@ -66,6 +77,8 @@ export const RESOURCE_KINDS: {
   {
     value: 'knowledge_base',
     label: '知识库',
+    icon: BookOpen,
+    tone: 'lib',
     blank: {
       title: '让 Agent 有资料可查',
       description: '知识库登记后可以被 Agent 引用，回答时从这里检索，而不是全靠模型自己记得。',
@@ -75,6 +88,8 @@ export const RESOURCE_KINDS: {
   {
     value: 'memory',
     label: '记忆库',
+    icon: Database,
+    tone: 'lib',
     blank: {
       title: '让对话记住上一次',
       description:
@@ -277,11 +292,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
             {skillUploadBlocked && (
               <span className="text-caption text-ink-500">未配置对象存储（OSS_*），Skill 上传暂不可用</span>
             )}
-            <Button
-              className="bg-gradient-cta text-white hover:opacity-90"
-              onClick={openRegister}
-              disabled={skillUploadBlocked}
-            >
+            <Button onClick={openRegister} disabled={skillUploadBlocked}>
               {kind.blank.cta}
             </Button>
           </div>
@@ -300,6 +311,8 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
 
           {marketQuery.isSuccess && marketItems.length === 0 && (
             <EmptyRail
+              icon={isSkill ? Puzzle : Plug}
+              tone={isSkill ? 'skill' : 'mcp'}
               title={isSkill ? '市场里还没有公开 Skill' : '市场里还没有公开 MCP Server'}
               description={
                 isSkill
@@ -406,6 +419,8 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
 
             {platformMarketQuery.isSuccess && (platformMarketQuery.data?.items.length ?? 0) === 0 && (
               <EmptyRail
+                icon={kind.icon}
+                tone={kind.tone}
                 title={`市场里还没有${kind.label}`}
                 description={`发布到广场的${kind.label}会出现在这里；订阅后即可挂到 Agent 的能力里使用，作者的内部定义不会带出来。`}
               />
@@ -442,6 +457,8 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
 
           {query.isSuccess && items.length === 0 && (
             <EmptyRail
+              icon={kind.icon}
+              tone={kind.tone}
               title={skillUploadBlocked ? 'Skill 上传暂不可用' : kind.blank.title}
               description={
                 skillUploadBlocked
@@ -450,7 +467,7 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
               }
               action={
                 !skillUploadBlocked && (
-                  <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={openRegister}>
+                  <Button size="sm" onClick={openRegister}>
                     {kind.blank.cta}
                   </Button>
                 )
@@ -478,45 +495,53 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
                   return (
                     <div
                       key={r.id}
-                      className="flex min-h-[8rem] flex-col gap-space-3 rounded-lg border border-border bg-surface p-space-4"
+                      className="flex min-h-[8rem] flex-col gap-space-3 rounded-lg border border-border bg-surface p-space-4 transition-all hover:border-blueprint-edge hover:shadow-status-sm"
                     >
-                      <span className="flex flex-wrap items-center gap-space-2">
-                        <Ref>{r.ref}</Ref>
-                        {r.display_name && (
-                          <span className="text-body-sm truncate text-ink-900">{r.display_name}</span>
-                        )}
-                        <span
-                          className={cn(
-                            'text-caption shrink-0 rounded-full px-space-2 py-0.5',
-                            from ? 'bg-blueprint-tint text-blueprint' : 'bg-surface-muted text-ink-500',
+                      <span className="flex items-start gap-space-3">
+                        <TypeTile icon={Puzzle} tone="skill" size="sm" />
+                        <span className="flex min-w-0 flex-1 flex-col gap-space-1">
+                          <span className="flex flex-wrap items-center gap-space-2">
+                            <Ref>{r.ref}</Ref>
+                            {r.display_name && (
+                              <span className="text-body-sm truncate text-ink-900">{r.display_name}</span>
+                            )}
+                            <span
+                              className={cn(
+                                'text-caption shrink-0 rounded-full px-space-2 py-0.5',
+                                from ? 'bg-blueprint-tint text-violet' : 'bg-surface-muted text-ink-500',
+                              )}
+                            >
+                              {from ? '市场安装' : '自定义'}
+                            </span>
+                          </span>
+                          {r.health && r.health !== 'unknown' && (
+                            <span
+                              className={cn(
+                                'text-caption inline-flex w-max items-center gap-1.5 rounded-full px-space-2 py-0.5',
+                                r.health === 'healthy'
+                                  ? 'bg-moss-tint text-moss-deep'
+                                  : 'bg-rust-tint text-rust-deep',
+                              )}
+                            >
+                              <span
+                                aria-hidden
+                                className={cn('size-1.5 rounded-full', r.health === 'healthy' ? 'bg-moss' : 'bg-rust')}
+                              />
+                              {r.health === 'healthy' ? '上次探测：连接正常' : '上次探测：连不上，检查地址与凭证'}
+                            </span>
                           )}
-                        >
-                          {from ? '市场安装' : '自定义'}
                         </span>
                       </span>
-                      {r.health && r.health !== 'unknown' && (
-                        <span
-                          className={cn(
-                            'text-caption',
-                            r.health === 'healthy' ? 'text-moss' : 'text-rust',
-                          )}
-                        >
-                          {r.health === 'healthy' ? '上次探测：连接正常' : '上次探测：连不上，检查地址与凭证'}
-                        </span>
-                      )}
                       <div className="mt-auto flex items-center justify-between">
                         <span
-                          aria-hidden
                           className={cn(
-                            'text-caption inline-flex items-center gap-space-1.5',
-                            r.status === 1 ? 'text-moss' : 'text-ink-500',
+                            'text-caption inline-flex w-max items-center gap-1.5 rounded-full px-space-2 py-0.5',
+                            r.status === 1 ? 'bg-moss-tint text-moss-deep' : 'bg-surface-muted text-ink-500',
                           )}
                         >
                           <span
-                            className={cn(
-                              'size-2 rounded-full',
-                              r.status === 1 ? 'bg-moss' : 'bg-border-strong',
-                            )}
+                            aria-hidden
+                            className={cn('size-1.5 rounded-full', r.status === 1 ? 'bg-moss' : 'bg-border-strong')}
                           />
                           {r.status === 1 ? '已启用' : '已停用'}
                         </span>
@@ -533,15 +558,9 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
                 {filtered.map((r) => (
                   <li
                     key={r.id}
-                    className="flex items-center gap-space-4 border-b border-border px-space-5 py-space-3 last:border-0"
+                    className="flex items-center gap-space-4 border-b border-border px-space-5 py-space-3 transition-colors last:border-0 hover:bg-surface-muted/60"
                   >
-                    <span
-                      aria-hidden
-                      className={cn(
-                        'size-2 shrink-0 rounded-full',
-                        r.status === 1 ? 'bg-moss' : 'bg-border-strong',
-                      )}
-                    />
+                    <TypeTile icon={kind.icon} tone={kind.tone} size="sm" />
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="flex items-center gap-space-3">
                         <Ref>{r.ref}</Ref>
@@ -552,20 +571,30 @@ export function ResourceKindPage({ type }: { type: ResourceType }) {
                       {r.health && r.health !== 'unknown' && (
                         <span
                           className={cn(
-                            'text-caption',
-                            r.health === 'healthy' ? 'text-moss' : 'text-rust',
+                            'text-caption inline-flex w-max items-center gap-1.5 rounded-full px-space-2 py-0.5',
+                            r.health === 'healthy'
+                              ? 'bg-moss-tint text-moss-deep'
+                              : 'bg-rust-tint text-rust-deep',
                           )}
                         >
+                          <span
+                            aria-hidden
+                            className={cn('size-1.5 rounded-full', r.health === 'healthy' ? 'bg-moss' : 'bg-rust')}
+                          />
                           {r.health === 'healthy' ? '上次探测：连接正常' : '上次探测：连不上，检查地址与凭证'}
                         </span>
                       )}
                     </span>
                     <span
                       className={cn(
-                        'text-caption w-12 shrink-0 text-right',
-                        r.status === 1 ? 'text-moss' : 'text-ink-500',
+                        'text-caption inline-flex w-max shrink-0 items-center gap-1.5 rounded-full px-space-2 py-0.5',
+                        r.status === 1 ? 'bg-moss-tint text-moss-deep' : 'bg-surface-muted text-ink-500',
                       )}
                     >
+                      <span
+                        aria-hidden
+                        className={cn('size-1.5 rounded-full', r.status === 1 ? 'bg-moss' : 'bg-border-strong')}
+                      />
                       {r.status === 1 ? '已启用' : '已停用'}
                     </span>
                     <Button variant="outline" size="sm" onClick={() => toggleStatus(r)}>

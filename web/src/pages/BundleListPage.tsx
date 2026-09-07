@@ -59,7 +59,7 @@ export function BundleListPage() {
       <Section
         title="我的应用"
         aside={
-          <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/apps/bundles/new')}>
+          <Button size="sm" onClick={() => navigate('/apps/bundles/new')}>
             新建应用
           </Button>
         }
@@ -77,7 +77,7 @@ export function BundleListPage() {
             title="编排你的第一个应用"
             description="一个应用（Bundle）决定谁先做、谁并行、哪一步要停下来等人。有了应用才能发起运行。"
             action={
-              <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/apps/bundles/new')}>
+              <Button size="sm" onClick={() => navigate('/apps/bundles/new')}>
                 新建应用
               </Button>
             }

@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { BarChart3, ChevronDown, Cpu, Home, LogOut, Settings, Store } from 'lucide-react'
+import { BarChart3, ChevronDown, Cpu, Home, LogOut, Settings, Store, Waypoints } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,15 +26,6 @@ const NAV_ITEMS = [
   { to: '/settings', label: '系统设置', icon: Settings },
 ]
 
-const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  cn(
-    'text-body-sm relative flex h-full shrink-0 items-center gap-space-2 px-0.5 transition-colors duration-150',
-    'after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:transition-colors',
-    isActive
-      ? 'font-medium text-ink-900 after:bg-blueprint'
-      : 'text-ink-500 after:bg-transparent hover:text-ink-900',
-  )
-
 export function AppShell() {
   const user = useAuthStore((s) => s.user)
   const clearSession = useAuthStore((s) => s.clearSession)
@@ -55,7 +46,12 @@ export function AppShell() {
         <div className="flex h-14 items-stretch px-space-6">
           <div className="flex min-w-fit flex-1 items-center">
             <NavLink to="/" className="flex shrink-0 items-center gap-space-2">
-              <span aria-hidden className="size-2 rounded-full bg-signal" />
+              <span
+                aria-hidden
+                className="flex size-7 items-center justify-center rounded-md bg-primary text-white shadow-[0_4px_12px_rgb(124_92_252_/_0.35)]"
+              >
+                <Waypoints className="size-4" />
+              </span>
               <span className="text-display-sm hidden tracking-tight text-ink-900 sm:inline">
                 Agentic Kit
               </span>
@@ -69,9 +65,22 @@ export function AppShell() {
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon
               return (
-                <NavLink key={item.to} to={item.to} end={item.end} className={navLinkClass}>
-                  <Icon className="size-4" aria-hidden />
-                  {item.label}
+                <NavLink key={item.to} to={item.to} end={item.end}>
+                  {({ isActive }) => (
+                    <span
+                      className={cn(
+                        'text-body-sm relative flex h-full shrink-0 items-center gap-space-2 px-0.5 transition-colors duration-150',
+                        'after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:transition-colors',
+                        isActive
+                          ? 'font-medium text-ink-900 after:bg-blueprint'
+                          : 'text-ink-500 after:bg-transparent hover:text-ink-900',
+                      )}
+                    >
+                      {/* 激活站点的图标也上车：下划线之外再给一个色彩信号，扫一眼就能定位。 */}
+                      <Icon className={cn('size-4', isActive ? 'text-blueprint' : '')} aria-hidden />
+                      {item.label}
+                    </span>
+                  )}
                 </NavLink>
               )
             })}
@@ -88,7 +97,7 @@ export function AppShell() {
                 >
                   <span
                     aria-hidden
-                    className="text-caption flex size-7 items-center justify-center rounded-full bg-surface-muted font-medium text-ink-700"
+                    className="text-caption flex size-7 items-center justify-center rounded-full bg-blueprint-tint font-medium text-violet"
                   >
                     {user.display_name.slice(0, 1).toUpperCase()}
                   </span>

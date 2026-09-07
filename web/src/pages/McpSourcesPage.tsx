@@ -169,7 +169,7 @@ export function McpSourcesPage() {
     <Section
       title="MCP 源"
       aside={
-        <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={openAdd}>
+        <Button onClick={openAdd}>
           添加源
         </Button>
       }
@@ -182,7 +182,7 @@ export function McpSourcesPage() {
           title="登记第一个 MCP 源"
           description="填一个公开 MCP 注册中心的根地址（官方是 https://registry.modelcontextprotocol.io），同步后它的 Server 经你审核会出现在 MCP 管理的市场视图里，用户点一下就能接入。"
           action={
-            <Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={openAdd}>
+            <Button size="sm" onClick={openAdd}>
               添加源
             </Button>
           }
@@ -372,7 +372,7 @@ export function McpSourcesPage() {
               取消
             </Button>
             <Button
-              className="bg-gradient-cta text-white hover:opacity-90"
+             
               disabled={
                 createMutation.isPending ||
                 !name.trim() ||

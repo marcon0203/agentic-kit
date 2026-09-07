@@ -180,7 +180,7 @@ export function PluginToolMultiSelect({
             onClick={() => toggle(opt.ref)}
             className={cn(
               'text-body-sm flex items-center gap-space-2 rounded-full border px-space-3 py-space-2',
-              active ? 'border-primary bg-blueprint-tint text-blueprint' : 'border-border bg-surface text-ink-700 hover:border-border-strong',
+              active ? 'border-primary bg-blueprint-tint text-violet' : 'border-border bg-surface text-ink-700 hover:border-border-strong',
             )}
           >
             {opt.tool_name}

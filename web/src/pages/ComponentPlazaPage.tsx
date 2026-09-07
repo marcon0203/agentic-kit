@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, Puzzle, Check } from 'lucide-react'
+import { Search, Puzzle, Check, Blocks } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ import {
 import { EmptyRail } from '@/components/common/Rail'
 import { ErrorPanel } from '@/components/common/EmptyState'
 import { Section } from '@/components/common/Page'
+import { TypeTile } from '@/components/common/TypeTile'
 import { PAGE_SIZES, Pagination } from '@/components/common/Pagination'
 import { PluginConfigDialog, type PluginConfigField } from '@/components/plugins/PluginConfigDialog'
 import { apiClient, unwrap, ApiError } from '@/lib/api/client'
@@ -171,7 +172,7 @@ export function ComponentPlazaPage() {
         </div>
       }
       aside={
-        <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => navigate('/apps/tool/new')}>
+        <Button onClick={() => navigate('/apps/tool/new')}>
           新建组件
         </Button>
       }
@@ -187,6 +188,8 @@ export function ComponentPlazaPage() {
 
           {pluginQuery.isSuccess && pluginItems.length === 0 && (
             <EmptyRail
+              icon={Puzzle}
+              tone="tool"
               title="市场上还没有已上架的插件"
               description="插件由发布者上传并申请上架，经管理员审核通过后才会出现在这里——和这里自己注册的组件走同一套引用方式（Agent 的能力白名单里一个 ref 一个工具），只是不需要你自己填地址和凭证。"
             />
@@ -290,12 +293,14 @@ export function ComponentPlazaPage() {
 
           {query.isSuccess && items.length === 0 && (
             <EmptyRail
+              icon={Blocks}
+              tone="tool"
               title="给 Agent 一件能用的工具"
               description="组件是 Agent 能调用的外部能力：一个检索接口、一批从 OpenAPI 导入的操作、一个能跑代码的沙箱环境……注册后才能写进 Agent 的能力白名单。"
               action={
                 <Button
                   size="sm"
-                  className="bg-gradient-cta text-white hover:opacity-90"
+                 
                   onClick={() => navigate('/apps/tool/new')}
                 >
                   新建组件
@@ -376,7 +381,7 @@ function FilterRow({
             onClick={() => onChange(opt.value)}
             className={cn(
               'text-body-sm rounded-md px-space-3 py-1 transition-colors',
-              value === opt.value ? 'bg-blueprint-tint text-blueprint' : 'text-ink-700 hover:bg-surface-muted',
+              value === opt.value ? 'bg-blueprint-tint font-medium text-violet' : 'text-ink-700 hover:bg-surface-muted',
             )}
           >
             {opt.label}
@@ -403,17 +408,9 @@ function ComponentCard({
   const name = resource.display_name || resource.ref
 
   return (
-    <li className="flex flex-col gap-space-3 rounded-lg border border-border bg-surface p-space-4">
+    <li className="flex flex-col gap-space-3 rounded-lg border border-border bg-surface p-space-4 transition-all hover:border-blueprint-edge hover:shadow-status-sm">
       <div className="flex items-start gap-space-3">
-        <span
-          aria-hidden
-          className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-md',
-            enabled ? 'bg-blueprint-tint text-blueprint' : 'bg-surface-muted text-ink-500',
-          )}
-        >
-          <Icon className="size-4" />
-        </span>
+        <TypeTile icon={Icon} tone="tool" size="sm" />
         <span className="flex min-w-0 flex-1 flex-col items-start">
           {/* 标题即入口。整张卡不做点击区——卡上还有"停用"，套一层点击区容
               易误触。 */}
@@ -442,11 +439,16 @@ function ComponentCard({
       <p className="text-body-sm line-clamp-2 min-h-10 text-ink-500">{componentDescription(config)}</p>
 
       <div className="flex items-center justify-between gap-space-2">
-        <span className="text-caption shrink-0 rounded-sm bg-surface-muted px-space-2 py-0.5 text-ink-700">
+        <span className="text-caption shrink-0 rounded-full bg-type-tool-tint px-space-2 py-0.5 text-type-tool">
           {categoryLabel(config.category)}
         </span>
         <span className="flex shrink-0 items-center gap-space-2">
-          <span className={cn('text-caption truncate', enabled ? 'text-ink-500' : 'text-rust')}>
+          <span
+            className={cn(
+              'text-caption inline-flex w-max items-center gap-1.5 rounded-full px-space-2 py-0.5',
+              enabled ? 'bg-surface-muted text-ink-500' : 'bg-rust-tint text-rust-deep',
+            )}
+          >
             {enabled ? shape.label : '已停用'}
           </span>
           <Button variant="ghost" size="sm" className="text-caption h-7 px-space-2 text-blueprint" onClick={onOpen}>
@@ -484,11 +486,9 @@ function PluginCard({
   const name = plugin.display_name || plugin.plugin_id
 
   return (
-    <li className="flex flex-col gap-space-3 rounded-lg border border-border bg-surface p-space-4">
+    <li className="flex flex-col gap-space-3 rounded-lg border border-border bg-surface p-space-4 transition-all hover:border-blueprint-edge hover:shadow-status-sm">
       <div className="flex items-start gap-space-3">
-        <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-md bg-blueprint-tint text-blueprint">
-          <Puzzle className="size-4" />
-        </span>
+        <TypeTile icon={Puzzle} tone="tool" size="sm" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="text-label-md truncate text-ink-900" title={name}>
             {name}
@@ -499,7 +499,7 @@ function PluginCard({
         </span>
         {installed ? (
           <span className="-mt-1 -mr-2 flex shrink-0 items-center gap-1">
-            <span className="text-caption flex h-7 items-center gap-1 px-space-2 text-emerald-600">
+            <span className="text-caption flex h-7 items-center gap-1.5 rounded-full bg-moss-tint px-space-2 text-moss-deep">
               <Check className="size-3.5" aria-hidden />
               已安装
             </span>
@@ -746,7 +746,7 @@ function PluginInstallDialog({
           <Button variant="outline" onClick={onClose} disabled={installing}>
             取消
           </Button>
-          <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={install} disabled={installing || !canInstall}>
+          <Button onClick={install} disabled={installing || !canInstall}>
             {installing ? '安装中…' : '确认安装'}
           </Button>
         </DialogFooter>

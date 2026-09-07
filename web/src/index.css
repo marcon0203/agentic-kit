@@ -35,6 +35,13 @@
   --color-moss-tint: #e7f8ee;
   --color-rust-tint: #feecea;
 
+  /* Deep stops for SMALL TEXT on the tints above. The vivid signal/moss/
+     rust values are for dots, borders and icons (3:1); at caption size on
+     a tint they measure 2.3–2.8:1, so chips pair tint bg with these. */
+  --color-signal-deep: #9a5700;
+  --color-moss-deep: #0d7a4f;
+  --color-rust-deep: #b91c1c;
+
   /* ── Color: ink ranks ────────────────────────────────────────────── */
   --color-ink-900: var(--color-graphite);
   --color-ink-700: #6e7079; /* text-secondary */
@@ -55,6 +62,24 @@
   --color-status-done: var(--color-moss);
   --color-status-failed: var(--color-rust);
   --color-status-blackbox: var(--color-ink-700);
+
+  /* ── Type hue wheel (design-system.md v3.0 §1.4) ────────────────────
+     Resource types get their own hue so cards and rows carry a visual
+     anchor besides text. Hues sit AWAY from the status colours (moss /
+     signal / rust keep their exclusive meanings); each solid stop passes
+     4.5:1 on its own tint, so tile = tint bg + solid icon/text. */
+  --color-type-bundle: #6a47f0; /* 编排应用 — the brand hue itself */
+  --color-type-bundle-tint: #ebe5fe;
+  --color-type-agent: #1d4fd8; /* 单体智能体 */
+  --color-type-agent-tint: #e8f0fe;
+  --color-type-skill: #a21caf; /* Skill 能力 */
+  --color-type-skill-tint: #fae8fc;
+  --color-type-tool: #0e7490; /* 组件 / 插件 */
+  --color-type-tool-tint: #dcf2f8;
+  --color-type-mcp: #4f46e5; /* MCP Server 连接 */
+  --color-type-mcp-tint: #e9ecfe;
+  --color-type-lib: #047857; /* 知识库 / 记忆库 */
+  --color-type-lib-tint: #e0f5ec;
 
   /* ── Radius — layering signal: outer bigger than inner, five tiers ── */
   --radius-xs: 6px; /* checkboxes */
@@ -181,6 +206,21 @@
   --color-status-done: var(--color-status-done);
   --color-status-failed: var(--color-status-failed);
   --color-status-blackbox: var(--color-status-blackbox);
+  --color-type-bundle: var(--color-type-bundle);
+  --color-type-bundle-tint: var(--color-type-bundle-tint);
+  --color-type-agent: var(--color-type-agent);
+  --color-type-agent-tint: var(--color-type-agent-tint);
+  --color-type-skill: var(--color-type-skill);
+  --color-type-skill-tint: var(--color-type-skill-tint);
+  --color-type-tool: var(--color-type-tool);
+  --color-type-tool-tint: var(--color-type-tool-tint);
+  --color-type-mcp: var(--color-type-mcp);
+  --color-type-mcp-tint: var(--color-type-mcp-tint);
+  --color-type-lib: var(--color-type-lib);
+  --color-type-lib-tint: var(--color-type-lib-tint);
+  --color-signal-deep: var(--color-signal-deep);
+  --color-moss-deep: var(--color-moss-deep);
+  --color-rust-deep: var(--color-rust-deep);
 
   --spacing-space-1: var(--space-1);
   --spacing-space-2: var(--space-2);
@@ -342,9 +382,11 @@
     background-size: 22px 22px;
   }
 
-  /* The single global gradient this system allows — shared by the primary
-     button, the active nav pill, and marketing/hero surfaces. Never a
-     second gradient elsewhere: that's the rule soft-saas-ui enforces. */
+  /* The single global gradient this system allows — reserved for the three
+     marketing moments (home hero CTA, home bottom banner, marketplace
+     featured banner). Buttons elsewhere are SOLID violet: when every button
+     carries the gradient, nothing else on the page is allowed colour, and
+     the app reads as grey text with purple noise on top. */
   .text-gradient {
     background: linear-gradient(90deg, #9c82f8, var(--color-blueprint));
     -webkit-background-clip: text;

@@ -5,6 +5,9 @@ export interface SectionSidebarItem {
   value: string
   label: string
   icon: ComponentType<{ className?: string }>
+  /** 可选的图标着色类（类型色相环）：资源类模块的图标带上自己的色相，
+   * 灰底列表因此有可扫读的视觉锚点。缺省跟随文字的灰。 */
+  tone?: string
 }
 
 export interface SectionSidebarGroup {
@@ -60,11 +63,11 @@ export function SectionSidebar({
                 className={cn(
                   'text-body-sm flex shrink-0 items-center gap-space-2 rounded-sm px-space-3 py-space-2 text-left transition-colors',
                   isActive
-                    ? 'bg-blueprint-tint font-medium text-blueprint'
+                    ? 'bg-blueprint-tint font-medium text-violet'
                     : 'text-ink-700 hover:bg-surface-muted hover:text-ink-900',
                 )}
               >
-                <Icon className="size-4 shrink-0" aria-hidden />
+                <Icon className={cn('size-4 shrink-0', item.tone)} aria-hidden />
                 {item.label}
               </button>
             )

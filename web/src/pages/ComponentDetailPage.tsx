@@ -223,7 +223,7 @@ export function ComponentDetailPage() {
                 className={cn(
                   'text-body-sm rounded-full border px-space-3 py-1 transition-colors',
                   form.category === c.value
-                    ? 'border-blueprint bg-blueprint-tint text-blueprint'
+                    ? 'border-blueprint bg-blueprint-tint text-violet'
                     : 'border-border text-ink-700 hover:border-border-strong',
                 )}
               >
@@ -346,7 +346,7 @@ export function ComponentDetailPage() {
 
         <div className="flex items-center gap-space-3">
           <Button
-            className="bg-gradient-cta text-white hover:opacity-90"
+           
             disabled={!dirty || saveMutation.isPending}
             onClick={() => saveMutation.mutate(form)}
           >

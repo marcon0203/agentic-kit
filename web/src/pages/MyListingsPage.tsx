@@ -68,7 +68,7 @@ export function MyListingsPage() {
   return (
     <div className="flex flex-col gap-space-6">
       <div className="flex items-center justify-end">
-        {!showForm && <Button className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setShowForm(true)}>发布新资源</Button>}
+        {!showForm && <Button onClick={() => setShowForm(true)}>发布新资源</Button>}
       </div>
 
       {showForm ? (
@@ -100,7 +100,7 @@ export function MyListingsPage() {
             <EmptyState
               title="还没有发布任何资源"
               description="把自己的 Bundle 或 Agent 发布到广场，让其他人可以订阅使用。"
-              action={<Button size="sm" className="bg-gradient-cta text-white hover:opacity-90" onClick={() => setShowForm(true)}>发布第一个资源</Button>}
+              action={<Button size="sm" onClick={() => setShowForm(true)}>发布第一个资源</Button>}
             />
           )}
 

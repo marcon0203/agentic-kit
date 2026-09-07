@@ -19,7 +19,7 @@ const buttonVariants = cva(
         outline:
           'border border-border bg-surface text-ink-900 shadow-xs hover:border-border-strong hover:bg-surface-muted',
         secondary: 'bg-surface text-ink-700 border border-border hover:border-border-strong hover:bg-surface-muted',
-        ghost: 'text-ink-700 hover:bg-blueprint-tint hover:text-blueprint',
+        ghost: 'text-ink-700 hover:bg-blueprint-tint hover:text-violet',
         link: 'text-blueprint underline-offset-4 hover:underline',
       },
       size: {

@@ -267,7 +267,7 @@ function ToolHTTPForm() {
       <Button
         disabled={saving || !ref || !endpoint}
         onClick={save}
-        className="self-end bg-gradient-cta text-white hover:opacity-90"
+        className="self-end"
       >
         {saving ? '保存中…' : '保存'}
       </Button>
@@ -452,7 +452,7 @@ function ToolOpenAPIImport() {
           <Button
             disabled={creating || !baseRef || !baseURL || selected.size === 0}
             onClick={create}
-            className="self-end bg-gradient-cta text-white hover:opacity-90"
+            className="self-end"
           >
             {creating ? '创建中…' : `创建 ${selected.size} 个组件`}
           </Button>
@@ -575,7 +575,7 @@ function SandboxForm() {
       <Button
         disabled={saving || !ref || !apiURL || !apiKey}
         onClick={save}
-        className="self-end bg-gradient-cta text-white hover:opacity-90"
+        className="self-end"
       >
         {saving ? '保存中…' : '保存'}
       </Button>

@@ -16,7 +16,7 @@ interface MarketAvatarProps {
    出现一堆设计系统之外的随机颜色——彩色的目的是让人能一眼区分条目，不是
    让页面变花。 */
 const PALETTE = [
-  'bg-blueprint-tint text-blueprint',
+  'bg-blueprint-tint text-violet',
   'bg-moss-tint text-moss',
   'bg-signal-tint text-signal',
   'bg-rust-tint text-rust',

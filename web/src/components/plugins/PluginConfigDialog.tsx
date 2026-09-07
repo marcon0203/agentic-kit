@@ -170,7 +170,7 @@ export function PluginConfigDialog({
             取消
           </Button>
           <Button
-            className="bg-gradient-cta text-white hover:opacity-90"
+           
             disabled={saveMutation.isPending || missingRequired}
             onClick={() => saveMutation.mutate()}
           >
