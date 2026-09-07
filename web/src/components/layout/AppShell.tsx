@@ -32,7 +32,14 @@ export function AppShell() {
   const openModal = useAuthStore((s) => s.openModal)
 
   return (
-    <div className="flex min-h-screen flex-col bg-surface-page">
+    // h-screen 而不是 min-h-screen：后者只是**最小**高度，内容一多整个外壳
+    // 就跟着长高。那样一来 main 的 flex-1 没有剩余空间可分，等于内容高度，
+    // 子页面的 min-h-0 也就无从生效——聊天页的表现是消息把输入框一路顶出
+    // 视口（实测 800px 视口下输入框跑到 4142px），而不是消息区自己滚动。
+    //
+    // 外壳固定一屏、overflow-hidden 兜住，滚动交给下面的 main：这样
+    // "框架高度不变、内容滚动"对每个子页面都成立，不用各自去凑高度。
+    <div className="flex h-screen flex-col overflow-hidden bg-surface-page">
       <a
         href="#main"
         className="text-label-md sr-only focus:not-sr-only focus:absolute focus:left-space-4 focus:top-space-4 focus:z-50 focus:rounded-sm focus:bg-blueprint focus:px-space-4 focus:py-space-2 focus:text-white"
@@ -125,8 +132,13 @@ export function AppShell() {
       </header>
 
       {/* flex 列 + 子页面根节点 flex-1：把 main 的高度传下去，二级布局
-          （如应用中心侧栏）才能拉伸到整个内容区高度，右边的分隔线才贯穿。 */}
-      <main id="main" className="flex min-h-0 w-full flex-1 flex-col px-space-6 pt-space-6 pb-space-8">
+          （如应用中心侧栏）才能拉伸到整个内容区高度，右边的分隔线才贯穿。
+
+          overflow-y-auto：外壳固定一屏之后，页面滚动条落在这里。普通的长
+          页面（广场、设置）照常滚，只是滚的是 main 而不是 window；顶栏在
+          main 之外，因此天然常驻，不再依赖 sticky。而聊天这类"自己管滚动"
+          的页面把高度用满、内部滚，main 就不会出现滚动条。 */}
+      <main id="main" className="flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-space-6 pt-space-6 pb-space-8">
         <Outlet />
       </main>
     </div>

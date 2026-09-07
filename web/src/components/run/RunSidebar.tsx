@@ -35,7 +35,11 @@ export function RunSidebar({
   const nodes = Object.values(bubbles)
 
   return (
-    <div className="flex flex-col gap-space-5">
+    // min-h-0 + 自己滚：侧栏和聊天列同在一个网格行里，行高取两者较大值。
+    // 侧栏不封顶的话，它一长就把整行撑高，左边的聊天列被 stretch 跟着变高，
+    // 输入框又被顶下去——和外壳那个 min-h-screen 是同一类问题，只是换了个
+    // 方向。内部各块的 max-h-* 只管住了单块，管不住总高。
+    <div className="flex min-h-0 flex-col gap-space-5 overflow-y-auto">
       <div className="rounded-lg border border-border bg-surface p-space-4">
         <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
           <TabsList className="w-full">
